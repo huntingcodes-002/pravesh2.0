@@ -15,7 +15,13 @@ export default function LeadFlowPage() {
 
     // Redirect to the current step
     const currentStep = currentLead.currentStep || 1;
-    router.replace(`/lead/step${currentStep}`);
+    
+    // Step 2 and above should go to new-lead-info page
+    if (currentStep >= 2) {
+      router.replace('/lead/new-lead-info');
+    } else {
+      router.replace(`/lead/step${currentStep}`);
+    }
   }, [currentLead, router]);
   return (
     <div className="flex min-h-screen items-center justify-center">

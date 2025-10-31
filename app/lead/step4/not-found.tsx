@@ -3,16 +3,12 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
-export default function Step9Page() {
+export default function NotFound() {
   const router = useRouter();
 
   useEffect(() => {
     router.replace('/404');
   }, [router]);
 
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <p className="text-gray-500">Page not found</p>
-      </div>
-  );
+  return null;
 }

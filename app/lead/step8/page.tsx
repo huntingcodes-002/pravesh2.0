@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload, CheckCircle, XCircle, Loader, Trash2, RotateCcw, Camera, AlertTriangle, User, Users, Home, ChevronDown, X, Image as ImageIcon } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
-import ProgressBar from '@/components/ProgressBar';
 import { useLead } from '@/contexts/LeadContext';
 import { validateFile } from '@/lib/mock-auth';
 import { Button } from '@/components/ui/button';
@@ -69,271 +68,35 @@ const getApplicantName = (firstName?: string, lastName?: string) => {
 // Helper function to generate dynamic document list
 const generateDocumentList = (lead: any) => {
     const documents: any[] = [];
-    const coApplicants = lead?.formData?.coApplicants || [];
     
-    // Main applicant documents
+    // Main applicant documents - only PAN and Aadhaar
     const mainApplicantName = getApplicantName(lead?.customerFirstName, lead?.customerLastName);
     
     // Check if main applicant has PAN
     const mainApplicantHasPan = lead?.formData?.step2?.hasPan === 'yes';
     
     if (mainApplicantHasPan) {
-        // Add PAN for main applicant
+        // Add PAN for main applicant (required)
         documents.push({
             value: "PAN",
             label: `PAN - ${mainApplicantName}`,
             fileTypes: ["image"],
             requiresCamera: true,
             applicantType: "main",
+            required: true,
             requiresFrontBack: false
         });
-    } else {
-        // Add alternate ID for main applicant (combined front/back)
-        const alternateIdType = lead?.formData?.step2?.alternateIdType;
-        if (alternateIdType) {
-            const alternateDoc = ALTERNATE_ID_TYPES.find(doc => doc.label === alternateIdType);
-            if (alternateDoc) {
-                documents.push({
-                    value: `${alternateDoc.value}`,
-                    label: `${alternateIdType} - ${mainApplicantName}`,
-                    fileTypes: alternateDoc.fileTypes,
-                    requiresCamera: alternateDoc.requiresCamera,
-                    applicantType: "main",
-                    requiresFrontBack: true
-                });
-            }
-        }
     }
     
-    // Add Aadhaar for main applicant (Front and Back combined)
+    // Add Aadhaar for main applicant (required)
     documents.push({
         value: "Adhaar",
         label: `Aadhaar - ${mainApplicantName}`,
         fileTypes: ["image"],
         requiresCamera: true,
         applicantType: "main",
+        required: true,
         requiresFrontBack: true
-    });
-    
-    // Add Bank Statement for main applicant
-    documents.push({
-        value: "BankStatement",
-        label: `Income – Bank Statement - ${mainApplicantName}`,
-        fileTypes: ["pdf"],
-        requiresCamera: false,
-        applicantType: "main",
-        requiresFrontBack: false
-    });
-    
-    // Add Form 60 for main applicant (required) - only if no PAN
-    if (!mainApplicantHasPan) {
-        documents.push({
-            value: "Form60",
-            label: `Form 60 - ${mainApplicantName}`,
-            fileTypes: ["pdf", "image"],
-            requiresCamera: true,
-            applicantType: "main",
-            required: true,
-            requiresFrontBack: false
-        });
-    }
-    
-    // Add Current Address Proof for main applicant (required)
-    documents.push({
-        value: "CurrentAddressProof",
-        label: `Current Address Proof - ${mainApplicantName}`,
-        fileTypes: ["pdf", "image"],
-        requiresCamera: true,
-        applicantType: "main",
-        required: true,
-        requiresFrontBack: false
-    });
-    
-    // Add Permanent Address Proof for main applicant (not required)
-    documents.push({
-        value: "PermanentAddressProof",
-        label: `Permanent Address Proof - ${mainApplicantName}`,
-        fileTypes: ["pdf", "image"],
-        requiresCamera: true,
-        applicantType: "main",
-        required: false,
-        requiresFrontBack: false
-    });
-    
-    // Add Office | Current Address Proof for main applicant (not required)
-    documents.push({
-        value: "OfficeCurrentAddressProof",
-        label: `Office | Current Address Proof - ${mainApplicantName}`,
-        fileTypes: ["pdf", "image"],
-        requiresCamera: true,
-        applicantType: "main",
-        required: false,
-        requiresFrontBack: false
-    });
-    
-    // Add Office | Permanent Address Proof for main applicant (not required)
-    documents.push({
-        value: "OfficePermanentAddressProof",
-        label: `Office | Permanent Address Proof - ${mainApplicantName}`,
-        fileTypes: ["pdf", "image"],
-        requiresCamera: true,
-        applicantType: "main",
-        required: false,
-        requiresFrontBack: false
-    });
-    
-    // Add co-applicant documents
-    coApplicants.forEach((coApp: any, index: number) => {
-        const coApplicantName = getApplicantName(coApp?.data?.step1?.firstName, coApp?.data?.step1?.lastName);
-        
-        // Check if co-applicant has PAN
-        const coApplicantHasPan = coApp?.data?.step2?.hasPan === 'yes';
-        
-        if (coApplicantHasPan) {
-            // Add PAN for co-applicant
-            documents.push({
-                value: `PAN_${coApp.id}`,
-                label: `PAN - ${coApplicantName}`,
-                fileTypes: ["image"],
-                requiresCamera: true,
-                applicantType: "coapplicant",
-                coApplicantId: coApp.id,
-                requiresFrontBack: false
-            });
-        } else {
-            // Add alternate ID for co-applicant (combined front/back)
-            const alternateIdType = coApp?.data?.step2?.alternateIdType;
-            if (alternateIdType) {
-                const alternateDoc = ALTERNATE_ID_TYPES.find(doc => doc.label === alternateIdType);
-                if (alternateDoc) {
-                    documents.push({
-                        value: `${alternateDoc.value}_${coApp.id}`,
-                        label: `${alternateIdType} - ${coApplicantName}`,
-                        fileTypes: alternateDoc.fileTypes,
-                        requiresCamera: alternateDoc.requiresCamera,
-                        applicantType: "coapplicant",
-                        coApplicantId: coApp.id,
-                        requiresFrontBack: true
-                    });
-                }
-            }
-        }
-        
-        // Add Aadhaar for co-applicant (Front and Back combined)
-        documents.push({
-            value: `Adhaar_${coApp.id}`,
-            label: `Aadhaar - ${coApplicantName}`,
-            fileTypes: ["image"],
-            requiresCamera: true,
-            applicantType: "coapplicant",
-            coApplicantId: coApp.id,
-            requiresFrontBack: true
-        });
-        
-        // Add Bank Statement for co-applicant
-        documents.push({
-            value: `BankStatement_${coApp.id}`,
-            label: `Income – Bank Statement - ${coApplicantName}`,
-            fileTypes: ["pdf"],
-            requiresCamera: false,
-            applicantType: "coapplicant",
-            coApplicantId: coApp.id,
-            requiresFrontBack: false
-        });
-        
-        // Add Form 60 for co-applicant (required) - only if no PAN
-        if (!coApplicantHasPan) {
-            documents.push({
-                value: `Form60_${coApp.id}`,
-                label: `Form 60 - ${coApplicantName}`,
-                fileTypes: ["pdf", "image"],
-                requiresCamera: true,
-                applicantType: "coapplicant",
-                coApplicantId: coApp.id,
-                required: true,
-                requiresFrontBack: false
-            });
-        }
-        
-        // Add Current Address Proof for co-applicant (required)
-        documents.push({
-            value: `CurrentAddressProof_${coApp.id}`,
-            label: `Current Address Proof - ${coApplicantName}`,
-            fileTypes: ["pdf", "image"],
-            requiresCamera: true,
-            applicantType: "coapplicant",
-            coApplicantId: coApp.id,
-            required: true,
-            requiresFrontBack: false
-        });
-        
-        // Add Permanent Address Proof for co-applicant (not required)
-        documents.push({
-            value: `PermanentAddressProof_${coApp.id}`,
-            label: `Permanent Address Proof - ${coApplicantName}`,
-            fileTypes: ["pdf", "image"],
-            requiresCamera: true,
-            applicantType: "coapplicant",
-            coApplicantId: coApp.id,
-            required: false,
-            requiresFrontBack: false
-        });
-        
-        // Add Office | Current Address Proof for co-applicant (not required)
-        documents.push({
-            value: `OfficeCurrentAddressProof_${coApp.id}`,
-            label: `Office | Current Address Proof - ${coApplicantName}`,
-            fileTypes: ["pdf", "image"],
-            requiresCamera: true,
-            applicantType: "coapplicant",
-            coApplicantId: coApp.id,
-            required: false,
-            requiresFrontBack: false
-        });
-        
-        // Add Office | Permanent Address Proof for co-applicant (not required)
-        documents.push({
-            value: `OfficePermanentAddressProof_${coApp.id}`,
-            label: `Office | Permanent Address Proof - ${coApplicantName}`,
-            fileTypes: ["pdf", "image"],
-            requiresCamera: true,
-            applicantType: "coapplicant",
-            coApplicantId: coApp.id,
-            required: false,
-            requiresFrontBack: false
-        });
-    });
-    
-    // Add other documents (collateral, business, etc.)
-    documents.push({
-        value: "CollateralProperty",
-        label: "Collateral – Ownership Proof",
-        fileTypes: ["pdf"],
-        requiresCamera: false,
-        applicantType: "collateral",
-        required: true,
-        requiresFrontBack: false
-    });
-    
-    documents.push({
-        value: "CollateralPhotos",
-        label: "Collateral – Property Photos (Geo required)",
-        fileTypes: ["image"],
-        requiresCamera: true,
-        applicantType: "collateral",
-        required: true,
-        requiresFrontBack: false
-    });
-    
-    // Add Collateral - Legal (required)
-    documents.push({
-        value: "CollateralLegal",
-        label: "Collateral – Legal",
-        fileTypes: ["pdf"],
-        requiresCamera: false,
-        applicantType: "collateral",
-        required: true,
-        requiresFrontBack: false
     });
     
     return documents;
@@ -779,48 +542,29 @@ export default function Step8Page() {
         setShowUploadMethodModal(true);
     };
 
-    const handleSaveAndContinue = () => {
-        if (!currentLead) return;
-        
-        // Get all required documents (marked as required: true)
-        const allRequiredDocs = availableDocuments.filter(doc => doc.required === true);
-        const successFiles = uploadedFiles.filter(f => f.status === 'Success');
-        
-        // Check if all required documents are uploaded
-        const missingDocs = allRequiredDocs.filter(doc => 
-            !successFiles.some(f => f.type === doc.value)
-        );
-
-        if (missingDocs.length > 0) {
-            const missingDocNames = missingDocs.map(doc => doc.label).join(', ');
-            toast({ 
-                title: 'Validation Failed', 
-                description: `Missing required documents: ${missingDocNames}`, 
-                variant: 'destructive' 
-            });
-            return;
-        }
-
-        updateLead(currentLead.id, { currentStep: 9 });
-        router.push('/lead/step9');
-    };
-
-    const handleContinueWithoutDocs = () => {
+    const handleSave = () => {
         if (!currentLead) return;
 
-        updateLead(currentLead.id, { currentStep: 9 });
-        router.push('/lead/step9');
+        // Save the uploaded files to step8
+        updateLead(currentLead.id, {
+            formData: {
+                ...currentLead.formData,
+                step8: { files: uploadedFiles }
+            }
+        });
+
+        toast({
+            title: 'Information Saved',
+            description: 'Documents have been saved successfully.',
+            className: 'bg-green-50 border-green-200'
+        });
+
+        router.push('/lead/new-lead-info');
     };
 
     const handleExit = () => {
-        if (!currentLead) { router.push('/leads'); return; }
-        updateLead(currentLead.id, { currentStep: 8 });
-        router.push('/leads');
+        router.push('/lead/new-lead-info');
     };
-
-  const handlePrevious = () => {
-    router.push('/lead/step7');
-  };
 
     const getUploadedDocTypes = () => {
         return new Set(uploadedFiles.filter(file => file.status === 'Success').map(file => file.type));
@@ -828,8 +572,7 @@ export default function Step8Page() {
 
     return (
         <DashboardLayout title="Document Upload" showNotifications={false} showExitButton={true} onExit={handleExit}>
-            <div className="max-w-2xl mx-auto">
-                <ProgressBar currentStep={7} totalSteps={totalSteps} />
+            <div className="max-w-2xl mx-auto pb-24">
 
                 {/* Camera Modal */}
                 {isCameraOpen && (
@@ -1311,32 +1054,15 @@ export default function Step8Page() {
                         </div>
                     </div>
 
-                    <div className="flex flex-col gap-3 pt-4">
-                        {/* Previous Button */}
-                        <Button
-                            onClick={handlePrevious}
-                            variant="outline"
-                            className="h-auto min-h-12 border-gray-300 text-gray-700 hover:bg-gray-100 font-semibold rounded-xl shadow-sm hover:shadow transition-all duration-150 text-center"
-                        >
-                            Previous
-                        </Button>
-
-                        {/* Continue without Docs */}
-                        <Button
-                            onClick={handleContinueWithoutDocs}
-                            variant="outline"
-                            className="h-auto min-h-12 border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold rounded-xl shadow-sm hover:shadow transition-all duration-150 text-center"
-                        >
-                            Continue without Docs
-                        </Button>
-
-                        {/* Save & Continue */}
-                        <Button
-                            onClick={handleSaveAndContinue}
-                            className="h-auto min-h-12 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 text-center"
-                        >
-                            Save & Continue
-                        </Button>
+                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
+                        <div className="flex gap-3 max-w-2xl mx-auto">
+                            <Button
+                                onClick={handleSave}
+                                className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white"
+                            >
+                                Save Information
+                            </Button>
+                        </div>
                     </div>
 
                 </div>

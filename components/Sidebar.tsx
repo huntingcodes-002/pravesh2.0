@@ -73,14 +73,6 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
           <nav className="flex-1 p-4 space-y-2">
             <button
-              onClick={() => handleNavigation('/dashboard')}
-              className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-blue-50 transition-colors text-left"
-            >
-              <Home className="w-5 h-5 text-blue-600" />
-              <span className="font-medium">Home</span>
-            </button>
-
-            <button
               onClick={() => handleNavigation('/leads')}
               className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-blue-50 transition-colors text-left"
             >

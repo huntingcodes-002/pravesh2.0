@@ -25,7 +25,7 @@ export default function OtpVerificationPage() {
   // Redirect if no pending auth data
   useEffect(() => {
     if (!pendingAuth) {
-      router.replace('/dashboard');
+      router.replace('/leads');
     }
   }, [pendingAuth, router]);
 
@@ -61,13 +61,13 @@ export default function OtpVerificationPage() {
     if (success) {
       toast({
         title: 'Verification Successful',
-        description: 'Mobile number verified. Redirecting to Home Dashboard.',
+        description: 'Mobile number verified. Redirecting to Leads.',
         className: 'bg-green-50 border-green-200',
         action: <CircleCheck className='h-4 w-4'/>
       });
       
-      // Redirect to the Home Dashboard
-      router.replace('/dashboard'); 
+      // Redirect to the Leads page
+      router.replace('/leads'); 
     } else {
       toast({
         title: 'Verification Failed',

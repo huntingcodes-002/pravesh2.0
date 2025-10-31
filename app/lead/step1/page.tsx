@@ -3,7 +3,6 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
-import ProgressBar from '@/components/ProgressBar';
 import { useLead } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -105,26 +104,29 @@ function Step1PageContent() {
   const handleNext = () => {
     if (!currentLead) return;
 
-    // Save and proceed to next step
+    // Save and proceed to New Lead Information page
     updateLead(currentLead.id, {
       currentStep: 2,
     });
-    router.push('/lead/step2');
+    router.push('/lead/new-lead-info');
   };
 
   const canSendOtp = formData.productType && formData.applicationType && formData.mobile.length === 10 && formData.firstName && formData.lastName;
   const canProceed = isMobileVerified;
   
   // Co-applicant flow elements should not appear here
+  const handleExit = () => {
+    router.push('/leads');
+  };
+
   return (
     <DashboardLayout
       title="New Lead"
       showNotifications={false}
       showExitButton={true}
+      onExit={handleExit}
     >
       <div className="max-w-2xl mx-auto pb-24">
-        <ProgressBar currentStep={1} totalSteps={10} />
-
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
           <h2 className="text-xl font-semibold text-[#003366] mb-6">Lead Information</h2>
           <div className="space-y-6">
