@@ -3,14 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
-import ProgressBar from '@/components/ProgressBar';
 import { useLead } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from "@/lib/utils";
@@ -23,7 +21,6 @@ interface Address {
   addressLine3: string;
   landmark: string;
   postalCode: string;
-  isPrimary: boolean;
 }
 
 export default function Step3Page() {
@@ -35,7 +32,9 @@ export default function Step3Page() {
 
   useEffect(() => {
     if (currentLead?.formData?.step3?.addresses) {
-      setAddresses(currentLead.formData.step3.addresses);
+      // Remove isPrimary field if it exists
+      const cleanedAddresses = currentLead.formData.step3.addresses.map(({ isPrimary, ...rest }: any) => rest);
+      setAddresses(cleanedAddresses);
     } else {
       setAddresses([
         {
@@ -46,30 +45,10 @@ export default function Step3Page() {
           addressLine3: '',
           landmark: '',
           postalCode: '',
-          isPrimary: true,
         },
       ]);
     }
   }, [currentLead]);
-
-  const handleAddAddress = () => {
-    const newCollapsed = new Set(addresses.map(addr => addr.id));
-    setCollapsedAddresses(newCollapsed);
-
-    setAddresses([
-      ...addresses,
-      {
-        id: Date.now().toString(),
-        addressType: 'residential',
-        addressLine1: '',
-        addressLine2: '',
-        addressLine3: '',
-        landmark: '',
-        postalCode: '',
-        isPrimary: addresses.length === 0,
-      },
-    ]);
-  };
 
   const toggleAddressCollapse = (addressId: string) => {
     const newCollapsed = new Set(collapsedAddresses);
@@ -80,9 +59,6 @@ export default function Step3Page() {
 
   const handleRemoveAddress = (id: string) => {
     const remainingAddresses = addresses.filter((addr) => addr.id !== id);
-    if (remainingAddresses.length > 0 && !remainingAddresses.some(a => a.isPrimary)) {
-      remainingAddresses[0].isPrimary = true;
-    }
     setAddresses(remainingAddresses);
   };
 
@@ -92,51 +68,22 @@ export default function Step3Page() {
     );
   };
 
-  const handleSetPrimary = (id: string) => {
-    setAddresses(
-      addresses.map((addr) => ({
-        ...addr,
-        isPrimary: addr.id === id,
-      }))
-    );
-  };
 
-  const handleNext = () => {
+  const handleSave = () => {
     if (!currentLead) return;
 
-    // Auto-fill employment details with "Other" since step 4 is hidden
     updateLead(currentLead.id, {
       formData: {
         ...currentLead.formData,
         step3: { addresses },
-        step5: {
-          ...currentLead.formData?.step5,
-          occupationType: 'Others',
-          natureOfOccupation: 'Others'
-        }
       },
-      currentStep: 5,
     });
-    router.push('/lead/step5');
+    
+    router.push('/lead/new-lead-info');
   };
 
   const handleExit = () => {
-    if (!currentLead) {
-      router.push('/leads');
-      return;
-    }
-    updateLead(currentLead.id, {
-      formData: {
-        ...currentLead.formData,
-        step3: { addresses },
-      },
-      currentStep: 3,
-    });
-    router.push('/leads');
-  };
-
-  const handlePrevious = () => {
-    router.push('/lead/step2');
+    router.push('/lead/new-lead-info');
   };
 
   const canProceed = addresses.every(
@@ -156,8 +103,6 @@ export default function Step3Page() {
       onExit={handleExit}
     >
       <div className="max-w-2xl mx-auto pb-28 px-4">
-        <ProgressBar currentStep={3} totalSteps={10} />
-
         <div className="bg-white rounded-xl shadow-sm p-6 space-y-6 border border-gray-100">
           <h2 className="text-xl font-semibold text-[#003366] mb-6">
             Address Information
@@ -195,11 +140,6 @@ export default function Step3Page() {
                             )}
                           </h3>
 
-                          {address.isPrimary && (
-                            <span className="mt-1 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md font-medium w-fit">
-                              Primary
-                            </span>
-                          )}
 
                           {isCollapsed && address.addressLine1 && (
                             <span className="text-sm text-gray-500 truncate mt-1">
@@ -344,16 +284,6 @@ export default function Step3Page() {
                             />
                           </div>
 
-                          {/* Primary Address */}
-                          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
-                            <Label className="text-base font-medium">
-                              Mark as Primary Address
-                            </Label>
-                            <Switch
-                              checked={address.isPrimary}
-                              onCheckedChange={() => handleSetPrimary(address.id)}
-                            />
-                          </div>
                         </div>
                       </CardContent>
                     </CollapsibleContent>
@@ -362,36 +292,17 @@ export default function Step3Page() {
               );
             })}
 
-            {/* Add Another Address */}
-            <div className="pt-2">
-              <Button
-                variant="outline"
-                className="w-full h-12 text-[#0072CE] border-dashed border-[#0072CE]/50 hover:bg-[#E6F0FA] rounded-lg font-medium"
-                onClick={handleAddAddress}
-              >
-                <Plus className="w-5 h-5 mr-2" />
-                Add Another Address
-              </Button>
-            </div>
           </div>
         </div>
 
-        {/* Fixed Bottom Buttons */}
+        {/* Fixed Bottom Button */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
           <div className="flex gap-3 max-w-2xl mx-auto">
             <Button
-              onClick={handlePrevious}
-              variant="outline"
-              className="flex-1 h-12 rounded-lg font-medium"
-            >
-              Previous
-            </Button>
-            <Button
-              onClick={handleNext}
-              disabled={!canProceed}
+              onClick={handleSave}
               className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white"
             >
-              Next
+              Save Information
             </Button>
           </div>
         </div>

@@ -2,10 +2,12 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, CheckCircle, XCircle, Loader, Trash2, RotateCcw, Camera, AlertTriangle, User, Users, Home, ChevronDown, X, Image as ImageIcon } from 'lucide-react';
+import { Upload, CheckCircle, XCircle, Loader, Trash2, RotateCcw, Camera, AlertTriangle, User, Users, Home, ChevronDown, X, Image as ImageIcon, RefreshCw } from 'lucide-react';
+import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { validateFile } from '@/lib/mock-auth';
+import { validateFile, extractAadhaarData, extractPANData } from '@/lib/mock-auth';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -65,30 +67,45 @@ const getApplicantName = (firstName?: string, lastName?: string) => {
     return name || 'Applicant';
 };
 
+// Helper function to map alternate ID type from step2 to step8 document value
+const mapAlternateIdTypeToDocumentValue = (alternateIdType: string): string => {
+    const mapping: { [key: string]: string } = {
+        "Passport": "Passport",
+        "Voter ID": "VoterID",
+        "Driving License": "DrivingLicense"
+    };
+    return mapping[alternateIdType] || alternateIdType;
+};
+
+// Helper function to get document label for alternate ID types
+const getAlternateDocumentLabel = (alternateIdType: string): string => {
+    const labelMapping: { [key: string]: string } = {
+        "Passport": "Passport",
+        "Voter ID": "Voter ID",
+        "Driving License": "Driving License"
+    };
+    return labelMapping[alternateIdType] || alternateIdType;
+};
+
 // Helper function to generate dynamic document list
 const generateDocumentList = (lead: any) => {
     const documents: any[] = [];
     
-    // Main applicant documents - only PAN and Aadhaar
+    // Main applicant documents
     const mainApplicantName = getApplicantName(lead?.customerFirstName, lead?.customerLastName);
     
-    // Check if main applicant has PAN
-    const mainApplicantHasPan = lead?.formData?.step2?.hasPan === 'yes';
+    // PAN is always required
+    documents.push({
+        value: "PAN",
+        label: `PAN - ${mainApplicantName}`,
+        fileTypes: ["image"],
+        requiresCamera: true,
+        applicantType: "main",
+        required: true,
+        requiresFrontBack: false
+    });
     
-    if (mainApplicantHasPan) {
-        // Add PAN for main applicant (required)
-        documents.push({
-            value: "PAN",
-            label: `PAN - ${mainApplicantName}`,
-            fileTypes: ["image"],
-            requiresCamera: true,
-            applicantType: "main",
-            required: true,
-            requiresFrontBack: false
-        });
-    }
-    
-    // Add Aadhaar for main applicant (required)
+    // Aadhaar is always required
     documents.push({
         value: "Adhaar",
         label: `Aadhaar - ${mainApplicantName}`,
@@ -106,7 +123,6 @@ const generateDocumentList = (lead: any) => {
 const categorizeUploadedFiles = (files: UploadedFile[], availableDocuments: any[], coApplicants: any[]) => {
     const applicantDocs: UploadedFile[] = [];
     const coApplicantDocsMap: { [key: string]: UploadedFile[] } = {};
-    const collateralDocs: UploadedFile[] = [];
     
     // Initialize co-applicant docs map
     coApplicants.forEach((coApp: any) => {
@@ -124,13 +140,11 @@ const categorizeUploadedFiles = (files: UploadedFile[], availableDocuments: any[
                 if (coApplicantId && coApplicantDocsMap[coApplicantId]) {
                     coApplicantDocsMap[coApplicantId].push(file);
                 }
-            } else if (docInfo.applicantType === 'collateral') {
-                collateralDocs.push(file);
             }
         }
     });
     
-    return { applicantDocs, coApplicantDocsMap, collateralDocs };
+    return { applicantDocs, coApplicantDocsMap };
 };
 
 // Helper function to get document display name
@@ -145,7 +159,7 @@ export default function Step8Page() {
     const { toast } = useToast();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [selectedEntity, setSelectedEntity] = useState('');
+    const [selectedEntity, setSelectedEntity] = useState('applicant');
     const [documentType, setDocumentType] = useState('');
     const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>(
         currentLead?.formData?.step8?.files || []
@@ -162,7 +176,20 @@ export default function Step8Page() {
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
-    const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({});
+    // Default to open for applicant section to prevent auto-collapse
+    const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({ applicant: true });
+    
+    // Camera flip state
+    const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
+    const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
+    
+    // Crop state
+    const [showCropModal, setShowCropModal] = useState(false);
+    const [capturedImageSrc, setCapturedImageSrc] = useState<string>('');
+    const [crop, setCrop] = useState<Crop>();
+    const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
+    const [imageRef, setImageRef] = useState<HTMLImageElement | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
     
     // Preview state
     const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null);
@@ -199,39 +226,34 @@ export default function Step8Page() {
             });
         });
         
-        // Collateral
-        entities.push({
-            value: 'collateral',
-            label: 'Collateral',
-            type: 'collateral'
-        });
-        
         return entities;
     };
     
-    const entityOptions = getEntityOptions();
-    const selectedEntityData = entityOptions.find(e => e.value === selectedEntity);
-    
-    // Filter documents based on selected entity
+    // Filter documents - only show PAN and Aadhaar for main applicant
     const getFilteredDocuments = () => {
-        if (!selectedEntity || !selectedEntityData) return [];
-        
-        if (selectedEntityData.type === 'main') {
-            return availableDocuments.filter(doc => doc.applicantType === 'main');
-        } else if (selectedEntityData.type === 'coapplicant') {
-            return availableDocuments.filter(doc => 
-                doc.applicantType === 'coapplicant' && 
-                doc.coApplicantId === selectedEntityData.coApplicantId
-            );
-        } else if (selectedEntityData.type === 'collateral') {
-            return availableDocuments.filter(doc => doc.applicantType === 'collateral');
-        }
-        
-        return [];
+        return availableDocuments.filter(doc => doc.applicantType === 'main');
     };
     
     const filteredDocuments = getFilteredDocuments();
     const selectedDocument = filteredDocuments.find(doc => doc.value === documentType);
+
+    // Clean up any alternate documents (should only have PAN and Aadhaar)
+    useEffect(() => {
+        if (currentLead && uploadedFiles.length > 0) {
+            const alternateDocumentTypes = ['Passport', 'VoterID', 'DrivingLicense'];
+            const hasAlternateDocs = uploadedFiles.some((file: any) => 
+                alternateDocumentTypes.includes(file.type)
+            );
+            
+            if (hasAlternateDocs) {
+                const cleanedFiles = uploadedFiles.filter((file: any) => 
+                    !alternateDocumentTypes.includes(file.type)
+                );
+                setUploadedFiles(cleanedFiles);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentLead]);
 
     useEffect(() => {
         if (currentLead) {
@@ -304,21 +326,125 @@ export default function Step8Page() {
                 fileType: isPdf ? 'pdf' : 'image'
             };
 
-            setUploadedFiles((prev) => [...prev, newFile]);
+            // If PAN or Aadhaar, delete old failed entries of the same type
+            if (documentType === 'PAN' || documentType === 'Adhaar') {
+                setUploadedFiles((prev) => {
+                    // Remove failed entries of the same document type
+                    const filteredFiles = prev.filter((f) => 
+                        !(f.type === documentType && f.status === 'Failed')
+                    );
+                    // Keep applicant section open when adding new files
+                    setOpenSections((sections) => ({ ...sections, applicant: true }));
+                    return [...filteredFiles, newFile];
+                });
+            } else {
+                setUploadedFiles((prev) => {
+                    // Keep applicant section open when adding new files
+                    setOpenSections((sections) => ({ ...sections, applicant: true }));
+                    return [...prev, newFile];
+                });
+            }
             toast({ title: 'Processing', description: `Uploading ${file.name}...` });
 
             setTimeout(() => {
                 const validation = validateFile(file.name);
-                setUploadedFiles((prev) =>
-                    prev.map((f) =>
+                
+                setUploadedFiles((prev) => {
+                    const updatedFiles = prev.map((f) =>
                         f.id === fileId
-                            ? { ...f, status: validation.valid ? 'Success' : 'Failed', error: validation.error }
+                            ? { ...f, status: validation.valid ? 'Success' : 'Failed' as 'Success' | 'Failed', error: validation.error }
                             : f
-                    )
-                );
+                    );
+                    
+                    // Auto-fill data based on document type
+                    if (validation.valid && currentLead) {
+                        if (documentType === 'Adhaar') {
+                            // Always extract Aadhaar data when documentType is Adhaar, regardless of filename
+                            const aadhaarData = extractAadhaarData(file.name, documentType);
+                            if (aadhaarData) {
+                                // Update step3 with address data
+                                const existingAddresses = currentLead.formData?.step3?.addresses || [];
+                                const updatedAddresses = existingAddresses.length > 0 
+                                    ? existingAddresses.map((addr: any, index: number) => 
+                                        index === 0 ? {
+                                            ...addr,
+                                            addressLine1: aadhaarData.addressLine1 || addr.addressLine1,
+                                            addressLine2: aadhaarData.addressLine2 || addr.addressLine2,
+                                            addressLine3: aadhaarData.addressLine3 || addr.addressLine3,
+                                            postalCode: aadhaarData.pincode || addr.postalCode,
+                                            autoFilledViaAadhaar: true // Flag to indicate auto-filled via Aadhaar
+                                        } : addr
+                                      )
+                                    : [{
+                                        id: Date.now().toString(),
+                                        addressType: 'residential',
+                                        addressLine1: aadhaarData.addressLine1 || '',
+                                        addressLine2: aadhaarData.addressLine2 || '',
+                                        addressLine3: aadhaarData.addressLine3 || '',
+                                        landmark: '', // Landmark must be manually entered
+                                        postalCode: aadhaarData.pincode || '',
+                                        autoFilledViaAadhaar: true
+                                    }];
+                                
+                                updateLead(currentLead.id, {
+                                    formData: {
+                                        ...currentLead.formData,
+                                        step3: { addresses: updatedAddresses, autoFilledViaAadhaar: true },
+                                        step8: { 
+                                            ...currentLead.formData.step8, 
+                                            files: updatedFiles 
+                                        }
+                                    }
+                                });
+                            }
+                        } else if (documentType === 'PAN') {
+                            const panData = extractPANData(file.name);
+                            if (panData) {
+                                // Update step2 with PAN number, DOB and gender
+                                const updatedStep2 = {
+                                    ...currentLead.formData?.step2,
+                                    pan: panData.panNumber || currentLead.formData?.step2?.pan,
+                                    dob: panData.dateOfBirth || currentLead.formData?.step2?.dob,
+                                    gender: panData.gender || currentLead.formData?.step2?.gender,
+                                    autoFilledViaPAN: true // Flag to indicate auto-filled via PAN
+                                };
+                                
+                                // Calculate age from DOB
+                                let age = 0;
+                                if (panData.dateOfBirth) {
+                                    const dob = new Date(panData.dateOfBirth);
+                                    const today = new Date();
+                                    age = today.getFullYear() - dob.getFullYear();
+                                    const m = today.getMonth() - dob.getMonth();
+                                    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+                                        age--;
+                                    }
+                                }
+                                
+                                updateLead(currentLead.id, {
+                                    formData: {
+                                        ...currentLead.formData,
+                                        step2: updatedStep2,
+                                        step8: { 
+                                            ...currentLead.formData.step8, 
+                                            files: updatedFiles 
+                                        }
+                                    },
+                                    panNumber: panData.panNumber || currentLead.panNumber,
+                                    dob: panData.dateOfBirth || currentLead.dob,
+                                    age: age || currentLead.age,
+                                    gender: panData.gender || currentLead.gender,
+                                });
+                            }
+                        }
+                    }
+                    
+                    return updatedFiles;
+                });
+                
                 toast({
                     title: validation.valid ? 'Success' : 'Failed',
-                    description: validation.valid ? `${file.name} uploaded successfully` : validation.error || 'File validation failed',
+                    description: validation.valid ? `${file.name} uploaded successfully${documentType === 'Adhaar' ? ' and address auto-filled' : documentType === 'PAN' ? ' and details auto-filled' : ''}` : validation.error || 'File validation failed',
                     variant: validation.valid ? 'default' : 'destructive',
                     className: validation.valid ? 'bg-green-50 border-green-200' : ''
                 });
@@ -364,6 +490,19 @@ export default function Step8Page() {
         setShowUploadMethodModal(false);
     };
 
+    // Enumerate available cameras
+    const enumerateCameras = async () => {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            setAvailableCameras(videoDevices);
+            return videoDevices;
+        } catch (error) {
+            console.error('Error enumerating cameras:', error);
+            return [];
+        }
+    };
+
     const startCamera = async () => {
         if (!selectedDocument && !uploadMode) {
             toast({ title: 'Error', description: 'Please select a document type first', variant: 'destructive' });
@@ -382,9 +521,16 @@ export default function Step8Page() {
         
         setCameraPermissionDenied(false);
         try {
+            // Request camera access first to get permission
             const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
             setStream(mediaStream);
             setIsCameraOpen(true);
+            
+            // After getting permission, enumerate cameras
+            const cameras = await enumerateCameras();
+            if (cameras.length > 0) {
+                setCurrentCameraIndex(0);
+            }
         } catch (err: any) {
             if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
                 setCameraPermissionDenied(true);
@@ -394,12 +540,255 @@ export default function Step8Page() {
         }
     };
 
+    // Flip camera function
+    const flipCamera = async () => {
+        if (availableCameras.length <= 1) return;
+        
+        // Stop current stream
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Switch to next camera
+        const nextIndex = (currentCameraIndex + 1) % availableCameras.length;
+        setCurrentCameraIndex(nextIndex);
+        
+        try {
+            const constraints: MediaStreamConstraints = {
+                video: { deviceId: { exact: availableCameras[nextIndex].deviceId } }
+            };
+            
+            const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+            setStream(newStream);
+            
+            if (videoRef.current) {
+                videoRef.current.srcObject = newStream;
+            }
+        } catch (error) {
+            toast({ title: 'Camera Error', description: 'Could not switch camera.', variant: 'destructive' });
+        }
+    };
+
     useEffect(() => {
         if (isCameraOpen && stream && videoRef.current) {
             videoRef.current.srcObject = stream;
         }
     }, [isCameraOpen, stream]);
 
+    // Initialize crop on image load
+    const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+        const { width, height } = e.currentTarget;
+        const crop = makeAspectCrop(
+            {
+                unit: '%',
+                width: 90,
+            },
+            16 / 9, // aspect ratio
+            width,
+            height
+        );
+        const centeredCrop = centerCrop(crop, width, height);
+        setCrop(centeredCrop);
+    };
+
+    // Get cropped image
+    const getCroppedImg = (image: HTMLImageElement, crop: PixelCrop): Promise<string> => {
+        return new Promise((resolve) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                resolve('');
+                return;
+            }
+
+            const scaleX = image.naturalWidth / image.width;
+            const scaleY = image.naturalHeight / image.height;
+
+            canvas.width = crop.width;
+            canvas.height = crop.height;
+
+            ctx.drawImage(
+                image,
+                crop.x * scaleX,
+                crop.y * scaleY,
+                crop.width * scaleX,
+                crop.height * scaleY,
+                0,
+                0,
+                crop.width,
+                crop.height
+            );
+
+            canvas.toBlob((blob) => {
+                if (!blob) {
+                    resolve('');
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    resolve(reader.result as string);
+                };
+                reader.readAsDataURL(blob);
+            }, 'image/jpeg', 0.95);
+        });
+    };
+
+    // Handle crop completion
+    const handleCropComplete = async () => {
+        if (!imageRef || !completedCrop) {
+            toast({ title: 'Error', description: 'No crop selected', variant: 'destructive' });
+            return;
+        }
+
+        const croppedImageUrl = await getCroppedImg(imageRef, completedCrop);
+        processCapturedImage(croppedImageUrl);
+        setShowCropModal(false);
+        setCapturedImageSrc('');
+        setCrop(undefined);
+        setCompletedCrop(undefined);
+    };
+
+    // Process captured image after cropping
+    const processCapturedImage = (dataUrl: string) => {
+        const fileId = Date.now().toString();
+        
+        // For front/back documents
+        if (uploadMode) {
+            const tempFile: TempFile = {
+                name: `capture_${fileId}.jpg`,
+                file: null,
+                dataUrl: dataUrl
+            };
+            
+            if (uploadMode === 'front') {
+                setFrontFile(tempFile);
+            } else {
+                setBackFile(tempFile);
+            }
+            setShowUploadMethodModal(false);
+        } else {
+                    // For regular documents - check if it's pan.jpg or aadhaar.jpg mock file
+                    // For camera captures, we'll use the documentType to determine what to extract
+                    const mockFileName = documentType === 'PAN' ? 'pan.jpg' : documentType === 'Adhaar' ? 'aadhaar.jpg' : `capture_${fileId}.jpg`;
+                    
+                    const newFile: UploadedFile = {
+                        id: fileId,
+                        name: mockFileName,
+                        type: documentType,
+                        status: 'Success',
+                        previewUrl: dataUrl,
+                        fileType: 'image'
+                    };
+                    
+                    // If PAN or Aadhaar, delete old failed entries of the same type
+                    if (documentType === 'PAN' || documentType === 'Adhaar') {
+                        setUploadedFiles((prev) => {
+                            // Remove failed entries of the same document type
+                            const filteredFiles = prev.filter((f) => 
+                                !(f.type === documentType && f.status === 'Failed')
+                            );
+                            // Keep applicant section open
+                            setOpenSections((sections) => ({ ...sections, applicant: true }));
+                            const updatedFiles = [...filteredFiles, newFile];
+                        
+                            // Auto-fill data if it's PAN or Aadhaar
+                            if (currentLead && documentType === 'PAN') {
+                                const panData = extractPANData(mockFileName);
+                                if (panData) {
+                                    const updatedStep2 = {
+                                        ...currentLead.formData?.step2,
+                                        pan: panData.panNumber || currentLead.formData?.step2?.pan,
+                                        dob: panData.dateOfBirth || currentLead.formData?.step2?.dob,
+                                        gender: panData.gender || currentLead.formData?.step2?.gender,
+                                        autoFilledViaPAN: true
+                                    };
+                                    
+                                    let age = 0;
+                                    if (panData.dateOfBirth) {
+                                        const dob = new Date(panData.dateOfBirth);
+                                        const today = new Date();
+                                        age = today.getFullYear() - dob.getFullYear();
+                                        const m = today.getMonth() - dob.getMonth();
+                                        if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+                                            age--;
+                                        }
+                                    }
+                                    
+                                    updateLead(currentLead.id, {
+                                        formData: {
+                                            ...currentLead.formData,
+                                            step2: updatedStep2,
+                                            step8: { 
+                                                ...currentLead.formData.step8, 
+                                                files: updatedFiles 
+                                            }
+                                        },
+                                        panNumber: panData.panNumber || currentLead.panNumber,
+                                        dob: panData.dateOfBirth || currentLead.dob,
+                                        age: age || currentLead.age,
+                                        gender: panData.gender || currentLead.gender,
+                                    });
+                                }
+                            } else if (currentLead && documentType === 'Adhaar') {
+                                const aadhaarData = extractAadhaarData(mockFileName, documentType);
+                                if (aadhaarData) {
+                                    const existingAddresses = currentLead.formData?.step3?.addresses || [];
+                                    const updatedAddresses = existingAddresses.length > 0 
+                                        ? existingAddresses.map((addr: any, index: number) => 
+                                            index === 0 ? {
+                                                ...addr,
+                                                addressLine1: aadhaarData.addressLine1 || addr.addressLine1,
+                                                addressLine2: aadhaarData.addressLine2 || addr.addressLine2,
+                                                addressLine3: aadhaarData.addressLine3 || addr.addressLine3,
+                                                city: aadhaarData.city || addr.city || aadhaarData.addressLine3,
+                                                postalCode: aadhaarData.pincode || addr.postalCode,
+                                                autoFilledViaAadhaar: true
+                                            } : addr
+                                          )
+                                        : [{
+                                            id: Date.now().toString(),
+                                            addressType: 'residential',
+                                            addressLine1: aadhaarData.addressLine1 || '',
+                                            addressLine2: aadhaarData.addressLine2 || '',
+                                            addressLine3: aadhaarData.addressLine3 || '',
+                                            landmark: '', // Landmark must be manually entered
+                                            postalCode: aadhaarData.pincode || '',
+                                            autoFilledViaAadhaar: true
+                                        }];
+                                    
+                                    updateLead(currentLead.id, {
+                                        formData: {
+                                            ...currentLead.formData,
+                                            step3: { addresses: updatedAddresses, autoFilledViaAadhaar: true },
+                                            step8: { 
+                                                ...currentLead.formData.step8, 
+                                                files: updatedFiles 
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                            
+                            return updatedFiles;
+                        });
+                    } else {
+                        setUploadedFiles((prev) => {
+                            // Keep applicant section open
+                            setOpenSections((sections) => ({ ...sections, applicant: true }));
+                            return [...prev, newFile];
+                        });
+                    }
+                    
+                    toast({ 
+                        title: 'Success', 
+                        description: documentType === 'PAN' ? 'Image captured and details auto-filled' : documentType === 'Adhaar' ? 'Image captured and address auto-filled' : 'Image captured and uploaded successfully.', 
+                        className: 'bg-green-50 border-green-200' 
+                    });
+                    setDocumentType('');
+        }
+    };
+
+    // Capture image function - shows crop modal instead of directly processing
     const captureImage = () => {
         if (videoRef.current) {
             const canvas = document.createElement('canvas');
@@ -409,38 +798,12 @@ export default function Step8Page() {
             if (context) {
                 context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
                 const dataUrl = canvas.toDataURL('image/jpeg');
-                const fileId = Date.now().toString();
                 
-                // For front/back documents
-                if (uploadMode) {
-                    const tempFile: TempFile = {
-                        name: `capture_${fileId}.jpg`,
-                        file: null,
-                        dataUrl: dataUrl
-                    };
-                    
-                    if (uploadMode === 'front') {
-                        setFrontFile(tempFile);
-                    } else {
-                        setBackFile(tempFile);
-                    }
-                    setShowUploadMethodModal(false);
-                } else {
-                    // For regular documents - fixed to include preview
-                    const newFile: UploadedFile = {
-                        id: fileId,
-                        name: `capture_${fileId}.jpg`,
-                        type: documentType,
-                        status: 'Success',
-                        previewUrl: dataUrl,
-                        fileType: 'image'
-                    };
-                    setUploadedFiles((prev) => [...prev, newFile]);
-                    toast({ title: 'Success', description: 'Image captured and uploaded successfully.', className: 'bg-green-50 border-green-200' });
-                    setDocumentType('');
-                }
+                // Show crop modal instead of directly processing
+                setCapturedImageSrc(dataUrl);
+                setShowCropModal(true);
+                stopCamera();
             }
-            stopCamera();
         }
     };
 
@@ -460,14 +823,6 @@ export default function Step8Page() {
         setUploadedFiles(uploadedFiles.filter((f) => f.id !== fileId));
     };
 
-    const handleAddPropertyPhoto = () => {
-        setSelectedEntity('collateral');
-        setDocumentType('CollateralPhotos');
-        // Trigger file input click
-        setTimeout(() => {
-            fileInputRef.current?.click();
-        }, 100);
-    };
 
     // Handle front/back button click
     const handleFrontBackClick = (side: 'front' | 'back') => {
@@ -498,7 +853,7 @@ export default function Step8Page() {
         setUploadedFiles((prev) => [...prev, newFile]);
         toast({ title: 'Processing', description: 'Validating documents...' });
 
-        setTimeout(() => {
+            setTimeout(() => {
             // Mock validation - validate both together
             const frontValidation = validateFile(frontFile.name);
             const backValidation = validateFile(backFile.name);
@@ -506,18 +861,62 @@ export default function Step8Page() {
             const isValid = frontValidation.valid && backValidation.valid;
             const error = !frontValidation.valid ? frontValidation.error : backValidation.error;
 
-            setUploadedFiles((prev) =>
-                prev.map((f) =>
+            setUploadedFiles((prev) => {
+                const updatedFiles = prev.map((f) =>
                     f.id === fileId
-                        ? { ...f, status: isValid ? 'Success' : 'Failed', error: error }
+                        ? { ...f, status: isValid ? 'Success' : 'Failed' as 'Success' | 'Failed', error: error }
                         : f
-                )
-            );
+                );
+                
+                // Auto-fill Aadhaar data if valid
+                if (isValid && documentType === 'Adhaar' && currentLead) {
+                    const aadhaarData = extractAadhaarData(frontFile.name, documentType);
+                    if (aadhaarData) {
+                        const existingAddresses = currentLead.formData?.step3?.addresses || [];
+                        const updatedAddresses = existingAddresses.length > 0 
+                            ? existingAddresses.map((addr: any, index: number) => 
+                                index === 0 ? {
+                                    ...addr,
+                                    addressLine1: aadhaarData.addressLine1 || addr.addressLine1,
+                                    addressLine2: aadhaarData.addressLine2 || addr.addressLine2,
+                                    addressLine3: aadhaarData.addressLine3 || addr.addressLine3,
+                                    city: aadhaarData.city || addr.city || aadhaarData.addressLine3,
+                                    postalCode: aadhaarData.pincode || addr.postalCode,
+                                    autoFilledViaAadhaar: true
+                                } : addr
+                              )
+                            : [{
+                                id: Date.now().toString(),
+                                addressType: 'residential',
+                                addressLine1: aadhaarData.addressLine1 || '',
+                                addressLine2: aadhaarData.addressLine2 || '',
+                                addressLine3: aadhaarData.addressLine3 || '',
+                                city: aadhaarData.city || aadhaarData.addressLine3 || '',
+                                landmark: '', // Landmark must be manually entered
+                                postalCode: aadhaarData.pincode || '',
+                                autoFilledViaAadhaar: true
+                            }];
+                        
+                        updateLead(currentLead.id, {
+                            formData: {
+                                ...currentLead.formData,
+                                step3: { addresses: updatedAddresses, autoFilledViaAadhaar: true },
+                                step8: { 
+                                    ...currentLead.formData.step8, 
+                                    files: updatedFiles 
+                                }
+                            }
+                        });
+                    }
+                }
+                
+                return updatedFiles;
+            });
 
             if (isValid) {
                 toast({
                     title: 'Success',
-                    description: 'Documents uploaded successfully',
+                    description: documentType === 'Adhaar' ? 'Documents uploaded successfully and address auto-filled' : 'Documents uploaded successfully',
                     className: 'bg-green-50 border-green-200'
                 });
                 // Clear temp files and reset
@@ -583,8 +982,60 @@ export default function Step8Page() {
                                 <Camera className="w-4 h-4 mr-2" /> Capture
                             </Button>
                             <Button onClick={stopCamera} variant="destructive">Cancel</Button>
+                            {/* Flip camera button - only show if multiple cameras available */}
+                            {availableCameras.length > 1 && (
+                                <Button onClick={flipCamera} variant="outline" size="icon" className="w-10 h-10">
+                                    <RefreshCw className="w-4 h-4" />
+                                </Button>
+                            )}
                         </div>
                     </div>
+                )}
+
+                {/* Crop Modal */}
+                {showCropModal && capturedImageSrc && (
+                    <Dialog open={showCropModal} onOpenChange={setShowCropModal}>
+                        <DialogContent className="sm:max-w-2xl">
+                            <DialogHeader>
+                                <DialogTitle>Crop Image</DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-4">
+                                {capturedImageSrc && (
+                                    <div className="flex justify-center">
+                                        <ReactCrop
+                                            crop={crop}
+                                            onChange={(_, percentCrop) => setCrop(percentCrop)}
+                                            onComplete={(c) => setCompletedCrop(c)}
+                                            aspect={undefined}
+                                            minWidth={50}
+                                            minHeight={50}
+                                        >
+                                            <img
+                                                ref={(el) => setImageRef(el)}
+                                                src={capturedImageSrc}
+                                                alt="Captured"
+                                                style={{ maxHeight: '70vh', maxWidth: '100%' }}
+                                                onLoad={onImageLoad}
+                                            />
+                                        </ReactCrop>
+                                    </div>
+                                )}
+                                <div className="flex justify-end space-x-2">
+                                    <Button variant="outline" onClick={() => {
+                                        setShowCropModal(false);
+                                        setCapturedImageSrc('');
+                                        setCrop(undefined);
+                                        setCompletedCrop(undefined);
+                                    }}>
+                                        Cancel
+                                    </Button>
+                                    <Button onClick={handleCropComplete} disabled={!completedCrop}>
+                                        Use Cropped Image
+                                    </Button>
+                                </div>
+                            </div>
+                        </DialogContent>
+                    </Dialog>
                 )}
 
                 {/* Camera Permission Dialog */}
@@ -651,63 +1102,26 @@ export default function Step8Page() {
 
                         <div className="space-y-4">
                             <div>
-                                <Label htmlFor="entitySelect">Select Applicant / Collateral</Label>
-                                <Select 
-                                    value={selectedEntity} 
-                                    onValueChange={(value) => {
-                                        // Close all sections first
-                                        const newOpenSections: { [key: string]: boolean } = {};
-                                        
-                                        // Open the newly selected section
-                                        if (value === 'applicant') {
-                                            newOpenSections['applicant'] = true;
-                                        } else if (value.startsWith('coapplicant-')) {
-                                            newOpenSections[value] = true;
-                                        } else if (value === 'collateral') {
-                                            newOpenSections['collateral'] = true;
-                                        }
-                                        
-                                        setOpenSections(newOpenSections);
-                                        setSelectedEntity(value);
-                                        setDocumentType('');
-                                    }}
-                                >
-                                    <SelectTrigger id="entitySelect" className="h-12">
-                                        <SelectValue placeholder="Choose applicant or collateral..." />
+                                <Label htmlFor="documentType">Select Document Type</Label>
+                                <Select value={documentType} onValueChange={(value) => {
+                                    setDocumentType(value);
+                                    setFrontFile(null);
+                                    setBackFile(null);
+                                    setUploadError('');
+                                }}>
+                                    <SelectTrigger id="documentType" className="h-12">
+                                        <SelectValue placeholder="Choose document type..." />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {entityOptions.map(entity => (
-                                            <SelectItem key={entity.value} value={entity.value}>
-                                                {entity.label}
-                                            </SelectItem>
-                                        ))}
+                                        {filteredDocuments.map(doc => {
+                                            const isUploaded = getUploadedDocTypes().has(doc.value);
+                                            return (
+                                                <DocumentSelectItem key={doc.value} docType={doc} isUploaded={isUploaded} />
+                                            );
+                                        })}
                                     </SelectContent>
                                 </Select>
                             </div>
-                            
-                            {selectedEntity && (
-                                <div>
-                                    <Label htmlFor="documentType">Select Document Type</Label>
-                                    <Select value={documentType} onValueChange={(value) => {
-                                        setDocumentType(value);
-                                        setFrontFile(null);
-                                        setBackFile(null);
-                                        setUploadError('');
-                                    }}>
-                                        <SelectTrigger id="documentType" className="h-12">
-                                            <SelectValue placeholder="Choose document type..." />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {filteredDocuments.map(doc => {
-                                                const isUploaded = getUploadedDocTypes().has(doc.value);
-                                                return (
-                                                    <DocumentSelectItem key={doc.value} docType={doc} isUploaded={isUploaded} />
-                                                );
-                                            })}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            )}
 
                             {documentType && selectedDocument && (
                                 <>
@@ -865,9 +1279,8 @@ export default function Step8Page() {
 
                             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
                                 <p className="font-semibold mb-1">How to upload:</p>
-                                <p className="text-xs mb-2">1. Select applicant/co-applicant/collateral from the first dropdown</p>
-                                <p className="text-xs mb-2">2. Select document type from the second dropdown</p>
-                                <p className="text-xs">3. Upload file or capture photo</p>
+                                <p className="text-xs mb-2">1. Select document type from the dropdown</p>
+                                <p className="text-xs">2. Upload file or capture photo</p>
                             </div>
 
                             {uploadedFiles.length > 0 && (
@@ -875,7 +1288,7 @@ export default function Step8Page() {
                                     <h3 className="font-semibold text-gray-900 my-4">Uploaded Documents</h3>
                                     {(() => {
                                         const coApplicants = currentLead?.formData?.coApplicants || [];
-                                        const { applicantDocs, coApplicantDocsMap, collateralDocs } = categorizeUploadedFiles(uploadedFiles, availableDocuments, coApplicants);
+                                        const { applicantDocs, coApplicantDocsMap } = categorizeUploadedFiles(uploadedFiles, availableDocuments, coApplicants);
                                         
                                         const renderDocumentCard = (file: UploadedFile) => (
                                             <Card key={file.id} className={cn(
@@ -927,9 +1340,12 @@ export default function Step8Page() {
                                                                     <RotateCcw className="w-4 h-4" />
                                                                 </Button>
                                                             )}
-                                                            <Button variant="ghost" size="icon" onClick={() => handleDelete(file.id)} className="w-8 h-8 rounded-lg text-red-600 hover:bg-red-100 flex-shrink-0">
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </Button>
+                                                            {/* Only show delete button for Failed or Processing documents */}
+                                                            {(file.status === 'Failed' || file.status === 'Processing') && (
+                                                                <Button variant="ghost" size="icon" onClick={() => handleDelete(file.id)} className="w-8 h-8 rounded-lg text-red-600 hover:bg-red-100 flex-shrink-0">
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </Button>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </CardContent>
@@ -1001,51 +1417,6 @@ export default function Step8Page() {
                                                     );
                                                 })}
 
-                                                {/* Collateral Documents */}
-                                                <Collapsible
-                                                    open={openSections['collateral']}
-                                                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, collateral: open }))}
-                                                >
-                                                    <Card className="border-purple-200">
-                                                        <CollapsibleTrigger className="w-full">
-                                                            <CardContent className="p-4">
-                                                                <div className="flex items-center justify-between">
-                                                                    <h4 className="text-sm font-semibold text-gray-800 flex items-center">
-                                                                        <Home className="w-4 h-4 mr-2 text-purple-600" />
-                                                                        Collateral Documents ({collateralDocs.length})
-                                                                    </h4>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <Button
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                handleAddPropertyPhoto();
-                                                                            }}
-                                                                            variant="outline"
-                                                                            size="sm"
-                                                                            className="h-8 px-3 text-xs border-purple-300 text-purple-600 hover:bg-purple-50"
-                                                                        >
-                                                                            <span className="mr-1">+</span> Property Photos
-                                                                        </Button>
-                                                                        <ChevronDown className={cn("w-5 h-5 text-gray-500 transition-transform", openSections['collateral'] && "rotate-180")} />
-                                                                    </div>
-                                                                </div>
-                                                            </CardContent>
-                                                        </CollapsibleTrigger>
-                                                        <CollapsibleContent>
-                                                            <CardContent className="px-4 pb-4 pt-0">
-                                                                {collateralDocs.length > 0 ? (
-                                                                    <div className="space-y-2">
-                                                                        {collateralDocs.map(renderDocumentCard)}
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="text-center py-4 text-gray-500 text-sm">
-                                                                        No collateral documents uploaded yet
-                                                                    </div>
-                                                                )}
-                                                            </CardContent>
-                                                        </CollapsibleContent>
-                                                    </Card>
-                                                </Collapsible>
                                             </div>
                                         );
                                     })()}

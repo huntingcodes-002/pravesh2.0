@@ -100,7 +100,7 @@ export default function Step7Page() {
       loanPurpose: formData.loanPurpose,
       currentStep: 8
     });
-    router.push('/lead/step8');
+    router.push('/lead/documents');
   };
 
   const handleExit = () => {

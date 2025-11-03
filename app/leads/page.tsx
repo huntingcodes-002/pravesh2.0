@@ -123,8 +123,7 @@ export default function LeadsDashboardPage() {
     } 
     
     if (action === 'call') {
-        // Mock phone call action
-        window.location.href = `tel:+91${lead.customerMobile}`;
+        // No action - call functionality disabled
         return;
     }
 
@@ -137,7 +136,7 @@ export default function LeadsDashboardPage() {
   const handleEditButtonLogic = (lead: Lead) => {
     const isFinalized = ['Submitted', 'Approved', 'Rejected', 'Disbursed'].includes(lead.status);
     const isDraft = lead.status === 'Draft';
-    const buttonText = isDraft ? 'Continue Application' : 'Edit Lead';
+    const buttonText = isDraft ? 'Continue' : 'Edit Lead';
     const buttonIcon = isDraft ? <Play className="w-4 h-4 mr-2" /> : <Edit className="w-4 h-4 mr-2" />;
     
     return { isFinalized, buttonText, buttonIcon };

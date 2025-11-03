@@ -4,7 +4,6 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Calendar, CheckCircle, AlertTriangle, Loader, Edit, X } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
-import ProgressBar from '@/components/ProgressBar';
 import { useLead } from '@/contexts/LeadContext';
 import { validatePANDetails, PAN_DATA } from '@/lib/mock-auth'; 
 import { Button } from '@/components/ui/button';
@@ -140,17 +139,10 @@ export default function Step2Page() {
   
   const [formData, setFormData] = useState({
     customerType: 'individual',
-    hasPan: currentLead?.formData?.step2?.hasPan || 'yes',
     pan: currentLead?.panNumber || '',
-    panUnavailabilityReason: currentLead?.formData?.step2?.panUnavailabilityReason || '',
-    panUnavailabilityNotes: currentLead?.formData?.step2?.panUnavailabilityNotes || '',
-    alternateIdType: currentLead?.formData?.step2?.alternateIdType || '',
-    documentNumber: currentLead?.formData?.step2?.documentNumber || '',
     dob: currentLead?.dob || '',
     age: currentLead?.age || 0,
     gender: currentLead?.gender || '',
-    maritalStatus: currentLead?.formData?.step2?.maritalStatus || '',
-    email: currentLead?.formData?.step2?.email || '',
   });
 
   const [panValidationStatus, setPanValidationStatus] = useState<ValidationStatus>('pending');
@@ -158,7 +150,6 @@ export default function Step2Page() {
   const [nameMismatchReason, setNameMismatchReason] = useState(currentLead?.formData?.step2?.nameMismatchReason || '');
   const [isPanTouched, setIsPanTouched] = useState(false);
   const [isVerifyingPan, setIsVerifyingPan] = useState(false);
-  const [emailError, setEmailError] = useState('');
   const [panFormatError, setPanFormatError] = useState('');
   const [dobMismatch, setDobMismatch] = useState(false);
   const [nameMismatch, setNameMismatch] = useState(false);
@@ -233,17 +224,10 @@ export default function Step2Page() {
         setFormData(prev => ({
             ...prev,
             customerType: 'individual',
-            hasPan: step2Data.hasPan || 'yes',
             pan: currentLead.panNumber || '',
-            panUnavailabilityReason: step2Data.panUnavailabilityReason || '',
-            panUnavailabilityNotes: step2Data.panUnavailabilityNotes || '',
-            alternateIdType: step2Data.alternateIdType || '',
-            documentNumber: step2Data.documentNumber || '',
             dob: currentLead.dob || '',
             age: currentLead.age || 0,
             gender: currentLead.gender || '',
-            maritalStatus: step2Data.maritalStatus || '',
-            email: step2Data.email || '',
         }));
         setLocalFirstName(currentLead.customerFirstName || '');
         setLocalLastName(currentLead.customerLastName || '');
@@ -259,11 +243,9 @@ export default function Step2Page() {
   // Removed: PAN validation should only trigger after DOB is set, not on PAN input change
   
   const handlePanInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    if (formData.hasPan === 'yes') {
-        const newPan = e.target.value.toUpperCase();
-        if (newPan !== formData.pan || panValidationStatus === 'pending') {
-             setFormData(prev => ({...prev, pan: newPan}));
-        }
+    const newPan = e.target.value.toUpperCase();
+    if (newPan !== formData.pan || panValidationStatus === 'pending') {
+         setFormData(prev => ({...prev, pan: newPan}));
     }
   };
 
@@ -273,7 +255,7 @@ export default function Step2Page() {
     setNameMismatchReason(mismatchReason);
     
     // Re-trigger PAN validation after name change if PAN and DOB are present
-    if (formData.hasPan === 'yes' && formData.pan.length === 10 && formData.dob) {
+    if (formData.pan.length === 10 && formData.dob) {
       handlePanValidation(formData.pan, newFirstName, newLastName, formData.dob);
     }
   };
@@ -289,99 +271,64 @@ export default function Step2Page() {
         age--;
       }
       setFormData({ ...formData, dob: dobString, age: age });
-      
-      // Trigger PAN verification after DOB is set
-      if (formData.hasPan === 'yes' && formData.pan.length === 10) {
-        handlePanValidation(formData.pan, localFirstName, localLastName, dobString);
-      }
+      // PAN validation will be triggered via button now, not automatically
     }
   };
 
-  const handleEmailBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    const email = e.target.value;
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        setEmailError('Please enter a valid email address.');
-    } else {
-        setEmailError('');
+  const handleValidatePan = () => {
+    if (formData.pan.length === 10 && formData.dob) {
+      handlePanValidation(formData.pan, localFirstName, localLastName, formData.dob);
     }
   };
 
-  const handleNext = () => {
+  const handleSave = () => {
     if (!currentLead) return;
     
-    if (formData.hasPan === 'yes' && panValidationStatus === 'invalid') {
-        return;
+    if (panValidationStatus === 'invalid') {
+      return;
     }
     
     updateLead(currentLead.id, {
-      formData: { ...currentLead.formData, step2: { ...formData, nameMismatchReason } },
+      formData: { 
+        ...currentLead.formData, 
+        step2: { ...formData, nameMismatchReason },
+      },
       customerFirstName: localFirstName,
       customerLastName: localLastName,
-      panNumber: formData.hasPan === 'yes' ? formData.pan : '',
+      panNumber: formData.pan,
       dob: formData.dob,
       age: formData.age,
       gender: formData.gender,
-      currentStep: 3,
     });
-    router.push('/lead/step3');
+    
+    router.push('/lead/new-lead-info');
   };
 
-  const handlePrevious = () => {
-    router.push('/lead/step1');
+  const handleExit = () => {
+    router.push('/lead/new-lead-info');
   };
   
-  const isPanValidAndMatched = formData.hasPan === 'yes' && (panValidationStatus === 'valid' || (panValidationStatus === 'mismatch' && !dobMismatch));
-  const isNoPanValid = formData.hasPan === 'no' && formData.panUnavailabilityReason && formData.alternateIdType && formData.documentNumber;
+  const isPanValidAndMatched = panValidationStatus === 'valid' || (panValidationStatus === 'mismatch' && !dobMismatch);
   
-  const canProceed = formData.dob && formData.gender && formData.maritalStatus && !emailError && !dobMismatch && (isPanValidAndMatched || isNoPanValid);
-    
-  const customerFullName = `${localFirstName} ${localLastName}`.trim();
-  const isNameMismatch = panValidationStatus === 'mismatch';
+  const canProceed = formData.dob && formData.gender && formData.pan.length === 10 && !dobMismatch && isPanValidAndMatched;
+  
+  // Check if PAN validation needs to be done
+  const needsPanValidation = formData.pan.length === 10 && formData.dob && (panValidationStatus === 'pending' || panValidationStatus === 'mismatch');
 
   return (
-    <DashboardLayout title="Customer Details" showNotifications={false} showExitButton={true}>
+    <DashboardLayout title="Customer Details" showNotifications={false} showExitButton={true} onExit={handleExit}>
       <NameEditDialog
-            isOpen={isNameEditOpen}
-            setIsOpen={setIsNameEditOpen}
-            currentFirstName={localFirstName}
-            currentLastName={localLastName}
-            currentMismatchReason={nameMismatchReason}
-            onSave={handleNameSave}
-        />
+        isOpen={isNameEditOpen}
+        setIsOpen={setIsNameEditOpen}
+        currentFirstName={localFirstName}
+        currentLastName={localLastName}
+        currentMismatchReason={nameMismatchReason}
+        onSave={handleNameSave}
+      />
         
       <div className="max-w-2xl mx-auto pb-24">
-        <ProgressBar currentStep={2} totalSteps={10} />
-        
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
             <div className="space-y-4">
-                 <div className="flex items-start justify-between">
-                    <div>
-                        <Label className="block text-xs font-medium text-neutral mb-1">Customer Name</Label>
-                        <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-[#003366]">{customerFullName || 'N/A'}</p>
-                            {isNameMismatch && (
-                                <AlertTriangle className="text-yellow-600 w-4 h-4" />
-                            )}
-                        </div>
-                    </div>
-                    <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => setIsNameEditOpen(true)}
-                        className='w-8 h-8 rounded-full flex-shrink-0'
-                        title="Edit Customer Name"
-                        disabled={!isNameMismatch}
-                    >
-                        <Edit className="w-4 h-4 text-blue-600" />
-                    </Button>
-                </div>
-                <div>
-                    <Label className="block text-xs font-medium text-neutral mb-1">Mobile Number</Label>
-                    <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-[#003366]">{currentLead?.customerMobile ? `+91-${currentLead.customerMobile}` : 'N/A'}</p>
-                        <CheckCircle className="text-[#16A34A] w-4 h-4" />
-                    </div>
-                </div>
                  <div>
                     <Label className="block text-xs font-medium text-neutral mb-1">Customer Type</Label>
                     <p className="text-sm font-medium text-[#003366]">Individual</p>
@@ -396,26 +343,7 @@ export default function Step2Page() {
           
             <div className="space-y-6">
                 <div>
-                    <Label className="block text-sm font-medium text-[#003366] mb-3">Does the customer have a PAN? *</Label>
-                    <RadioGroup value={formData.hasPan} onValueChange={(value) => {
-                        setFormData({ ...formData, hasPan: value, pan: '' });
-                        setPanValidationStatus('pending');
-                        setPanApiName('');
-                        setIsPanTouched(false);
-                        // Clear all error states when switching PAN status
-                        setDobMismatch(false);
-                        setNameMismatch(false);
-                        setPanFormatError('');
-                    }} className="flex gap-4">
-                        <div className="flex items-center space-x-2"><RadioGroupItem value="yes" id="pan-yes" /><Label htmlFor="pan-yes" className="font-normal">Yes</Label></div>
-                        <div className="flex items-center space-x-2"><RadioGroupItem value="no" id="pan-no" /><Label htmlFor="pan-no" className="font-normal">No</Label></div>
-                    </RadioGroup>
-                </div>
-                
-                {formData.hasPan === 'yes' && (
-                    <div className="space-y-4">
-                        <div>
-                            <Label htmlFor="pan-input" className="text-sm font-medium text-[#003366] mb-2 block">PAN Number *</Label>
+                    <Label htmlFor="pan-input" className="text-sm font-medium text-[#003366] mb-2 block">PAN Number *</Label>
                              <div className="relative flex items-center">
                                 <Input 
                                     id="pan-input" 
@@ -437,10 +365,10 @@ export default function Step2Page() {
                                                 setDobMismatch(false);
                                             } else {
                                                 setPanFormatError('');
-                                                // If DOB is set, trigger full validation
-                                                if (formData.dob) {
-                                                    handlePanValidation(newPan, localFirstName, localLastName, formData.dob);
-                                                }
+                                                // Clear validation status to allow manual validation
+                                                setPanValidationStatus('pending');
+                                                setNameMismatch(false);
+                                                setDobMismatch(false);
                                             }
                                         } else {
                                             setPanFormatError('');
@@ -496,48 +424,7 @@ export default function Step2Page() {
                                 <p className="text-sm text-[#003366]">Name on PAN: <span className="font-medium">{panApiName}</span></p>
                             </div>
                         )}
-                    </div>
-                )}
-                
-                {formData.hasPan === 'no' && (
-                    <div className="space-y-4">
-                        <div>
-                            <Label className="text-sm font-medium text-[#003366] mb-2 block">PAN Unavailability Reason *</Label>
-                            <Select value={formData.panUnavailabilityReason} onValueChange={(v: string) => setFormData({...formData, panUnavailabilityReason: v})}>
-                                <SelectTrigger className="h-12 rounded-xl"><SelectValue placeholder="Select reason" /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="not-handy">Not handy</SelectItem>
-                                    <SelectItem value="not-allotted">Not allotted</SelectItem>
-                                    <SelectItem value="name-change">Name change in progress</SelectItem>
-                                    <SelectItem value="other">Other</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        {(formData.panUnavailabilityReason === 'other' || formData.panUnavailabilityReason === 'name-change') && (
-                            <div>
-                                <Label className="text-sm font-medium text-[#003366] mb-2 block">Notes</Label>
-                                <Textarea value={formData.panUnavailabilityNotes} onChange={e => setFormData({...formData, panUnavailabilityNotes: e.target.value})} placeholder="Please provide additional details..." className="rounded-xl"/>
-                            </div>
-                        )}
-                        <div>
-                            <Label className="text-sm font-medium text-[#003366] mb-2 block">Alternate Primary ID Type *</Label>
-                            <Select value={formData.alternateIdType} onValueChange={(v: string) => setFormData({...formData, alternateIdType: v})}>
-                                <SelectTrigger className="h-12 rounded-xl"><SelectValue placeholder="Select ID Type" /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Passport">Passport</SelectItem>
-                                    <SelectItem value="Voter ID">Voter ID</SelectItem>
-                                    <SelectItem value="Driving License">Driving License</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label className="text-sm font-medium text-[#003366] mb-2 block">Document Number *</Label>
-                            <Input value={formData.documentNumber} onChange={e => setFormData({...formData, documentNumber: e.target.value})} placeholder="Enter document number" className="h-12 rounded-xl"/>
-                        </div>
-                    </div>
-                )}
-
-            </div>
+                </div>
             
             <div className="border-t border-gray-100 pt-6 mt-6 space-y-6">
                  <h3 className="text-sm font-semibold text-[#003366]">Personal Details</h3>
@@ -566,52 +453,32 @@ export default function Step2Page() {
                         <Label htmlFor="g-not-specified" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer", formData.gender === 'not-specified' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300')}><RadioGroupItem value="not-specified" id="g-not-specified" className="sr-only" />Not Specified</Label>
                     </RadioGroup>
                 </div>
-                <div>
-                    <Label className="block text-sm font-medium text-[#003366] mb-3">Marital Status *</Label>
-                     <RadioGroup value={formData.maritalStatus} onValueChange={(value) => setFormData({ ...formData, maritalStatus: value })} className="grid grid-cols-3 gap-2">
-                        <Label htmlFor="m-single" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer", formData.maritalStatus === 'single' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300')}><RadioGroupItem value="single" id="m-single" className="sr-only" />Single</Label>
-                        <Label htmlFor="m-married" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer", formData.maritalStatus === 'married' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300')}><RadioGroupItem value="married" id="m-married" className="sr-only" />Married</Label>
-                        <Label htmlFor="m-divorced" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer", formData.maritalStatus === 'divorced' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300')}><RadioGroupItem value="divorced" id="m-divorced" className="sr-only" />Divorced</Label>
-                    </RadioGroup>
-                </div>
-                <div>
-                    <Label className="text-sm font-medium text-[#003366] mb-2 block">Email (Optional)</Label>
-                    <Input type="email" value={formData.email} onBlur={handleEmailBlur} onChange={e => { setFormData({...formData, email: e.target.value}); if (emailError) setEmailError(''); }} placeholder="customer@example.com" className={cn("h-12 rounded-xl", emailError && "border-red-500")}/>
-                    {emailError && <p className="text-xs text-red-600 mt-1">{emailError}</p>}
-                </div>
             </div>
             
         </div>
-        
-        {/* Important Note - PAN Notification */}
-        {formData.hasPan === 'no' && (
-          <div className="max-w-2xl mx-auto pb-6">
-            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-start gap-3">
-              <div className="flex-shrink-0 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mt-0.5">
-                <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-blue-900 mb-1">Important Note</h4>
-                <p className="text-sm text-blue-800">
-                  PAN must be provided before sanction. A follow-up task will be created automatically.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
-            <div className="flex gap-3 max-w-2xl mx-auto">
-                <Button onClick={handlePrevious} variant="outline" className="flex-1 h-12 rounded-lg">
-                  Previous
-                </Button>
-                <Button onClick={handleNext} disabled={!canProceed} className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e]">
-                  Next
-                </Button>
-            </div>
+      
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
+        <div className="flex gap-3 max-w-2xl mx-auto">
+          {needsPanValidation ? (
+            <Button 
+              onClick={handleValidatePan} 
+              disabled={!formData.dob || isVerifyingPan}
+              className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              {isVerifyingPan ? 'Validating...' : 'Validate Pan'}
+            </Button>
+          ) : (
+            <Button 
+              onClick={handleSave} 
+              disabled={!canProceed}
+              className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              Save Information
+            </Button>
+          )}
         </div>
+      </div>
     </DashboardLayout>
   );
 }

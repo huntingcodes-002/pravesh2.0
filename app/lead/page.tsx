@@ -16,11 +16,12 @@ export default function LeadFlowPage() {
     // Redirect to the current step
     const currentStep = currentLead.currentStep || 1;
     
-    // Step 2 and above should go to new-lead-info page
-    if (currentStep >= 2) {
+    // Step 1 should go to new-lead page
+    if (currentStep === 1) {
+      router.replace('/lead/new-lead');
+    } else if (currentStep >= 2) {
+      // Step 2 and above should go to new-lead-info page
       router.replace('/lead/new-lead-info');
-    } else {
-      router.replace(`/lead/step${currentStep}`);
     }
   }, [currentLead, router]);
   return (

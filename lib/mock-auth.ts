@@ -103,3 +103,45 @@ export function validateFile(fileName: string): { valid: boolean; error?: string
   
   return { valid: false, error: 'File name is invalid for mock validation.' };
 }
+
+// Extract Aadhaar data from uploaded file
+export function extractAadhaarData(fileName: string, documentType?: string): { 
+  addressLine1?: string; 
+  addressLine2?: string; 
+  addressLine3?: string; 
+  city?: string;
+  pincode?: string;
+} | null {
+  // Check if it's an Aadhaar document (either by filename or documentType)
+  const isAadhaarFile = fileName.toLowerCase() === 'aadhaar.jpg' || 
+                       fileName.toLowerCase().includes('aadhaar') ||
+                       documentType === 'Adhaar';
+  
+  if (isAadhaarFile) {
+    return {
+      addressLine1: '9 Johar Mansion',
+      addressLine2: '106 Hill Road',
+      addressLine3: 'Bandra',
+      city: 'Mumbai', // City extracted from Aadhaar (or can be derived from addressLine3)
+      pincode: '400050'
+    };
+  }
+  return null;
+}
+
+// Extract PAN data from uploaded file
+export function extractPANData(fileName: string): {
+  panNumber?: string;
+  dateOfBirth?: string;
+  gender?: string;
+} | null {
+  if (fileName.toLowerCase() === 'pan.jpg') {
+    // Convert "24th August 2002" to "2002-08-24" format
+    return {
+      panNumber: 'ABCDE1234F',
+      dateOfBirth: '2002-08-24',
+      gender: 'male'
+    };
+  }
+  return null;
+}
