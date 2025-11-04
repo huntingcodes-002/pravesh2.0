@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Calendar, CheckCircle, AlertTriangle, Loader, Edit, X } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { validatePANDetails, PAN_DATA } from '@/lib/mock-auth'; 
+import { submitPersonalInfo, isApiError } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
+import { CheckCircle2 } from 'lucide-react';
 
 type ValidationStatus = 'pending' | 'valid' | 'invalid' | 'mismatch';
 
@@ -136,6 +138,10 @@ function NameEditDialog({
 export default function Step2Page() {
   const { currentLead, updateLead } = useLead();
   const router = useRouter();
+  const { toast } = useToast();
+  
+  // Check if this section is already completed
+  const isCompleted = currentLead?.step2Completed === true;
   
   const [formData, setFormData] = useState({
     customerType: 'individual',
@@ -143,6 +149,7 @@ export default function Step2Page() {
     dob: currentLead?.dob || '',
     age: currentLead?.age || 0,
     gender: currentLead?.gender || '',
+    email: currentLead?.formData?.step2?.email || '',
   });
 
   const [panValidationStatus, setPanValidationStatus] = useState<ValidationStatus>('pending');
@@ -158,65 +165,6 @@ export default function Step2Page() {
   const [localFirstName, setLocalFirstName] = useState(currentLead?.customerFirstName || '');
   const [localLastName, setLocalLastName] = useState(currentLead?.customerLastName || '');
 
-  const handlePanValidation = React.useCallback((pan: string, firstName: string, lastName: string, dob?: string) => {
-    // Check PAN format first
-    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
-    if (!panRegex.test(pan)) {
-        setPanFormatError('Invalid Pan');
-        setPanValidationStatus('invalid');
-        setPanApiName('');
-        setNameMismatch(false);
-        setDobMismatch(false);
-        return;
-    }
-    setPanFormatError('');
-    
-    if (pan.length !== 10) {
-        setPanValidationStatus('pending');
-        setPanApiName('');
-        setNameMismatch(false);
-        setDobMismatch(false);
-        return;
-    }
-    setIsVerifyingPan(true);
-    setPanValidationStatus('pending');
-    
-    setTimeout(() => {
-        const result = validatePANDetails(pan, 'Mr', firstName, lastName, dob);
-        const panData = PAN_DATA.find((p: any) => p.pan.toUpperCase() === pan.toUpperCase());
-
-        if (panData) {
-            const fetchedName = `${panData.firstName} ${panData.lastName}`.trim().toUpperCase();
-            setPanApiName(fetchedName);
-            
-            // Check for name mismatch
-            if (!result.firstNameMatch || !result.lastNameMatch) {
-                setNameMismatch(true);
-            } else {
-                setNameMismatch(false);
-            }
-            
-            // Check for DOB mismatch
-            if (dob && !result.dateOfBirthMatch) {
-                setDobMismatch(true);
-            } else {
-                setDobMismatch(false);
-            }
-            
-            if (result.firstNameMatch && result.lastNameMatch && result.dateOfBirthMatch) {
-                setPanValidationStatus('valid');
-            } else {
-                setPanValidationStatus('mismatch');
-            }
-        } else {
-            setPanValidationStatus('invalid');
-            setPanApiName('');
-            setNameMismatch(false);
-            setDobMismatch(false);
-        }
-        setIsVerifyingPan(false);
-    }, 1500);
-  }, []);
 
   useEffect(() => {
     if (currentLead) {
@@ -228,6 +176,7 @@ export default function Step2Page() {
             dob: currentLead.dob || '',
             age: currentLead.age || 0,
             gender: currentLead.gender || '',
+            email: currentLead.formData?.step2?.email || '',
         }));
         setLocalFirstName(currentLead.customerFirstName || '');
         setLocalLastName(currentLead.customerLastName || '');
@@ -235,10 +184,10 @@ export default function Step2Page() {
         
         if (currentLead.panNumber) {
             setIsPanTouched(true);
-            handlePanValidation(currentLead.panNumber, currentLead.customerFirstName || '', currentLead.customerLastName || '', currentLead.dob);
+            // PAN validation now only happens via API when user clicks "Validate Pan"
         }
     }
-  }, [currentLead, handlePanValidation]);
+  }, [currentLead]);
 
   // Removed: PAN validation should only trigger after DOB is set, not on PAN input change
   
@@ -254,9 +203,10 @@ export default function Step2Page() {
     setLocalLastName(newLastName);
     setNameMismatchReason(mismatchReason);
     
-    // Re-trigger PAN validation after name change if PAN and DOB are present
-    if (formData.pan.length === 10 && formData.dob) {
-      handlePanValidation(formData.pan, newFirstName, newLastName, formData.dob);
+    // PAN validation now only happens via API when user clicks "Validate Pan"
+    // Reset validation status if name is changed after validation
+    if (panValidationStatus === 'valid' || panValidationStatus === 'mismatch') {
+      setPanValidationStatus('pending');
     }
   };
 
@@ -275,9 +225,194 @@ export default function Step2Page() {
     }
   };
 
-  const handleValidatePan = () => {
-    if (formData.pan.length === 10 && formData.dob) {
-      handlePanValidation(formData.pan, localFirstName, localLastName, formData.dob);
+  const handleValidatePan = async () => {
+    // Prevent validation if section is already completed
+    if (isCompleted) {
+      toast({
+        title: 'Section Completed',
+        description: 'This section has already been completed and submitted. It is now read-only.',
+        variant: 'default',
+      });
+      return;
+    }
+
+    if (!currentLead?.appId) {
+      toast({
+        title: 'Error',
+        description: 'Application ID not found. Please create a new lead first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (formData.pan.length !== 10 || !formData.dob || !formData.gender) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in PAN, Date of Birth, and Gender before validating.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsVerifyingPan(true);
+    setPanValidationStatus('pending');
+
+    try {
+      // Endpoint 3: Submit Personal Info
+      const response = await submitPersonalInfo({
+        application_id: currentLead.appId,
+        customer_type: 'individual',
+        pan_number: formData.pan,
+        date_of_birth: formData.dob,
+        gender: formData.gender,
+        email: formData.email || undefined,
+      });
+
+      if (isApiError(response)) {
+        // On API error, don't mark as completed - allow retry
+        if (currentLead) {
+          updateLead(currentLead.id, {
+            step2Completed: false, // Ensure not marked as completed on error
+          });
+        }
+        
+        toast({
+          title: 'Validation Failed',
+          description: response.error || 'Failed to validate PAN. Please try again.',
+          variant: 'destructive',
+        });
+        setPanValidationStatus('invalid');
+        setIsVerifyingPan(false);
+        return;
+      }
+
+      // Debug: Log the full response
+      console.log('PAN Validation Response:', response);
+      console.log('Response structure:', {
+        success: response.success,
+        hasData: !!(response as any).data,
+        dataKeys: response.success ? Object.keys((response as any).data || {}) : [],
+      });
+
+      // Success response - apiFetch returns the backend response as ApiSuccess<PersonalInfoResponse>
+      // The backend response structure: { success: true, message, application_id, next_step, data: { ... } }
+      // apiFetch wraps it, so response.data is PersonalInfoResponse which has its own data field
+      if (response.success) {
+        // Try multiple ways to access the response data
+        // The response might be: response.data.data or just response.data
+        const personalInfoResponse = (response as any).data;
+        const responseData = personalInfoResponse?.data || personalInfoResponse;
+        
+        console.log('PersonalInfoResponse:', personalInfoResponse);
+        console.log('Response data:', responseData);
+        console.log('PAN Verification Status:', responseData?.pan_verification_status);
+        
+        // Check if we have pan_verification_status in the response
+        const panVerificationStatus = responseData?.pan_verification_status;
+        
+        if (!panVerificationStatus) {
+          // If pan_verification_status is not found, don't set to invalid - just log and wait
+          console.warn('PAN verification status not found in response. Response structure:', {
+            personalInfoResponse,
+            responseData,
+            responseKeys: response.success ? Object.keys((response as any) || {}) : [],
+          });
+          // Keep the status as pending rather than invalid
+          setPanValidationStatus('pending');
+          setIsVerifyingPan(false);
+          toast({
+            title: 'Warning',
+            description: 'PAN verification status not found in response. Please try again.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        
+        // Update validation status based on PAN verification status
+        if (panVerificationStatus === 'verified') {
+          console.log('Setting PAN validation status to valid');
+          setPanValidationStatus('valid');
+          
+          // Extract name from masked PAN response if available
+          if (responseData.pan_number) {
+            // PAN is masked like "AEE***1A", we can't extract name from this
+            // But we can mark it as verified
+            setPanApiName('Verified'); // Placeholder since name isn't in response
+          }
+          
+          // Update lead context with response data and mark as completed
+          if (currentLead) {
+            updateLead(currentLead.id, {
+              panNumber: responseData.pan_number || formData.pan,
+              dob: responseData.date_of_birth || formData.dob,
+              gender: responseData.gender || formData.gender,
+              step2Completed: true, // Mark section as completed
+              formData: {
+                ...currentLead.formData,
+                step2: {
+                  ...formData,
+                  email: responseData.email || formData.email,
+                },
+              },
+            });
+          }
+
+          toast({
+            title: 'Success',
+            description: 'PAN verified successfully. Personal information saved and marked as completed.',
+            className: 'bg-green-50 border-green-200',
+          });
+        } else {
+          // PAN verification status exists but is not 'verified'
+          console.log('Setting PAN validation status to mismatch - status:', panVerificationStatus);
+          setPanValidationStatus('mismatch');
+          
+          // Update lead context with response data even on mismatch
+          // Don't mark as completed if there's a mismatch - allow retry
+          if (currentLead) {
+            updateLead(currentLead.id, {
+              panNumber: responseData.pan_number || formData.pan,
+              dob: responseData.date_of_birth || formData.dob,
+              gender: responseData.gender || formData.gender,
+              step2Completed: false, // Don't mark as completed on mismatch - allow retry
+              formData: {
+                ...currentLead.formData,
+                step2: {
+                  ...formData,
+                  email: responseData.email || formData.email,
+                },
+              },
+            });
+          }
+
+          toast({
+            title: 'Validation Issue',
+            description: 'PAN verification found mismatches. Please review the details.',
+            variant: 'destructive',
+          });
+        }
+      } else {
+        // Response is not successful (shouldn't happen if isApiError didn't catch it)
+        console.error('Response is not successful:', response);
+        setPanValidationStatus('pending');
+      }
+
+      setIsVerifyingPan(false);
+    } catch (error: any) {
+      // On error, don't mark as completed - allow retry
+      if (currentLead) {
+        updateLead(currentLead.id, {
+          step2Completed: false, // Ensure not marked as completed on error
+        });
+      }
+      
+      toast({
+        title: 'Validation Failed',
+        description: error.message || 'Failed to validate PAN. Please try again.',
+        variant: 'destructive',
+      });
+      setPanValidationStatus('invalid');
+      setIsVerifyingPan(false);
     }
   };
 
@@ -308,12 +443,35 @@ export default function Step2Page() {
     router.push('/lead/new-lead-info');
   };
   
-  const isPanValidAndMatched = panValidationStatus === 'valid' || (panValidationStatus === 'mismatch' && !dobMismatch);
+  // Check if PAN validation needs to be done - only show Validate Pan button if not already verified
+  const needsPanValidation = formData.pan.length === 10 && formData.dob && panValidationStatus !== 'valid' && (panValidationStatus === 'pending' || panValidationStatus === 'mismatch');
   
-  const canProceed = formData.dob && formData.gender && formData.pan.length === 10 && !dobMismatch && isPanValidAndMatched;
+  // Enable Save Information button when:
+  // 1. PAN is verified (panValidationStatus === 'valid') - enable immediately
+  // 2. Otherwise, require all fields and no DOB mismatch
+  const canProceed = (() => {
+    // If PAN is verified by API, enable button immediately (backend has validated everything)
+    if (panValidationStatus === 'valid') {
+      return true; // Enable immediately when verified
+    }
+    
+    // If PAN is not verified yet, check required fields
+    const hasRequiredFields = formData.dob && formData.gender && formData.pan.length === 10;
+    return hasRequiredFields && !dobMismatch && (panValidationStatus === 'mismatch' || panValidationStatus === 'pending');
+  })();
   
-  // Check if PAN validation needs to be done
-  const needsPanValidation = formData.pan.length === 10 && formData.dob && (panValidationStatus === 'pending' || panValidationStatus === 'mismatch');
+  // Debug logging
+  React.useEffect(() => {
+    console.log('Save Information Button Debug:', {
+      canProceed,
+      panValidationStatus,
+      hasDOB: !!formData.dob,
+      hasGender: !!formData.gender,
+      panLength: formData.pan.length,
+      dobMismatch,
+      needsPanValidation,
+    });
+  }, [canProceed, panValidationStatus, formData.dob, formData.gender, formData.pan.length, dobMismatch, needsPanValidation]);
 
   return (
     <DashboardLayout title="Customer Details" showNotifications={false} showExitButton={true} onExit={handleExit}>
@@ -327,12 +485,27 @@ export default function Step2Page() {
       />
         
       <div className="max-w-2xl mx-auto pb-24">
+        {isCompleted && (
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-green-600" />
+            <p className="text-sm font-medium text-green-800">
+              Customer Details section has been completed and submitted. This section is now read-only.
+            </p>
+          </div>
+        )}
+        
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
-            <div className="space-y-4">
+            <div className="space-y-4 flex items-center justify-between">
                  <div>
                     <Label className="block text-xs font-medium text-neutral mb-1">Customer Type</Label>
                     <p className="text-sm font-medium text-[#003366]">Individual</p>
                 </div>
+                {isCompleted && (
+                  <Badge className="bg-green-100 text-green-800 border-green-200">
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    Completed
+                  </Badge>
+                )}
             </div>
         </div>
 
@@ -351,6 +524,7 @@ export default function Step2Page() {
                                     placeholder="ABCDE1234F" 
                                     value={formData.pan} 
                                     onChange={e => {
+                                        if (isCompleted) return; // Prevent editing when completed
                                         setIsPanTouched(true);
                                         const newPan = e.target.value.toUpperCase();
                                         setFormData(prev => ({...prev, pan: newPan}));
@@ -378,7 +552,8 @@ export default function Step2Page() {
                                         }
                                     }}
                                     onBlur={handlePanInputBlur} 
-                                    className={cn("w-full h-12 px-4 py-3 border-gray-300 rounded-xl uppercase tracking-wider", panValidationStatus === 'invalid' && 'border-red-500')}
+                                    disabled={isCompleted}
+                                    className={cn("w-full h-12 px-4 py-3 border-gray-300 rounded-xl uppercase tracking-wider", panValidationStatus === 'invalid' && 'border-red-500', isCompleted && 'bg-gray-50 cursor-not-allowed')}
                                 />
                                 <div className="absolute right-3 h-full flex items-center">
                                     {isVerifyingPan && <Loader className="text-[#0072CE] animate-spin w-5 h-5" />}
@@ -415,13 +590,12 @@ export default function Step2Page() {
                         
                         {panValidationStatus === 'valid' && !isVerifyingPan && (
                              <div className="bg-[#16A34A]/5 border border-[#16A34A]/20 rounded-xl p-4">
-                                <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
                                         <CheckCircle className="text-[#16A34A] w-5 h-5" />
                                         <span className="text-sm font-medium text-[#16A34A]">PAN Verified</span>
                                     </div>
                                 </div>
-                                <p className="text-sm text-[#003366]">Name on PAN: <span className="font-medium">{panApiName}</span></p>
                             </div>
                         )}
                 </div>
@@ -435,23 +609,56 @@ export default function Step2Page() {
                     </Label>
                     <Popover>
                         <PopoverTrigger asChild>
-                            <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal h-12 rounded-xl", !formData.dob && "text-muted-foreground")}>
+                            <Button 
+                                variant={"outline"} 
+                                disabled={isCompleted}
+                                className={cn("w-full justify-start text-left font-normal h-12 rounded-xl", !formData.dob && "text-muted-foreground", isCompleted && "bg-gray-50 cursor-not-allowed")}
+                            >
                                 <Calendar className="mr-2 h-4 w-4" />
                                 {formData.dob ? format(new Date(formData.dob), "PPP") : <span>Pick a date</span>}
                             </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0"><DatePicker mode="single" selected={formData.dob ? new Date(formData.dob) : undefined} onSelect={handleDateChange} captionLayout="dropdown-buttons" fromYear={1920} toYear={new Date().getFullYear()} /></PopoverContent>
+                        {!isCompleted && (
+                          <PopoverContent className="w-auto p-0">
+                            <DatePicker mode="single" selected={formData.dob ? new Date(formData.dob) : undefined} onSelect={handleDateChange} captionLayout="dropdown-buttons" fromYear={1920} toYear={new Date().getFullYear()} />
+                          </PopoverContent>
+                        )}
                     </Popover>
                     {formData.age > 0 && <div className="mt-3"><Badge className="bg-[#E6F0FA] text-[#0072CE]">Age: {formData.age} years</Badge></div>}
                 </div>
                  <div>
                     <Label className="block text-sm font-medium text-[#003366] mb-3">Gender *</Label>
-                     <RadioGroup value={formData.gender} onValueChange={(value) => setFormData({ ...formData, gender: value })} className="grid grid-cols-2 gap-2">
-                        <Label htmlFor="g-male" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer", formData.gender === 'male' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300')}><RadioGroupItem value="male" id="g-male" className="sr-only" /><span className="text-lg"></span>Male</Label>
-                        <Label htmlFor="g-female" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer", formData.gender === 'female' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300')}><RadioGroupItem value="female" id="g-female" className="sr-only" />Female</Label>
-                        <Label htmlFor="g-other" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer", formData.gender === 'other' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300')}><RadioGroupItem value="other" id="g-other" className="sr-only" />Other</Label>
-                        <Label htmlFor="g-not-specified" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer", formData.gender === 'not-specified' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300')}><RadioGroupItem value="not-specified" id="g-not-specified" className="sr-only" />Not Specified</Label>
+                     <RadioGroup 
+                        value={formData.gender} 
+                        onValueChange={(value) => {
+                          if (!isCompleted) {
+                            setFormData({ ...formData, gender: value });
+                          }
+                        }}
+                        disabled={isCompleted}
+                        className="grid grid-cols-2 gap-2"
+                      >
+                        <Label htmlFor="g-male" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all", formData.gender === 'male' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300', isCompleted ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}><RadioGroupItem value="male" id="g-male" className="sr-only" disabled={isCompleted} /><span className="text-lg"></span>Male</Label>
+                        <Label htmlFor="g-female" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all", formData.gender === 'female' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300', isCompleted ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}><RadioGroupItem value="female" id="g-female" className="sr-only" disabled={isCompleted} />Female</Label>
+                        <Label htmlFor="g-other" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all", formData.gender === 'other' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300', isCompleted ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}><RadioGroupItem value="other" id="g-other" className="sr-only" disabled={isCompleted} />Other</Label>
+                        <Label htmlFor="g-not-specified" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all", formData.gender === 'not-specified' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300', isCompleted ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}><RadioGroupItem value="not-specified" id="g-not-specified" className="sr-only" disabled={isCompleted} />Not Specified</Label>
                     </RadioGroup>
+                </div>
+                 <div>
+                    <Label htmlFor="email-input" className="text-sm font-medium text-[#003366] mb-2 block">Email</Label>
+                    <Input 
+                        id="email-input" 
+                        type="email"
+                        placeholder="example@email.com" 
+                        value={formData.email} 
+                        onChange={(e) => {
+                          if (!isCompleted) {
+                            setFormData({ ...formData, email: e.target.value });
+                          }
+                        }}
+                        disabled={isCompleted}
+                        className={cn("w-full h-12 px-4 py-3 border-gray-300 rounded-xl", isCompleted && "bg-gray-50 cursor-not-allowed")}
+                    />
                 </div>
             </div>
             
@@ -463,7 +670,7 @@ export default function Step2Page() {
           {needsPanValidation ? (
             <Button 
               onClick={handleValidatePan} 
-              disabled={!formData.dob || isVerifyingPan}
+              disabled={isCompleted || !formData.dob || isVerifyingPan}
               className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
               {isVerifyingPan ? 'Validating...' : 'Validate Pan'}
@@ -471,7 +678,7 @@ export default function Step2Page() {
           ) : (
             <Button 
               onClick={handleSave} 
-              disabled={!canProceed}
+              disabled={isCompleted || (panValidationStatus !== 'valid' && !canProceed)}
               className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
               Save Information

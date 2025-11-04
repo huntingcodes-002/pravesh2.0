@@ -59,6 +59,9 @@ export interface Lead {
     step9_eval?: any;
     step10?: any;
   };
+  // Completion status for sections
+  step2Completed?: boolean; // Customer Details (basic-details) completed
+  step3Completed?: boolean; // Address Details completed
   payments: PaymentSession[];
   createdAt: string;
   updatedAt: string;

@@ -4,13 +4,16 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
+import { submitAddressDetails, isApiError } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Badge } from '@/components/ui/badge';
 import { cn } from "@/lib/utils";
 
 interface Address {
@@ -18,14 +21,16 @@ interface Address {
   addressType: string;
   addressLine1: string;
   addressLine2: string;
-  addressLine3: string;
-  landmark: string;
   postalCode: string;
 }
 
 export default function Step3Page() {
   const { currentLead, updateLead } = useLead();
   const router = useRouter();
+  const { toast } = useToast();
+
+  // Check if this section is already completed
+  const isCompleted = currentLead?.step3Completed === true;
 
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
@@ -42,8 +47,6 @@ export default function Step3Page() {
           addressType: 'residential',
           addressLine1: '',
           addressLine2: '',
-          addressLine3: '',
-          landmark: '',
           postalCode: '',
         },
       ]);
@@ -58,28 +61,109 @@ export default function Step3Page() {
   };
 
   const handleRemoveAddress = (id: string) => {
+    if (isCompleted) return; // Prevent removing addresses when completed
     const remainingAddresses = addresses.filter((addr) => addr.id !== id);
     setAddresses(remainingAddresses);
   };
 
   const handleAddressChange = (id: string, field: keyof Address, value: any) => {
+    if (isCompleted) return; // Prevent editing when completed
     setAddresses(
       addresses.map((addr) => (addr.id === id ? { ...addr, [field]: value } : addr))
     );
   };
 
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!currentLead) return;
 
-    updateLead(currentLead.id, {
-      formData: {
-        ...currentLead.formData,
-        step3: { addresses },
-      },
-    });
-    
-    router.push('/lead/new-lead-info');
+    if (!currentLead.appId) {
+      toast({
+        title: 'Error',
+        description: 'Application ID not found. Please create a new lead first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Map frontend address format to backend format
+    // Remove address_line_3 and landmark - not required by backend
+    // Auto-send: city_id, latitude, longitude, is_primary, address_type (from dropdown)
+    const backendAddresses = addresses.map((addr, index) => ({
+      address_type: addr.addressType || 'residential', // From dropdown
+      address_line_1: addr.addressLine1 || '',
+      address_line_2: addr.addressLine2 || '',
+      pincode: addr.postalCode || '',
+      city_id: 1, // Auto-send: default city_id
+      latitude: "90", // Auto-send: default latitude
+      longitude: "90", // Auto-send: default longitude
+      is_primary: index === 0, // Auto-send: first address is primary
+    }));
+
+    try {
+      // Endpoint 4: Submit address details
+      const response = await submitAddressDetails({
+        application_id: currentLead.appId,
+        addresses: backendAddresses,
+      });
+
+      if (isApiError(response)) {
+        // On API error, don't mark as completed - allow retry
+        if (currentLead) {
+          updateLead(currentLead.id, {
+            step3Completed: false, // Ensure not marked as completed on error
+          });
+        }
+        
+        // Check if error is related to city_id validation
+        const errorDetails = (response as any).details?.validation_errors?.addresses;
+        let errorMessage = response.error || 'Failed to save address details. Please try again.';
+        
+        if (errorDetails) {
+          const cityError = Object.values(errorDetails).find((err: any) => err?.city_id);
+          if (cityError && (cityError as any).city_id) {
+            errorMessage = `City ID validation failed: ${(cityError as any).city_id[0]}. Please use a valid city ID from the database.`;
+          }
+        }
+        
+        toast({
+          title: 'Save Failed',
+          description: errorMessage,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Update local state and mark as completed
+      updateLead(currentLead.id, {
+        step3Completed: true, // Mark section as completed
+        formData: {
+          ...currentLead.formData,
+          step3: { addresses },
+        },
+      });
+
+      toast({
+        title: 'Success',
+        description: 'Address details saved successfully and marked as completed.',
+        className: 'bg-green-50 border-green-200',
+      });
+
+      router.push('/lead/new-lead-info');
+    } catch (error: any) {
+      // On error, don't mark as completed - allow retry
+      if (currentLead) {
+        updateLead(currentLead.id, {
+          step3Completed: false, // Ensure not marked as completed on error
+        });
+      }
+      
+      toast({
+        title: 'Save Failed',
+        description: error.message || 'Failed to save address details. Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleExit = () => {
@@ -90,7 +174,6 @@ export default function Step3Page() {
     (addr) =>
       addr.addressType &&
       addr.addressLine1 &&
-      addr.landmark &&
       addr.postalCode &&
       addr.postalCode.length === 6
   );
@@ -103,10 +186,27 @@ export default function Step3Page() {
       onExit={handleExit}
     >
       <div className="max-w-2xl mx-auto pb-28 px-4">
+        {isCompleted && (
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-green-600" />
+            <p className="text-sm font-medium text-green-800">
+              Address Details section has been completed and submitted. This section is now read-only.
+            </p>
+          </div>
+        )}
+        
         <div className="bg-white rounded-xl shadow-sm p-6 space-y-6 border border-gray-100">
-          <h2 className="text-xl font-semibold text-[#003366] mb-6">
-            Address Information
-          </h2>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-[#003366]">
+              Address Information
+            </h2>
+            {isCompleted && (
+              <Badge className="bg-green-100 text-green-800 border-green-200">
+                <CheckCircle2 className="w-3 h-3 mr-1" />
+                Completed
+              </Badge>
+            )}
+          </div>
 
           <div className="space-y-5">
             {addresses.map((address, index) => {
@@ -150,7 +250,7 @@ export default function Step3Page() {
 
                         {/* Right side - Icons (CHANGED HERE) */}
                         <div className="flex items-center gap-2 shrink-0 pl-2">
-                          {addresses.length > 1 && (
+                          {addresses.length > 1 && !isCompleted && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -159,6 +259,7 @@ export default function Step3Page() {
                                 handleRemoveAddress(address.id);
                               }}
                               className="hover:bg-red-50"
+                              disabled={isCompleted}
                             >
                               <Trash2 className="h-4 w-4 text-red-500" />
                             </Button>
@@ -187,8 +288,9 @@ export default function Step3Page() {
                               onValueChange={(value) =>
                                 handleAddressChange(address.id, 'addressType', value)
                               }
+                              disabled={isCompleted}
                             >
-                              <SelectTrigger className="h-12 rounded-lg">
+                              <SelectTrigger className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}>
                                 <SelectValue placeholder="Select address type" />
                               </SelectTrigger>
                               <SelectContent>
@@ -214,7 +316,8 @@ export default function Step3Page() {
                                 handleAddressChange(address.id, 'addressLine1', e.target.value)
                               }
                               placeholder="House/Flat No., Building Name"
-                              className="h-12 rounded-lg"
+                              disabled={isCompleted}
+                              className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}
                               maxLength={255}
                             />
                           </div>
@@ -230,39 +333,8 @@ export default function Step3Page() {
                                 handleAddressChange(address.id, 'addressLine2', e.target.value)
                               }
                               placeholder="Street Name, Area"
-                              className="h-12 rounded-lg"
-                              maxLength={255}
-                            />
-                          </div>
-
-                          <div>
-                            <Label className="text-sm font-medium text-[#003366] mb-2 block">
-                              Address Line 3
-                            </Label>
-                            <Input
-                              type="text"
-                              value={address.addressLine3}
-                              onChange={(e) =>
-                                handleAddressChange(address.id, 'addressLine3', e.target.value)
-                              }
-                              placeholder="Additional Info"
-                              className="h-12 rounded-lg"
-                              maxLength={255}
-                            />
-                          </div>
-
-                          <div>
-                            <Label className="text-sm font-medium text-[#003366] mb-2 block">
-                              Landmark <span className="text-red-500">*</span>
-                            </Label>
-                            <Input
-                              type="text"
-                              value={address.landmark}
-                              onChange={(e) =>
-                                handleAddressChange(address.id, 'landmark', e.target.value)
-                              }
-                              placeholder="Nearby landmark"
-                              className="h-12 rounded-lg"
+                              disabled={isCompleted}
+                              className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}
                               maxLength={255}
                             />
                           </div>
@@ -279,7 +351,8 @@ export default function Step3Page() {
                                 handleAddressChange(address.id, 'postalCode', e.target.value.replace(/[^0-9]/g, ''))
                               }
                               placeholder="Enter 6-digit postal code"
-                              className="h-12 rounded-lg"
+                              disabled={isCompleted}
+                              className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}
                               maxLength={6}
                             />
                           </div>
@@ -300,9 +373,10 @@ export default function Step3Page() {
           <div className="flex gap-3 max-w-2xl mx-auto">
             <Button
               onClick={handleSave}
-              className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white"
+              disabled={isCompleted}
+              className={cn("flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white", isCompleted && "bg-gray-300 cursor-not-allowed")}
             >
-              Save Information
+              {isCompleted ? 'Section Completed' : 'Save Information'}
             </Button>
           </div>
         </div>

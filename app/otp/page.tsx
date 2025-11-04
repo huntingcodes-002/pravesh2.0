@@ -5,7 +5,6 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { MOCK_OTP } from '@/lib/mock-auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp';
@@ -171,10 +170,6 @@ export default function OtpVerificationPage() {
                             ? `Resend OTP (${resendTimer}s)` 
                             : 'Resend OTP'}
                     </Button>
-                </div>
-                
-                <div className="text-center text-xs text-blue-500">
-                    <p>For testing, use the mock OTP: <span className="font-semibold">{MOCK_OTP}</span></p>
                 </div>
             </div>
           </form>

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { LogIn, Eye, EyeOff, LayoutGrid, AlertTriangle } from 'lucide-react'; // Added AlertTriangle for error state
+import { LogIn, Eye, EyeOff, LayoutGrid } from 'lucide-react';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -21,7 +21,6 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { MOCK_USER } from '@/lib/mock-auth';
 import { cn } from '@/lib/utils';
 
 // --- Custom Colors based on HTML Mock ---
@@ -44,14 +43,12 @@ export default function LoginPage() {
   const { toast } = useToast();
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showMockInfo, setShowMockInfo] = useState(true);
-
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      email: MOCK_USER.email,
-      password: MOCK_USER.password,
+      email: '',
+      password: '',
     },
     mode: 'onChange',
   });
@@ -167,30 +164,6 @@ export default function LoginPage() {
                     {isSubmitting ? <LogIn className="w-5 h-5 animate-spin" /> : 'Login'}
                 </Button>
               </div>
-              
-              {/* Mock Info Toggle Section */}
-               <div className="text-center text-xs text-gray-500 pt-2">
-                    <button 
-                        type='button' 
-                        onClick={() => setShowMockInfo(!showMockInfo)} 
-                        className="text-gray-500 hover:text-gray-700 transition-colors"
-                    >
-                        {showMockInfo ? 
-                            <span className='flex items-center justify-center gap-1'><AlertTriangle className='w-3 h-3 text-red-500'/> Hide Mock Credentials</span> : 
-                            'Show Mock Credentials'
-                        }
-                    </button>
-                </div>
-              
-              {showMockInfo && (
-                <div className="text-center text-xs text-gray-700 pt-0 border-t border-gray-100 pt-3">
-                    Use mock credentials: 
-                    <p className="font-semibold text-sm mt-1"> 
-                        Username: {MOCK_USER.email} <br/> 
-                        Password: {MOCK_USER.password}
-                    </p>
-                </div>
-              )}
             </form>
           </Form>
         </CardContent>

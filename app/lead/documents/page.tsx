@@ -7,7 +7,7 @@ import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-im
 import 'react-image-crop/dist/ReactCrop.css';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { validateFile, extractAadhaarData, extractPANData } from '@/lib/mock-auth';
+import { uploadDocument, getDetailedInfo, submitPersonalInfo, isApiError } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -272,8 +272,305 @@ export default function Step8Page() {
         };
     }, [stream]);
 
+    // Helper function to map frontend document type to backend format
+    const mapDocumentTypeToBackend = (docType: string): 'pan_card' | 'aadhaar_card' | 'driving_license' | 'passport' | 'voter_id' | 'collateral_documents' | 'bank_statement' | 'salary_slip' | 'itr' | 'other' => {
+        const mapping: Record<string, 'pan_card' | 'aadhaar_card' | 'driving_license' | 'passport' | 'voter_id' | 'collateral_documents' | 'bank_statement' | 'salary_slip' | 'itr' | 'other'> = {
+            'PAN': 'pan_card',
+            'Adhaar': 'aadhaar_card',
+            'DrivingLicense': 'driving_license',
+            'Passport': 'passport',
+            'VoterID': 'voter_id',
+            'CollateralProperty': 'collateral_documents',
+            'BankStatement': 'bank_statement',
+            'SalarySlip': 'salary_slip',
+            'ITR': 'itr',
+        };
+        return mapping[docType] || 'other';
+    };
+
+    // Helper function to handle document upload with API integration
+    const handleDocumentUpload = async (
+        file: File,
+        documentType: string,
+        fileId: string,
+        backFile?: File
+    ) => {
+        if (!currentLead?.appId) {
+            toast({
+                title: 'Error',
+                description: 'Application ID not found. Please create a new lead first.',
+                variant: 'destructive',
+            });
+            return { success: false };
+        }
+
+        const backendDocType = mapDocumentTypeToBackend(documentType);
+        
+        try {
+            // Endpoint 5: Upload document - http://10.40.30.29:8080/api/lead-collection/applications/document-upload/
+            const uploadResponse = await uploadDocument({
+                application_id: currentLead.appId,
+                document_type: backendDocType,
+                front_file: file,
+                back_file: backFile,
+                document_name: file.name,
+            });
+
+            // Only approve if backend returns success (200 OK)
+            if (isApiError(uploadResponse) || !uploadResponse.success) {
+                toast({
+                    title: 'Upload Failed',
+                    description: uploadResponse.error || uploadResponse.error_type || 'Failed to upload document. Please try again.',
+                    variant: 'destructive',
+                });
+                return { success: false };
+            }
+
+            // Document uploaded successfully - now fetch parsed data for PAN/Aadhaar
+
+            // If PAN or Aadhaar, fetch parsed data from Endpoint 6 after backend processes it
+            if (documentType === 'PAN' || documentType === 'Adhaar') {
+                // Wait a bit for backend to process the document
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                const detailedResponse = await getDetailedInfo(currentLead.appId);
+                
+                if (!isApiError(detailedResponse) && detailedResponse.data) {
+                    const parsedData = detailedResponse.data;
+                    
+                    // Handle PAN document - populate Customer Details page with PAN number and DOB
+                    if (documentType === 'PAN') {
+                        // Helper function to convert DD/MM/YYYY format (e.g., "24/08/2002") to YYYY-MM-DD format
+                        const convertDDMMYYYYToISO = (dateStr: string): string => {
+                            if (!dateStr) return '';
+                            
+                            // If already in ISO format (YYYY-MM-DD), return as is
+                            if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                                return dateStr;
+                            }
+                            
+                            // If in DD/MM/YYYY format (e.g., "24/08/2002"), convert to YYYY-MM-DD
+                            const slashMatch = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+                            if (slashMatch) {
+                                const [, day, month, year] = slashMatch;
+                                return `${year}-${month}-${day}`;
+                            }
+                            
+                            // If in ddmmyyyy format (8 digits: 24082002), convert to YYYY-MM-DD
+                            const ddmmyyyyMatch = dateStr.match(/^(\d{2})(\d{2})(\d{4})$/);
+                            if (ddmmyyyyMatch) {
+                                const [, day, month, year] = ddmmyyyyMatch;
+                                return `${year}-${month}-${day}`;
+                            }
+                            
+                            // Try to parse as Date object and convert
+                            try {
+                                const dateObj = new Date(dateStr);
+                                if (!isNaN(dateObj.getTime())) {
+                                    return dateObj.toISOString().split('T')[0];
+                                }
+                            } catch (e) {
+                                // Ignore parse errors
+                            }
+                            
+                            return dateStr; // Return as-is if conversion fails
+                        };
+                        
+                        // Extract PAN number and DOB from workflow_state.pan_ocr_data.extracted_fields
+                        // Response structure: workflow_state.pan_ocr_data.extracted_fields.pan_number and .date_of_birth
+                        const extractedFields = parsedData.workflow_state?.pan_ocr_data?.extracted_fields;
+                        
+                        // Extract PAN number - ensure it's a valid string
+                        let panNumber: string | null = null;
+                        if (extractedFields?.pan_number) {
+                            const panValue = String(extractedFields.pan_number).trim();
+                            if (panValue && panValue.length > 0) {
+                                panNumber = panValue;
+                            }
+                        }
+                        
+                        // Extract date of birth and convert from DD/MM/YYYY to YYYY-MM-DD
+                        let dateOfBirth: string | null = null;
+                        if (extractedFields?.date_of_birth) {
+                            const dobValue = String(extractedFields.date_of_birth).trim();
+                            if (dobValue && dobValue.length > 0) {
+                                dateOfBirth = convertDDMMYYYYToISO(dobValue);
+                            }
+                        }
+                        
+                        // Debug: Log the extracted data
+                        console.log('Extracted PAN data from API:', {
+                            extractedFields: extractedFields,
+                            rawPanNumber: extractedFields?.pan_number,
+                            rawDateOfBirth: extractedFields?.date_of_birth,
+                            panNumber,
+                            dateOfBirth
+                        });
+                        
+                        // Only populate if we have at least one field with actual value
+                        if (panNumber || dateOfBirth) {
+                            // Auto-populate Customer Details (Basic Details) page via LeadContext
+                            if (currentLead) {
+                                // Prepare update data - use extracted values if available, otherwise keep existing
+                                const updatedPanNumber = panNumber || currentLead.panNumber || '';
+                                const updatedDob = dateOfBirth || currentLead.dob || '';
+                                
+                                // Calculate age if DOB is available
+                                let calculatedAge = currentLead.age || 0;
+                                if (updatedDob) {
+                                    try {
+                                        const today = new Date();
+                                        const birthDate = new Date(updatedDob);
+                                        if (!isNaN(birthDate.getTime())) {
+                                            calculatedAge = today.getFullYear() - birthDate.getFullYear();
+                                            const m = today.getMonth() - birthDate.getMonth();
+                                            if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                                                calculatedAge--;
+                                            }
+                                        }
+                                    } catch (e) {
+                                        console.error('Error calculating age:', e);
+                                    }
+                                }
+                                
+                                const updatedStep2 = {
+                                    ...currentLead.formData?.step2,
+                                    pan: updatedPanNumber,
+                                    dob: updatedDob,
+                                    age: calculatedAge,
+                                    // Keep existing gender value
+                                    gender: currentLead.formData?.step2?.gender ?? currentLead.gender ?? '',
+                                };
+                                
+                                updateLead(currentLead.id, {
+                                    panNumber: updatedPanNumber,
+                                    dob: updatedDob,
+                                    age: calculatedAge,
+                                    // Keep existing gender value
+                                    gender: currentLead.gender ?? '',
+                                    formData: {
+                                        ...currentLead.formData,
+                                        step2: updatedStep2,
+                                    },
+                                });
+
+                                console.log('PAN Data populated successfully:', { 
+                                    panNumber, 
+                                    dateOfBirth,
+                                    updatedPanNumber,
+                                    updatedDob,
+                                    currentLeadBeforeUpdate: {
+                                        panNumber: currentLead.panNumber,
+                                        dob: currentLead.dob
+                                    }
+                                });
+                                toast({
+                                    title: 'Success',
+                                    description: 'PAN document processed successfully. PAN Number and Date of Birth populated in Customer Details page.',
+                                    className: 'bg-green-50 border-green-200',
+                                });
+                            }
+                        } else {
+                            console.log('No PAN data found in response:', { 
+                                extractedFields,
+                                panNumber, 
+                                dateOfBirth,
+                                workflowStateKeys: Object.keys(parsedData.workflow_state || {}),
+                                panOcrData: parsedData.workflow_state?.pan_ocr_data
+                            });
+                            toast({
+                                title: 'Upload Successful',
+                                description: 'Document uploaded successfully. Waiting for data parsing...',
+                                className: 'bg-green-50 border-green-200',
+                            });
+                        }
+                    }
+                    
+                    // Handle Aadhaar document - populate Address Details page with address data
+                    if (documentType === 'Adhaar' && parsedData.address_info) {
+                        // Try to get address from parsed_aadhaar_data or addresses array
+                        const aadhaarAddress = parsedData.address_info.parsed_aadhaar_data || 
+                                             parsedData.address_info.addresses?.[0];
+                        
+                        // Only populate if we have address data from backend
+                        if (aadhaarAddress) {
+                            // Auto-populate Address Details page via LeadContext
+                            if (currentLead) {
+                                const existingAddresses = currentLead.formData?.step3?.addresses || [];
+                                const updatedAddresses = existingAddresses.length > 0 
+                                    ? existingAddresses.map((addr: any, index: number) => 
+                                        index === 0 ? {
+                                            ...addr,
+                                            addressLine1: aadhaarAddress.address_line_1 || addr.addressLine1 || '',
+                                            addressLine2: aadhaarAddress.address_line_2 || addr.addressLine2 || '',
+                                            addressLine3: aadhaarAddress.address_line_3 || addr.addressLine3 || '',
+                                            postalCode: aadhaarAddress.pincode || addr.postalCode || '',
+                                        } : addr
+                                      )
+                                    : [{
+                                        id: Date.now().toString(),
+                                        addressType: 'residential',
+                                        addressLine1: aadhaarAddress.address_line_1 || '',
+                                        addressLine2: aadhaarAddress.address_line_2 || '',
+                                        addressLine3: aadhaarAddress.address_line_3 || '',
+                                        landmark: '',
+                                        postalCode: aadhaarAddress.pincode || '',
+                                    }];
+                                
+                                updateLead(currentLead.id, {
+                                    formData: {
+                                        ...currentLead.formData,
+                                        step3: { addresses: updatedAddresses },
+                                    },
+                                });
+
+                                toast({
+                                    title: 'Success',
+                                    description: 'Aadhaar document processed successfully. Address populated in Address Details page.',
+                                    className: 'bg-green-50 border-green-200',
+                                });
+                            }
+                        } else {
+                            toast({
+                                title: 'Upload Successful',
+                                description: 'Aadhaar document uploaded successfully. Parsing address data...',
+                                className: 'bg-green-50 border-green-200',
+                            });
+                        }
+                    }
+                } else {
+                    // If detailed info fetch fails, still show success for upload but note parsing may be pending
+                    if (documentType === 'PAN' || documentType === 'Adhaar') {
+                        toast({
+                            title: 'Upload Successful',
+                            description: 'Document uploaded successfully. Parsing in progress...',
+                            className: 'bg-green-50 border-green-200',
+                        });
+                    }
+                }
+            } else {
+                // For non-PAN/Aadhaar documents, just show success
+                toast({
+                    title: 'Success',
+                    description: `${file.name} uploaded successfully`,
+                    variant: 'default',
+                    className: 'bg-green-50 border-green-200',
+                });
+            }
+
+            return { success: true };
+        } catch (error: any) {
+            toast({
+                title: 'Upload Failed',
+                description: error.message || 'Failed to upload document. Please try again.',
+                variant: 'destructive',
+            });
+            return { success: false };
+        }
+    };
+
     // Handle file selection (for non-front/back documents)
-    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files || files.length === 0 || !documentType || !selectedDocument) {
             toast({
@@ -286,7 +583,8 @@ export default function Step8Page() {
 
         const file = files[0];
         
-        // Validate file type
+        // Basic file extension check only (not document content validation)
+        // Actual document validation is done by backend API
         const fileExtension = file.name.split('.').pop()?.toLowerCase();
         const isValidFileType = selectedDocument.fileTypes.some((type: string) => {
             if (type === 'image') {
@@ -314,7 +612,7 @@ export default function Step8Page() {
 
         // Create preview URL for images
         const reader = new FileReader();
-        reader.onloadend = () => {
+        reader.onloadend = async () => {
             const previewUrl = reader.result as string;
             
             const newFile: UploadedFile = {
@@ -346,109 +644,41 @@ export default function Step8Page() {
             }
             toast({ title: 'Processing', description: `Uploading ${file.name}...` });
 
-            setTimeout(() => {
-                const validation = validateFile(file.name);
+            // Upload document via API
+            const uploadResult = await handleDocumentUpload(file, documentType, fileId);
+            
+            // Only mark as success if backend returned 200 OK (success: true)
+            const isSuccess = uploadResult?.success === true;
+            
+            setUploadedFiles((prev) => {
+                const updatedFiles = prev.map((f) =>
+                    f.id === fileId
+                        ? { 
+                            ...f, 
+                            status: isSuccess ? 'Success' as const : 'Failed' as const, 
+                            error: isSuccess ? undefined : 'Upload failed - backend validation failed' 
+                        }
+                        : f
+                );
                 
-                setUploadedFiles((prev) => {
-                    const updatedFiles = prev.map((f) =>
-                        f.id === fileId
-                            ? { ...f, status: validation.valid ? 'Success' : 'Failed' as 'Success' | 'Failed', error: validation.error }
-                            : f
-                    );
-                    
-                    // Auto-fill data based on document type
-                    if (validation.valid && currentLead) {
-                        if (documentType === 'Adhaar') {
-                            // Always extract Aadhaar data when documentType is Adhaar, regardless of filename
-                            const aadhaarData = extractAadhaarData(file.name, documentType);
-                            if (aadhaarData) {
-                                // Update step3 with address data
-                                const existingAddresses = currentLead.formData?.step3?.addresses || [];
-                                const updatedAddresses = existingAddresses.length > 0 
-                                    ? existingAddresses.map((addr: any, index: number) => 
-                                        index === 0 ? {
-                                            ...addr,
-                                            addressLine1: aadhaarData.addressLine1 || addr.addressLine1,
-                                            addressLine2: aadhaarData.addressLine2 || addr.addressLine2,
-                                            addressLine3: aadhaarData.addressLine3 || addr.addressLine3,
-                                            postalCode: aadhaarData.pincode || addr.postalCode,
-                                            autoFilledViaAadhaar: true // Flag to indicate auto-filled via Aadhaar
-                                        } : addr
-                                      )
-                                    : [{
-                                        id: Date.now().toString(),
-                                        addressType: 'residential',
-                                        addressLine1: aadhaarData.addressLine1 || '',
-                                        addressLine2: aadhaarData.addressLine2 || '',
-                                        addressLine3: aadhaarData.addressLine3 || '',
-                                        landmark: '', // Landmark must be manually entered
-                                        postalCode: aadhaarData.pincode || '',
-                                        autoFilledViaAadhaar: true
-                                    }];
-                                
-                                updateLead(currentLead.id, {
-                                    formData: {
-                                        ...currentLead.formData,
-                                        step3: { addresses: updatedAddresses, autoFilledViaAadhaar: true },
-                                        step8: { 
-                                            ...currentLead.formData.step8, 
-                                            files: updatedFiles 
-                                        }
-                                    }
-                                });
-                            }
-                        } else if (documentType === 'PAN') {
-                            const panData = extractPANData(file.name);
-                            if (panData) {
-                                // Update step2 with PAN number, DOB and gender
-                                const updatedStep2 = {
-                                    ...currentLead.formData?.step2,
-                                    pan: panData.panNumber || currentLead.formData?.step2?.pan,
-                                    dob: panData.dateOfBirth || currentLead.formData?.step2?.dob,
-                                    gender: panData.gender || currentLead.formData?.step2?.gender,
-                                    autoFilledViaPAN: true // Flag to indicate auto-filled via PAN
-                                };
-                                
-                                // Calculate age from DOB
-                                let age = 0;
-                                if (panData.dateOfBirth) {
-                                    const dob = new Date(panData.dateOfBirth);
-                                    const today = new Date();
-                                    age = today.getFullYear() - dob.getFullYear();
-                                    const m = today.getMonth() - dob.getMonth();
-                                    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
-                                        age--;
-                                    }
-                                }
-                                
-                                updateLead(currentLead.id, {
-                                    formData: {
-                                        ...currentLead.formData,
-                                        step2: updatedStep2,
-                                        step8: { 
-                                            ...currentLead.formData.step8, 
-                                            files: updatedFiles 
-                                        }
-                                    },
-                                    panNumber: panData.panNumber || currentLead.panNumber,
-                                    dob: panData.dateOfBirth || currentLead.dob,
-                                    age: age || currentLead.age,
-                                    gender: panData.gender || currentLead.gender,
-                                });
+                // Update files in lead data
+                if (currentLead) {
+                    updateLead(currentLead.id, {
+                        formData: {
+                            ...currentLead.formData,
+                            step8: { 
+                                ...currentLead.formData.step8, 
+                                files: updatedFiles 
                             }
                         }
-                    }
-                    
-                    return updatedFiles;
-                });
+                    });
+                }
                 
-                toast({
-                    title: validation.valid ? 'Success' : 'Failed',
-                    description: validation.valid ? `${file.name} uploaded successfully${documentType === 'Adhaar' ? ' and address auto-filled' : documentType === 'PAN' ? ' and details auto-filled' : ''}` : validation.error || 'File validation failed',
-                    variant: validation.valid ? 'default' : 'destructive',
-                    className: validation.valid ? 'bg-green-50 border-green-200' : ''
-                });
-            }, 1500);
+                return updatedFiles;
+            });
+            
+            // Success toasts for PAN/Aadhaar are handled in handleDocumentUpload
+            // For other documents, success toast is also handled in handleDocumentUpload
         };
         
         if (isPdf) {
@@ -648,8 +878,21 @@ export default function Step8Page() {
         setCompletedCrop(undefined);
     };
 
-    // Process captured image after cropping
-    const processCapturedImage = (dataUrl: string) => {
+    // Helper function to convert dataUrl to File
+    const dataURLtoFile = (dataurl: string, filename: string): File => {
+        const arr = dataurl.split(',');
+        const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+        }
+        return new File([u8arr], filename, { type: mime });
+    };
+
+    // Process captured image after cropping - now uses API validation
+    const processCapturedImage = async (dataUrl: string) => {
         const fileId = Date.now().toString();
         
         // For front/back documents
@@ -667,124 +910,100 @@ export default function Step8Page() {
             }
             setShowUploadMethodModal(false);
         } else {
-                    // For regular documents - check if it's pan.jpg or aadhaar.jpg mock file
-                    // For camera captures, we'll use the documentType to determine what to extract
-                    const mockFileName = documentType === 'PAN' ? 'pan.jpg' : documentType === 'Adhaar' ? 'aadhaar.jpg' : `capture_${fileId}.jpg`;
-                    
-                    const newFile: UploadedFile = {
-                        id: fileId,
-                        name: mockFileName,
-                        type: documentType,
-                        status: 'Success',
-                        previewUrl: dataUrl,
-                        fileType: 'image'
-                    };
-                    
-                    // If PAN or Aadhaar, delete old failed entries of the same type
-                    if (documentType === 'PAN' || documentType === 'Adhaar') {
-                        setUploadedFiles((prev) => {
-                            // Remove failed entries of the same document type
-                            const filteredFiles = prev.filter((f) => 
-                                !(f.type === documentType && f.status === 'Failed')
-                            );
-                            // Keep applicant section open
-                            setOpenSections((sections) => ({ ...sections, applicant: true }));
-                            const updatedFiles = [...filteredFiles, newFile];
-                        
-                            // Auto-fill data if it's PAN or Aadhaar
-                            if (currentLead && documentType === 'PAN') {
-                                const panData = extractPANData(mockFileName);
-                                if (panData) {
-                                    const updatedStep2 = {
-                                        ...currentLead.formData?.step2,
-                                        pan: panData.panNumber || currentLead.formData?.step2?.pan,
-                                        dob: panData.dateOfBirth || currentLead.formData?.step2?.dob,
-                                        gender: panData.gender || currentLead.formData?.step2?.gender,
-                                        autoFilledViaPAN: true
-                                    };
-                                    
-                                    let age = 0;
-                                    if (panData.dateOfBirth) {
-                                        const dob = new Date(panData.dateOfBirth);
-                                        const today = new Date();
-                                        age = today.getFullYear() - dob.getFullYear();
-                                        const m = today.getMonth() - dob.getMonth();
-                                        if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
-                                            age--;
-                                        }
-                                    }
-                                    
-                                    updateLead(currentLead.id, {
-                                        formData: {
-                                            ...currentLead.formData,
-                                            step2: updatedStep2,
-                                            step8: { 
-                                                ...currentLead.formData.step8, 
-                                                files: updatedFiles 
-                                            }
-                                        },
-                                        panNumber: panData.panNumber || currentLead.panNumber,
-                                        dob: panData.dateOfBirth || currentLead.dob,
-                                        age: age || currentLead.age,
-                                        gender: panData.gender || currentLead.gender,
-                                    });
-                                }
-                            } else if (currentLead && documentType === 'Adhaar') {
-                                const aadhaarData = extractAadhaarData(mockFileName, documentType);
-                                if (aadhaarData) {
-                                    const existingAddresses = currentLead.formData?.step3?.addresses || [];
-                                    const updatedAddresses = existingAddresses.length > 0 
-                                        ? existingAddresses.map((addr: any, index: number) => 
-                                            index === 0 ? {
-                                                ...addr,
-                                                addressLine1: aadhaarData.addressLine1 || addr.addressLine1,
-                                                addressLine2: aadhaarData.addressLine2 || addr.addressLine2,
-                                                addressLine3: aadhaarData.addressLine3 || addr.addressLine3,
-                                                city: aadhaarData.city || addr.city || aadhaarData.addressLine3,
-                                                postalCode: aadhaarData.pincode || addr.postalCode,
-                                                autoFilledViaAadhaar: true
-                                            } : addr
-                                          )
-                                        : [{
-                                            id: Date.now().toString(),
-                                            addressType: 'residential',
-                                            addressLine1: aadhaarData.addressLine1 || '',
-                                            addressLine2: aadhaarData.addressLine2 || '',
-                                            addressLine3: aadhaarData.addressLine3 || '',
-                                            landmark: '', // Landmark must be manually entered
-                                            postalCode: aadhaarData.pincode || '',
-                                            autoFilledViaAadhaar: true
-                                        }];
-                                    
-                                    updateLead(currentLead.id, {
-                                        formData: {
-                                            ...currentLead.formData,
-                                            step3: { addresses: updatedAddresses, autoFilledViaAadhaar: true },
-                                            step8: { 
-                                                ...currentLead.formData.step8, 
-                                                files: updatedFiles 
-                                            }
-                                        }
-                                    });
-                                }
+            // For regular documents - convert dataUrl to File and upload via API
+            if (!documentType || !selectedDocument) {
+                toast({
+                    title: 'Error',
+                    description: 'Document type not selected',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            const fileName = documentType === 'PAN' ? 'pan.jpg' : documentType === 'Adhaar' ? 'aadhaar.jpg' : `capture_${fileId}.jpg`;
+            
+            // Convert dataUrl to File
+            const capturedFile = dataURLtoFile(dataUrl, fileName);
+            
+            // Create preview file entry with 'Processing' status
+            const newFile: UploadedFile = {
+                id: fileId,
+                name: fileName,
+                type: documentType,
+                status: 'Processing',
+                previewUrl: dataUrl,
+                fileType: 'image'
+            };
+            
+            // If PAN or Aadhaar, delete old failed entries of the same type
+            if (documentType === 'PAN' || documentType === 'Adhaar') {
+                setUploadedFiles((prev) => {
+                    const filteredFiles = prev.filter((f) => 
+                        !(f.type === documentType && f.status === 'Failed')
+                    );
+                    setOpenSections((sections) => ({ ...sections, applicant: true }));
+                    return [...filteredFiles, newFile];
+                });
+            } else {
+                setUploadedFiles((prev) => {
+                    setOpenSections((sections) => ({ ...sections, applicant: true }));
+                    return [...prev, newFile];
+                });
+            }
+            
+            toast({ title: 'Processing', description: `Uploading captured image...` });
+
+            // Upload document via API (same flow as file upload)
+            const uploadResult = await handleDocumentUpload(capturedFile, documentType, fileId);
+            
+            // Only mark as success if backend returned 200 OK (success: true)
+            const isSuccess = uploadResult?.success === true;
+            
+            setUploadedFiles((prev) => {
+                const updatedFiles = prev.map((f) =>
+                    f.id === fileId
+                        ? { 
+                            ...f, 
+                            status: isSuccess ? 'Success' as const : 'Failed' as const, 
+                            error: isSuccess ? undefined : 'Upload failed - backend validation failed' 
+                        }
+                        : f
+                );
+                
+                // Update files in lead data
+                if (currentLead) {
+                    updateLead(currentLead.id, {
+                        formData: {
+                            ...currentLead.formData,
+                            step8: { 
+                                ...currentLead.formData.step8, 
+                                files: updatedFiles 
                             }
-                            
-                            return updatedFiles;
-                        });
-                    } else {
-                        setUploadedFiles((prev) => {
-                            // Keep applicant section open
-                            setOpenSections((sections) => ({ ...sections, applicant: true }));
-                            return [...prev, newFile];
-                        });
-                    }
-                    
-                    toast({ 
-                        title: 'Success', 
-                        description: documentType === 'PAN' ? 'Image captured and details auto-filled' : documentType === 'Adhaar' ? 'Image captured and address auto-filled' : 'Image captured and uploaded successfully.', 
-                        className: 'bg-green-50 border-green-200' 
+                        }
                     });
-                    setDocumentType('');
+                }
+                
+                return updatedFiles;
+            });
+            
+            // Success toasts for PAN/Aadhaar are handled in handleDocumentUpload
+            // For other documents, show success toast
+            if (isSuccess && !(documentType === 'PAN' || documentType === 'Adhaar')) {
+                toast({
+                    title: 'Success',
+                    description: 'Image captured and uploaded successfully',
+                    variant: 'default',
+                    className: 'bg-green-50 border-green-200'
+                });
+            } else if (!isSuccess) {
+                toast({
+                    title: 'Upload Failed',
+                    description: 'Failed to upload captured image. Please try again.',
+                    variant: 'destructive',
+                });
+            }
+            
+            setDocumentType('');
         }
     };
 
@@ -831,12 +1050,35 @@ export default function Step8Page() {
     };
 
     // Handle upload document button click (for front/back documents)
-    const handleUploadFrontBackDocument = () => {
+    const handleUploadFrontBackDocument = async () => {
         if (!frontFile || !backFile || !documentType) return;
+
+        if (!currentLead?.appId) {
+            toast({
+                title: 'Error',
+                description: 'Application ID not found. Please create a new lead first.',
+                variant: 'destructive',
+            });
+            return;
+        }
 
         setIsUploading(true);
         setUploadError('');
         const fileId = Date.now().toString();
+
+        // Convert dataUrl to File if needed
+        const frontFileObj = frontFile.file || (frontFile.dataUrl ? dataURLtoFile(frontFile.dataUrl, frontFile.name) : null);
+        const backFileObj = backFile.file || (backFile.dataUrl ? dataURLtoFile(backFile.dataUrl, backFile.name) : null);
+
+        if (!frontFileObj || !backFileObj) {
+            toast({
+                title: 'Error',
+                description: 'Failed to process files. Please try again.',
+                variant: 'destructive',
+            });
+            setIsUploading(false);
+            return;
+        }
 
         const newFile: UploadedFile = {
             id: fileId,
@@ -851,72 +1093,46 @@ export default function Step8Page() {
         };
 
         setUploadedFiles((prev) => [...prev, newFile]);
-        toast({ title: 'Processing', description: 'Validating documents...' });
+        toast({ title: 'Processing', description: 'Uploading documents...' });
 
-            setTimeout(() => {
-            // Mock validation - validate both together
-            const frontValidation = validateFile(frontFile.name);
-            const backValidation = validateFile(backFile.name);
+        try {
+            // Upload document via API with both front and back files
+            const uploadResult = await handleDocumentUpload(frontFileObj, documentType, fileId, backFileObj);
             
-            const isValid = frontValidation.valid && backValidation.valid;
-            const error = !frontValidation.valid ? frontValidation.error : backValidation.error;
-
+            // Only mark as success if backend returned 200 OK (success: true)
+            const isSuccess = uploadResult?.success === true;
+            
             setUploadedFiles((prev) => {
                 const updatedFiles = prev.map((f) =>
                     f.id === fileId
-                        ? { ...f, status: isValid ? 'Success' : 'Failed' as 'Success' | 'Failed', error: error }
+                        ? { 
+                            ...f, 
+                            status: isSuccess ? 'Success' as const : 'Failed' as const,
+                            error: isSuccess ? undefined : 'Upload failed - backend validation failed'
+                        }
                         : f
                 );
                 
-                // Auto-fill Aadhaar data if valid
-                if (isValid && documentType === 'Adhaar' && currentLead) {
-                    const aadhaarData = extractAadhaarData(frontFile.name, documentType);
-                    if (aadhaarData) {
-                        const existingAddresses = currentLead.formData?.step3?.addresses || [];
-                        const updatedAddresses = existingAddresses.length > 0 
-                            ? existingAddresses.map((addr: any, index: number) => 
-                                index === 0 ? {
-                                    ...addr,
-                                    addressLine1: aadhaarData.addressLine1 || addr.addressLine1,
-                                    addressLine2: aadhaarData.addressLine2 || addr.addressLine2,
-                                    addressLine3: aadhaarData.addressLine3 || addr.addressLine3,
-                                    city: aadhaarData.city || addr.city || aadhaarData.addressLine3,
-                                    postalCode: aadhaarData.pincode || addr.postalCode,
-                                    autoFilledViaAadhaar: true
-                                } : addr
-                              )
-                            : [{
-                                id: Date.now().toString(),
-                                addressType: 'residential',
-                                addressLine1: aadhaarData.addressLine1 || '',
-                                addressLine2: aadhaarData.addressLine2 || '',
-                                addressLine3: aadhaarData.addressLine3 || '',
-                                city: aadhaarData.city || aadhaarData.addressLine3 || '',
-                                landmark: '', // Landmark must be manually entered
-                                postalCode: aadhaarData.pincode || '',
-                                autoFilledViaAadhaar: true
-                            }];
-                        
-                        updateLead(currentLead.id, {
-                            formData: {
-                                ...currentLead.formData,
-                                step3: { addresses: updatedAddresses, autoFilledViaAadhaar: true },
-                                step8: { 
-                                    ...currentLead.formData.step8, 
-                                    files: updatedFiles 
-                                }
+                // Update files in lead data
+                if (currentLead) {
+                    updateLead(currentLead.id, {
+                        formData: {
+                            ...currentLead.formData,
+                            step8: { 
+                                ...currentLead.formData.step8, 
+                                files: updatedFiles 
                             }
-                        });
-                    }
+                        }
+                    });
                 }
                 
                 return updatedFiles;
             });
-
-            if (isValid) {
-                toast({
-                    title: 'Success',
-                    description: documentType === 'Adhaar' ? 'Documents uploaded successfully and address auto-filled' : 'Documents uploaded successfully',
+            
+            if (isSuccess) {
+                toast({ 
+                    title: 'Success', 
+                    description: 'Documents uploaded successfully',
                     className: 'bg-green-50 border-green-200'
                 });
                 // Clear temp files and reset
@@ -924,15 +1140,28 @@ export default function Step8Page() {
                 setBackFile(null);
                 setDocumentType('');
             } else {
-                setUploadError(error || 'Validation failed');
                 toast({
-                    title: 'Validation Failed',
-                    description: error || 'Document validation failed',
-                    variant: 'destructive'
+                    title: 'Upload Failed',
+                    description: 'Failed to upload documents. Please try again.',
+                    variant: 'destructive',
                 });
             }
+        } catch (error: any) {
+            toast({
+                title: 'Upload Failed',
+                description: error.message || 'Failed to upload documents. Please try again.',
+                variant: 'destructive',
+            });
+            setUploadedFiles((prev) => {
+                return prev.map((f) =>
+                    f.id === fileId
+                        ? { ...f, status: 'Failed' as const, error: 'Upload failed' }
+                        : f
+                );
+            });
+        } finally {
             setIsUploading(false);
-        }, 1500);
+        }
     };
 
     // Handle replace for front/back

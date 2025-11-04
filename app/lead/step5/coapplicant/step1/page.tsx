@@ -12,7 +12,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { useToast } from '@/hooks/use-toast';
-import { MOCK_OTP } from '@/lib/mock-auth';
 import { cn } from '@/lib/utils';
 import { Send, CheckCircle, Loader, ArrowLeft, Edit } from 'lucide-react';
 
@@ -85,17 +84,18 @@ function CoApplicantStep1PageContent() {
       setIsVerifying(false);
       setIsOtpModalOpen(true);
       setResendTimer(30);
-      toast({ title: 'OTP Sent', description: `Mock OTP (${MOCK_OTP}) sent successfully.` });
+      toast({ title: 'OTP Sent', description: 'OTP sent successfully.' });
     }, 1000);
   };
 
   const handleResendOtp = () => {
     setResendTimer(30);
-    toast({ title: 'OTP Resent', description: `New Mock OTP (${MOCK_OTP}) sent.` });
+    toast({ title: 'OTP Resent', description: 'New OTP sent.' });
   };
 
   const handleVerifyOtp = () => {
-    if (otp === MOCK_OTP) {
+    // TODO: Replace with actual OTP validation API call
+    if (otp && otp.length === 6) {
       setIsMobileVerified(true);
       setIsOtpModalOpen(false);
       setOtp('');

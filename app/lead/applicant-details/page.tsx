@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { Calendar, CheckCircle, AlertTriangle, Loader, Edit, X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { validatePANDetails, PAN_DATA } from '@/lib/mock-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -228,10 +227,7 @@ export default function ApplicantDetailsPage() {
           handlePanValidation(pan, firstName, lastName, dob);
         } else if (panValidationStatus === 'valid' && lastValidatedData) {
           // Restore validation state if already validated with same data
-          const panData = PAN_DATA.find((p: any) => p.pan.toUpperCase() === pan.toUpperCase());
-          if (panData) {
-            setPanApiName(`${panData.firstName} ${panData.lastName}`.trim().toUpperCase());
-          }
+          // TODO: Replace with actual API call to restore PAN validation state
         }
       }
 
@@ -277,42 +273,13 @@ export default function ApplicantDetailsPage() {
     setPanValidationStatus('pending');
 
     setTimeout(() => {
-      const result = validatePANDetails(pan, 'Mr', firstName, lastName, dob);
-      const panData = PAN_DATA.find((p: any) => p.pan.toUpperCase() === pan.toUpperCase());
-
-      if (panData) {
-        const fetchedName = `${panData.firstName} ${panData.lastName}`.trim().toUpperCase();
-        setPanApiName(fetchedName);
-
-        if (!result.firstNameMatch || !result.lastNameMatch) {
-          setNameMismatch(true);
-        } else {
-          setNameMismatch(false);
-        }
-
-        if (dob && !result.dateOfBirthMatch) {
-          setDobMismatch(true);
-        } else {
-          setDobMismatch(false);
-        }
-
-        if (result.firstNameMatch && result.lastNameMatch && result.dateOfBirthMatch) {
-          setPanValidationStatus('valid');
-          // Store successful validation data to prevent re-validation
-          setLastValidatedData({ pan, firstName, lastName, dob });
-        } else {
-          setPanValidationStatus('mismatch');
-          // Clear last validated data on mismatch
-          setLastValidatedData(null);
-        }
-      } else {
-        setPanValidationStatus('invalid');
-        setPanApiName('');
-        setNameMismatch(false);
-        setDobMismatch(false);
-        // Clear last validated data on invalid
-        setLastValidatedData(null);
-      }
+      // TODO: Replace with actual API call for PAN validation
+      // For now, just mark as pending since mock validation is removed
+      setPanValidationStatus('pending');
+      setPanApiName('');
+      setNameMismatch(false);
+      setDobMismatch(false);
+      setLastValidatedData(null);
       setIsVerifyingPan(false);
     }, 1500);
   }, []);

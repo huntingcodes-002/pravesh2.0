@@ -6,7 +6,6 @@ import { Calendar, CheckCircle, AlertTriangle, Loader, Edit, X, ArrowLeft } from
 import DashboardLayout from '@/components/DashboardLayout';
 import ProgressBar from '@/components/ProgressBar';
 import { useLead, CoApplicant } from '@/contexts/LeadContext'; // Import CoApplicant
-import { validatePANDetails, PAN_DATA } from '@/lib/mock-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -214,38 +213,12 @@ function CoApplicantStep2PageContent() {
         setPanValidationStatus('pending');
 
         setTimeout(() => {
-            const result = validatePANDetails(pan, 'Mr', firstName, lastName, dob);
-            const panData = PAN_DATA.find((p: any) => p.pan.toUpperCase() === pan.toUpperCase());
-
-            if (panData) {
-                const fetchedName = `${panData.firstName} ${panData.lastName}`.trim().toUpperCase();
-                setPanApiName(fetchedName);
-                
-                // Check for name mismatch
-                if (!result.firstNameMatch || !result.lastNameMatch) {
-                    setNameMismatch(true);
-                } else {
-                    setNameMismatch(false);
-                }
-                
-                // Check for DOB mismatch
-                if (dob && !result.dateOfBirthMatch) {
-                    setDobMismatch(true);
-                } else {
-                    setDobMismatch(false);
-                }
-                
-                if (result.firstNameMatch && result.lastNameMatch && result.dateOfBirthMatch) {
-                    setPanValidationStatus('valid');
-                } else {
-                    setPanValidationStatus('mismatch');
-                }
-            } else {
-                setPanValidationStatus('invalid');
-                setPanApiName('');
-                setNameMismatch(false);
-                setDobMismatch(false);
-            }
+            // TODO: Replace with actual API call for PAN validation
+            // For now, just mark as pending since mock validation is removed
+            setPanValidationStatus('pending');
+            setPanApiName('');
+            setNameMismatch(false);
+            setDobMismatch(false);
             setIsVerifyingPan(false);
         }, 1500);
     }, []);

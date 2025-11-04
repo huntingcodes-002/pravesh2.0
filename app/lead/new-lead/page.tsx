@@ -11,9 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { useToast } from '@/hooks/use-toast'; // Import useToast
-import { MOCK_OTP } from '@/lib/mock-auth';
 import { cn } from '@/lib/utils';
 import { Send, CheckCircle, Loader, Edit } from 'lucide-react';
+import { createNewLead, verifyMobileOTP, isApiError } from '@/lib/api';
 
 function Step1PageContent() {
   const { currentLead, updateLead } = useLead();
@@ -33,6 +33,8 @@ function Step1PageContent() {
   const [otp, setOtp] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [resendTimer, setResendTimer] = useState(30);
+  const [isCreatingLead, setIsCreatingLead] = useState(false);
+  const [applicationId, setApplicationId] = useState<string | null>(currentLead?.appId || null);
 
   useEffect(() => {
     if (currentLead) {
@@ -56,34 +58,156 @@ function Step1PageContent() {
     return () => clearTimeout(timerId);
   }, [isOtpModalOpen, resendTimer]);
 
-  const handleSendOtp = () => {
+  const handleSendOtp = async () => {
     if (formData.mobile.length !== 10) {
       toast({ title: 'Error', description: 'Please enter a 10-digit mobile number.', variant: 'destructive' });
       return;
     }
+    
+    if (!formData.productType || !formData.applicationType || !formData.firstName || !formData.lastName) {
+      toast({ title: 'Error', description: 'Please fill all required fields.', variant: 'destructive' });
+      return;
+    }
+
+    setIsCreatingLead(true);
     setIsVerifying(true);
-    setTimeout(() => {
+
+    try {
+      // Map application type from frontend to backend format
+      const applicationTypeMap: Record<string, string> = {
+        'new': 'NewApplication',
+        'additional-disbursal': 'AdditionalDisbursal',
+        'multiple-assets': 'MultipleAssets',
+        'topup-without-closure': 'TopupWithoutClosure',
+        'bt-topup': 'Balance Transfer With Topup',
+      };
+
+      const backendApplicationType = applicationTypeMap[formData.applicationType] || 'NewApplication';
+
+      // Endpoint 1: Create new lead
+      const response = await createNewLead({
+        product_type: formData.productType as 'secured' | 'unsecured',
+        application_type: backendApplicationType,
+        mobile_number: formData.mobile,
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+      });
+
+      if (isApiError(response)) {
+        toast({
+          title: 'Error',
+          description: response.error || 'Failed to create new lead. Please try again.',
+          variant: 'destructive',
+        });
+        setIsCreatingLead(false);
+        setIsVerifying(false);
+        return;
+      }
+
+      // Store application_id
+      if (response.data?.application_id) {
+        setApplicationId(response.data.application_id);
+        
+        // Update lead with application_id
+        if (currentLead) {
+          updateLead(currentLead.id, {
+            appId: response.data.application_id,
+            formData: {
+              ...currentLead.formData,
+              step1: {
+                ...formData,
+                isMobileVerified,
+                applicationId: response.data.application_id,
+              },
+            },
+          });
+        }
+      }
+
       setIsVerifying(false);
       setIsOtpModalOpen(true);
       setResendTimer(30);
-      toast({ title: 'OTP Sent', description: `Mock OTP (${MOCK_OTP}) sent successfully.` });
-    }, 1000);
+      toast({ title: 'OTP Sent', description: 'OTP sent successfully.' });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to create new lead. Please try again.',
+        variant: 'destructive',
+      });
+      setIsCreatingLead(false);
+      setIsVerifying(false);
+    }
   };
   
   const handleResendOtp = () => {
     setResendTimer(30);
-    toast({ title: 'OTP Resent', description: `New Mock OTP (${MOCK_OTP}) sent.` });
+    toast({ title: 'OTP Resent', description: 'New OTP sent.' });
   };
 
-  const handleVerifyOtp = () => {
-    if (otp === MOCK_OTP) {
+  const handleVerifyOtp = async () => {
+    if (otp.length !== 4) {
+      toast({ title: 'Error', description: 'Please enter a 4-digit OTP.', variant: 'destructive' });
+      return;
+    }
+
+    if (!applicationId) {
+      toast({ title: 'Error', description: 'Application ID not found. Please request OTP again.', variant: 'destructive' });
+      return;
+    }
+
+    setIsVerifying(true);
+
+    try {
+      // Endpoint 7: Verify mobile OTP (verify-mobile)
+      const response = await verifyMobileOTP({
+        application_id: applicationId,
+        otp: otp,
+      });
+
+      if (isApiError(response)) {
+        toast({
+          title: 'Verification Failed',
+          description: response.error || 'Invalid OTP. Please try again.',
+          variant: 'destructive',
+        });
+        setOtp('');
+        setIsVerifying(false);
+        return;
+      }
+
+      // OTP verified successfully
       setIsMobileVerified(true);
       setIsOtpModalOpen(false);
       setOtp('');
-      toast({ title: 'Verification Successful', description: 'Mobile number verified.', className: 'bg-green-100 border-green-200' });
-    } else {
-      toast({ title: 'Verification Failed', description: 'Invalid OTP. Please try again.', variant: 'destructive' });
+      
+      // Update lead state
+      if (currentLead) {
+        updateLead(currentLead.id, {
+          formData: {
+            ...currentLead.formData,
+            step1: {
+              ...formData,
+              isMobileVerified: true,
+              applicationId: applicationId,
+            },
+          },
+        });
+      }
+
+      toast({
+        title: 'Verification Successful',
+        description: 'Mobile number verified.',
+        className: 'bg-green-100 border-green-200',
+      });
+      setIsVerifying(false);
+    } catch (error: any) {
+      toast({
+        title: 'Verification Failed',
+        description: error.message || 'Failed to verify OTP. Please try again.',
+        variant: 'destructive',
+      });
       setOtp('');
+      setIsVerifying(false);
     }
   };
 
@@ -186,9 +310,9 @@ function Step1PageContent() {
             
             <div className="pt-2">
               {!isMobileVerified ? (
-                 <Button onClick={handleSendOtp} disabled={!canSendOtp || isVerifying} className="w-full h-12 bg-[#0072CE] hover:bg-[#005a9e] font-medium transition-colors rounded-lg">
-                    {isVerifying ? <Loader className="w-5 h-5 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
-                    {isVerifying ? 'Sending...' : 'Send Consent OTP'}
+                 <Button onClick={handleSendOtp} disabled={!canSendOtp || isVerifying || isCreatingLead} className="w-full h-12 bg-[#0072CE] hover:bg-[#005a9e] font-medium transition-colors rounded-lg">
+                    {(isVerifying || isCreatingLead) ? <Loader className="w-5 h-5 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                    {(isVerifying || isCreatingLead) ? 'Creating Lead...' : 'Send Consent OTP'}
                 </Button>
               ) : (
                 <div className="p-4 bg-green-100/50 border border-green-200 rounded-2xl flex items-center justify-center gap-3">
@@ -215,13 +339,13 @@ function Step1PageContent() {
           <DialogHeader className="text-center space-y-4">
             <DialogTitle className="text-lg font-semibold text-[#003366]">Verify Consent OTP</DialogTitle>
             <DialogDescription>
-              An OTP has been sent to +91-XXXXXX{formData.mobile.slice(-4)}.
+              Enter the 4-digit OTP sent to +91-XXXXXX{formData.mobile.slice(-4)}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
              <div className="flex justify-center">
               <InputOTP 
-                maxLength={6}
+                maxLength={4}
                 value={otp}
                 onChange={(value) => {
                     const numbers = value.replace(/[^0-9]/g, '');
@@ -233,8 +357,6 @@ function Step1PageContent() {
                   <InputOTPSlot className="h-14 w-10 text-2xl" index={1} />
                   <InputOTPSlot className="h-14 w-10 text-2xl" index={2} />
                   <InputOTPSlot className="h-14 w-10 text-2xl" index={3} />
-                  <InputOTPSlot className="h-14 w-10 text-2xl" index={4} />
-                  <InputOTPSlot className="h-14 w-10 text-2xl" index={5} />
                 </InputOTPGroup>
               </InputOTP>
             </div>
@@ -255,8 +377,8 @@ function Step1PageContent() {
                 </Button>
             </div>
             <div className="space-y-3">
-                <Button onClick={handleVerifyOtp} disabled={otp.length !== 6} className="w-full h-12 bg-[#0072CE] text-white rounded-xl font-semibold text-lg hover:bg-[#005a9e] transition-colors">
-                    Verify & Continue
+                <Button onClick={handleVerifyOtp} disabled={otp.length !== 4 || isVerifying} className="w-full h-12 bg-[#0072CE] text-white rounded-xl font-semibold text-lg hover:bg-[#005a9e] transition-colors">
+                    {isVerifying ? <><Loader className="w-5 h-5 animate-spin mr-2" /> Verifying...</> : 'Verify & Continue'}
                 </Button>
                  <Button type="button" variant="link" onClick={() => setIsOtpModalOpen(false)} className="w-full text-sm text-[#0072CE] hover:text-[#005a9e] font-medium transition-colors">
                     <Edit className="w-4 h-4 mr-2" />

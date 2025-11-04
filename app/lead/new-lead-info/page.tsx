@@ -35,10 +35,14 @@ export default function NewLeadInfoPage() {
     }
   }, [currentLead, router]);
 
-  // Calculate Step 2 status (Basic Details)
+  // Calculate Step 2 status (Basic Details) - based on completion flag
   const getStep2Status = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
     
+    // Check completion flag first (from successful API submission)
+    if (currentLead.step2Completed === true) return 'completed';
+    
+    // Fallback to data check for in-progress
     const step2 = currentLead.formData?.step2;
     const hasData = step2 && 
       step2.dob &&
@@ -46,37 +50,46 @@ export default function NewLeadInfoPage() {
       currentLead.panNumber && // PAN is always required
       currentLead.panNumber.length === 10;
     
-    if (hasData) return 'completed';
-    if (step2) return 'in-progress';
+    if (hasData) return 'in-progress';
     return 'incomplete';
   };
 
-  // Calculate Step 3 status (Address Details)
+  // Calculate Step 3 status (Address Details) - based on completion flag
   const getStep3Status = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
     
+    // Check completion flag first (from successful API submission)
+    if (currentLead.step3Completed === true) return 'completed';
+    
+    // Fallback to data check for in-progress
     const step3 = currentLead.formData?.step3;
     const hasData = step3?.addresses && 
       step3.addresses.length > 0 &&
       step3.addresses.every((addr: any) => 
         addr.addressType && 
         addr.addressLine1 && 
-        addr.landmark && 
         addr.postalCode && 
         addr.postalCode.length === 6
       );
     
-    if (hasData) return 'completed';
-    if (step3) return 'in-progress';
+    if (hasData) return 'in-progress';
     return 'incomplete';
   };
 
   // Calculate Applicant Details overall status
+  // Both sections must be completed (via API) for this to be marked as completed
   const getApplicantDetailsStatus = (): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    
+    // Check completion flags - both must be true
+    if (currentLead.step2Completed === true && currentLead.step3Completed === true) {
+      return 'completed';
+    }
+    
+    // Check if either section has been submitted
     const step2Status = getStep2Status();
     const step3Status = getStep3Status();
     
-    if (step2Status === 'completed' && step3Status === 'completed') return 'completed';
     if (step2Status === 'incomplete' && step3Status === 'incomplete') return 'incomplete';
     return 'in-progress';
   };
