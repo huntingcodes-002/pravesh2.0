@@ -307,7 +307,7 @@ export default function Step8Page() {
         const backendDocType = mapDocumentTypeToBackend(documentType);
         
         try {
-            // Endpoint 5: Upload document - http://10.40.30.29:8080/api/lead-collection/applications/document-upload/
+            // Endpoint 5: Upload document - https://uatlb.api.saarathifinance.com/api/lead-collection/applications/document-upload/
             const uploadResponse = await uploadDocument({
                 application_id: currentLead.appId,
                 document_type: backendDocType,

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { LogIn, Eye, EyeOff, LayoutGrid } from 'lucide-react';
+import { LogIn, LayoutGrid } from 'lucide-react';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -29,10 +29,7 @@ import { cn } from '@/lib/utils';
 // neutral-gray: #6B7280
 
 const formSchema = z.object({
-  email: z.string().min(1, { message: 'Username / Employee ID is required.' }), // Changed validation to match "Username / Employee ID"
-  password: z.string().min(8, {
-    message: 'Password must be at least 8 characters.',
-  }),
+  email: z.string().email({ message: 'Please enter a valid email address.' }),
 });
 
 type LoginFormValues = z.infer<typeof formSchema>;
@@ -41,41 +38,39 @@ export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
   const { toast } = useToast();
-  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       email: '',
-      password: '',
     },
     mode: 'onChange',
   });
 
   async function onSubmit(data: LoginFormValues) {
     setIsSubmitting(true);
-    const success = await login(data.email, data.password);
+    const success = await login(data.email);
 
     if (success) {
       toast({
-        title: 'Login Successful',
-        description: 'Redirecting to OTP verification.',
+        title: 'OTP Sent',
+        description: 'An OTP has been sent to your email address. Redirecting to verification.',
         className: 'bg-green-50 border-green-200',
       });
-      // Redirect to the OTP page after successful password check
+      // Redirect to the OTP page
       router.push('/otp');
     } else {
       toast({
         title: 'Login Failed',
-        description: 'Invalid username or password.',
+        description: 'An error occurred. Please try again.',
         variant: 'destructive',
       });
       setIsSubmitting(false);
     }
   }
 
-  const isFormValid = form.formState.isValid && form.watch('email') && form.watch('password');
+  const isFormValid = form.formState.isValid && form.watch('email');
   
   // Custom button classes for matching mock disabled/enabled style
   const buttonClass = cn(
@@ -111,47 +106,16 @@ export default function LoginPage() {
                 name="email"
                 render={({ field }) => (
                   <FormItem className='space-y-2'>
-                    <FormLabel className={labelClass}>Username / Employee ID</FormLabel>
+                    <FormLabel className={labelClass}>Email</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Enter your username or employee ID"
-                        type="text"
+                        placeholder="Enter your email address"
+                        type="email"
                         className={inputClass}
                         {...field}
                       />
                     </FormControl>
                     <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem className='space-y-2'>
-                    <FormLabel className={labelClass}>Password</FormLabel>
-                    <FormControl>
-                      <div className="relative">
-                        <Input
-                          placeholder="Enter your password"
-                          type={showPassword ? "text" : "password"}
-                          className={cn(inputClass, "pr-12")}
-                          {...field}
-                        />
-                         <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-4 top-1/2 transform -translate-y-1/2 text-[#6B7280] hover:text-[#0072CE]"
-                          aria-label={showPassword ? "Hide password" : "Show password"}
-                        >
-                          {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                        </button>
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                    <a onClick={() => router.push('/forgot-password')} className="text-sm text-[#0072CE] font-medium hover:underline cursor-pointer">
-                        Forgot Password?
-                    </a>
                   </FormItem>
                 )}
               />

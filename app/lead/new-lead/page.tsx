@@ -13,7 +13,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { useToast } from '@/hooks/use-toast'; // Import useToast
 import { cn } from '@/lib/utils';
 import { Send, CheckCircle, Loader, Edit } from 'lucide-react';
-import { createNewLead, verifyMobileOTP, isApiError } from '@/lib/api';
+import { createNewLead, verifyMobileOTP, isApiError, type ApiSuccess, type NewLeadResponse } from '@/lib/api';
 
 function Step1PageContent() {
   const { currentLead, updateLead } = useLead();
@@ -94,9 +94,11 @@ function Step1PageContent() {
       });
 
       if (isApiError(response)) {
+        // Show validation error from backend
+        const errorMessage = response.error || 'Failed to create new lead. Please try again.';
         toast({
           title: 'Error',
-          description: response.error || 'Failed to create new lead. Please try again.',
+          description: errorMessage,
           variant: 'destructive',
         });
         setIsCreatingLead(false);
@@ -104,20 +106,26 @@ function Step1PageContent() {
         return;
       }
 
-      // Store application_id
-      if (response.data?.application_id) {
-        setApplicationId(response.data.application_id);
+      // Backend response structure: { success: true, application_id, workflow_id, next_step, data: {...} }
+      // application_id is at top level
+      const successResponse = response as ApiSuccess<NewLeadResponse>;
+      
+      // Store application_id from top level
+      const applicationId = successResponse.application_id;
+      
+      if (applicationId) {
+        setApplicationId(applicationId);
         
         // Update lead with application_id
         if (currentLead) {
           updateLead(currentLead.id, {
-            appId: response.data.application_id,
+            appId: applicationId,
             formData: {
               ...currentLead.formData,
               step1: {
                 ...formData,
                 isMobileVerified,
-                applicationId: response.data.application_id,
+                applicationId: applicationId,
               },
             },
           });
@@ -165,9 +173,11 @@ function Step1PageContent() {
       });
 
       if (isApiError(response)) {
+        // Show backend error message (for both 400 and 401)
+        const errorMessage = response.error || 'Failed to verify OTP. Please try again.';
         toast({
           title: 'Verification Failed',
-          description: response.error || 'Invalid OTP. Please try again.',
+          description: errorMessage,
           variant: 'destructive',
         });
         setOtp('');
@@ -175,6 +185,7 @@ function Step1PageContent() {
         return;
       }
 
+      // Backend response structure: { success: true, message, application_id, mobile_verified, next_step, data }
       // OTP verified successfully
       setIsMobileVerified(true);
       setIsOtpModalOpen(false);

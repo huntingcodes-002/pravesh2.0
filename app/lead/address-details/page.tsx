@@ -1,16 +1,16 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { submitAddressDetails, isApiError } from '@/lib/api';
+import { submitAddressDetails, isApiError, getDetailedInfo } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Trash2, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp, CheckCircle2, Loader } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +34,13 @@ export default function Step3Page() {
 
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
+  const [isLoadingOcrData, setIsLoadingOcrData] = useState(false);
+  const hasFetchedOcrData = useRef<string | null>(null);
+  const [isAutoFilledViaAadhaar, setIsAutoFilledViaAadhaar] = useState(
+    currentLead?.formData?.step3?.autoFilledViaAadhaar || 
+    currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar || 
+    false
+  );
 
   useEffect(() => {
     if (currentLead?.formData?.step3?.addresses) {
@@ -51,7 +58,138 @@ export default function Step3Page() {
         },
       ]);
     }
+    // Sync auto-population flag from context
+    setIsAutoFilledViaAadhaar(
+      currentLead?.formData?.step3?.autoFilledViaAadhaar || 
+      currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar || 
+      false
+    );
   }, [currentLead]);
+
+  // Auto-populate address from Aadhaar OCR data if available (only if page not submitted)
+  useEffect(() => {
+    const fetchAndPopulateOcrData = async () => {
+      // Only auto-populate if:
+      // 1. Page was not manually submitted (step3Completed !== true)
+      // 2. We have an application ID
+      // 3. We're not already loading
+      // 4. We haven't already fetched OCR data for this application ID
+      const appId = currentLead?.appId;
+      if (isCompleted || !appId || isLoadingOcrData || hasFetchedOcrData.current === appId) {
+        return;
+      }
+
+      setIsLoadingOcrData(true);
+
+      try {
+        const response = await getDetailedInfo(appId);
+
+        if (isApiError(response)) {
+          toast({
+            title: 'Error',
+            description: response.error || 'Failed to fetch document data. Please try again.',
+            variant: 'destructive',
+          });
+          setIsLoadingOcrData(false);
+          return;
+        }
+
+        // Backend response structure: { success: true, application_id, workflow_state: { aadhaar_extracted_address: {...} }, ... }
+        // All fields are at top level
+        const successResponse = response as any;
+
+        // Check if Aadhaar extracted address exists
+        const aadhaarAddress = successResponse.workflow_state?.aadhaar_extracted_address;
+        
+        if (aadhaarAddress) {
+          // Extract address fields
+          const addressLine1 = aadhaarAddress.address_line_one || aadhaarAddress.address_line_1 || '';
+          const addressLine2 = aadhaarAddress.address_line_two || aadhaarAddress.address_line_2 || '';
+          const pincode = aadhaarAddress.pincode || '';
+          // Default to "residential" if address_type is null
+          const addressType = aadhaarAddress.address_type || 'residential';
+
+          // Only populate if we have at least address_line_1 or pincode
+          if (addressLine1 || pincode) {
+            // Ensure we have at least one address, populate the first one (index 0)
+            setAddresses(prev => {
+              let updatedAddresses: Address[];
+              if (prev.length === 0) {
+                // Create new address if none exists
+                updatedAddresses = [{
+                  id: Date.now().toString(),
+                  addressType: addressType,
+                  addressLine1: addressLine1,
+                  addressLine2: addressLine2,
+                  postalCode: pincode,
+                }];
+              } else {
+                // Overwrite first address with OCR data
+                updatedAddresses = prev.map((addr, index) => 
+                  index === 0 ? {
+                    ...addr,
+                    addressType: addressType,
+                    addressLine1: addressLine1 || addr.addressLine1,
+                    addressLine2: addressLine2 || addr.addressLine2,
+                    postalCode: pincode || addr.postalCode,
+                  } : addr
+                );
+              }
+
+              // Set local state immediately for instant UI update
+              setIsAutoFilledViaAadhaar(true);
+              
+              // Update lead context with auto-population flag
+              if (currentLead) {
+                // Mark addresses as auto-filled via Aadhaar
+                const addressesWithFlag = updatedAddresses.map(addr => ({
+                  ...addr,
+                  autoFilledViaAadhaar: true,
+                }));
+                
+                updateLead(currentLead.id, {
+                  formData: {
+                    ...currentLead.formData,
+                    step3: { 
+                      addresses: addressesWithFlag,
+                      autoFilledViaAadhaar: true, // Mark step3 as auto-filled via Aadhaar
+                    },
+                  },
+                });
+              }
+
+              return updatedAddresses;
+            });
+
+            toast({
+              title: 'Auto-populated',
+              description: 'Address details have been auto-populated from uploaded Aadhaar document.',
+              className: 'bg-blue-50 border-blue-200',
+            });
+          }
+        }
+        
+        // Mark as fetched for this application ID to prevent re-fetching
+        hasFetchedOcrData.current = appId;
+      } catch (error: any) {
+        toast({
+          title: 'Error',
+          description: error.message || 'Failed to fetch document data. Please try again.',
+          variant: 'destructive',
+        });
+        // Mark as fetched even on error to prevent infinite retries
+        hasFetchedOcrData.current = appId;
+      } finally {
+        setIsLoadingOcrData(false);
+      }
+    };
+
+    // Only fetch if we have application ID and page is not completed
+    if (currentLead?.appId && !isCompleted) {
+      fetchAndPopulateOcrData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentLead?.appId, isCompleted]); // Only run when appId changes or completion status changes
 
   const toggleAddressCollapse = (addressId: string) => {
     const newCollapsed = new Set(collapsedAddresses);
@@ -197,15 +335,25 @@ export default function Step3Page() {
         
         <div className="bg-white rounded-xl shadow-sm p-6 space-y-6 border border-gray-100">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-[#003366]">
-              Address Information
-            </h2>
-            {isCompleted && (
-              <Badge className="bg-green-100 text-green-800 border-green-200">
-                <CheckCircle2 className="w-3 h-3 mr-1" />
-                Completed
-              </Badge>
-            )}
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold text-[#003366]">
+                Address Information
+              </h2>
+              {isLoadingOcrData && (
+                <Loader className="text-[#0072CE] animate-spin w-5 h-5" />
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {(isAutoFilledViaAadhaar || currentLead?.formData?.step3?.autoFilledViaAadhaar || currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar) && (
+                <Badge className="bg-green-100 text-green-700 text-xs">Verified via Aadhaar</Badge>
+              )}
+              {isCompleted && (
+                <Badge className="bg-green-100 text-green-800 border-green-200">
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  Completed
+                </Badge>
+              )}
+            </div>
           </div>
 
           <div className="space-y-5">
@@ -366,6 +514,11 @@ export default function Step3Page() {
             })}
 
           </div>
+          
+          {/* Auto-filled verification message */}
+          {(isAutoFilledViaAadhaar || currentLead?.formData?.step3?.autoFilledViaAadhaar || currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar) && (
+            <p className="text-xs text-gray-400 mt-4">Auto-filled and verified via Aadhaar OCR workflow</p>
+          )}
         </div>
 
         {/* Fixed Bottom Button */}

@@ -2,95 +2,141 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { MOCK_USER, validateOTP } from '@/lib/mock-auth';
+import { requestLoginOTP, verifyOTP, isApiError, type ApiSuccess } from '@/lib/api';
 
 interface User {
-  id: string;
+  user_id: number;
   email: string;
-  name: string;
-  rmId: string;
-  phone: string;
+  username: string;
+  first_name: string;
+  last_name: string;
+  employee_code: string;
+  designation: string | null;
+  branch: {
+    id: number;
+    name: string;
+    code: string;
+  } | null;
+  state: {
+    id: number;
+    name: string;
+  } | null;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
-  verifyOtpAndSignIn: (otp: string) => Promise<boolean>;
+  login: (email: string) => Promise<boolean>;
+  verifyOtpAndSignIn: (email: string, otp: string) => Promise<boolean>;
   logout: () => void;
-  pendingAuth: { email: string; user: User } | null;
+  pendingAuth: { email: string } | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const USER_STORAGE_KEY = 'user';
+const AUTH_STORAGE_KEY = 'auth';
 const PENDING_AUTH_KEY = 'pendingAuth';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [pendingAuth, setPendingAuth] = useState<{ email: string; user: User } | null>(null);
+  const [pendingAuth, setPendingAuth] = useState<{ email: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    // 1. Check for authenticated user
-    const storedUser = localStorage.getItem(USER_STORAGE_KEY);
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-    
-    // 2. Check for pending authentication (waiting for OTP)
-    const storedPendingAuth = sessionStorage.getItem(PENDING_AUTH_KEY);
-    if (storedPendingAuth) {
-        setPendingAuth(JSON.parse(storedPendingAuth));
+    // 1. Check for authenticated user and tokens
+    if (typeof window !== 'undefined') {
+      const storedAuth = sessionStorage.getItem(AUTH_STORAGE_KEY);
+      const storedUser = sessionStorage.getItem(USER_STORAGE_KEY);
+      
+      if (storedAuth && storedUser) {
+        try {
+          setUser(JSON.parse(storedUser));
+        } catch {
+          // Invalid data, clear it
+          sessionStorage.removeItem(AUTH_STORAGE_KEY);
+          sessionStorage.removeItem(USER_STORAGE_KEY);
+        }
+      }
+      
+      // 2. Check for pending authentication (waiting for OTP)
+      const storedPendingAuth = sessionStorage.getItem(PENDING_AUTH_KEY);
+      if (storedPendingAuth) {
+        try {
+          setPendingAuth(JSON.parse(storedPendingAuth));
+        } catch {
+          sessionStorage.removeItem(PENDING_AUTH_KEY);
+        }
+      }
     }
 
     setLoading(false);
   }, []);
 
-  const login = async (email: string, password: string): Promise<boolean> => {
-    // Check credentials, but DO NOT sign in yet. Prepare user object for OTP.
-    if (email === MOCK_USER.email && password === MOCK_USER.password) {
-      const userData: User = {
-        id: '1',
-        email: MOCK_USER.email,
-        name: MOCK_USER.name,
-        rmId: MOCK_USER.rmId,
-        phone: MOCK_USER.phone
-      };
+  const login = async (email: string): Promise<boolean> => {
+    try {
+      const response = await requestLoginOTP({ email });
 
-      const authData = { email: email, user: userData };
+      if (isApiError(response)) {
+        return false;
+      }
+
+      // Store pending auth with email
+      const authData = { email };
       setPendingAuth(authData);
       sessionStorage.setItem(PENDING_AUTH_KEY, JSON.stringify(authData));
       
-      // Successfully authenticated credentials, now proceed to OTP step
-      return true; 
+      return true;
+    } catch (error) {
+      return false;
     }
-    return false;
   };
 
-  const verifyOtpAndSignIn = async (otp: string): Promise<boolean> => {
-    if (!pendingAuth) {
-        return false;
-    }
+  const verifyOtpAndSignIn = async (email: string, otp: string): Promise<boolean> => {
+    try {
+      const response = await verifyOTP({ email, otp });
 
-    // Logic: Validate OTP using mock-auth
-    if (validateOTP(otp)) {
-        // Final sign-in step: clear pending state and set user
-        setUser(pendingAuth.user);
-        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(pendingAuth.user));
-        sessionStorage.removeItem(PENDING_AUTH_KEY);
-        setPendingAuth(null);
-        return true;
+      if (isApiError(response)) {
+        return false;
+      }
+
+      // Backend response structure: { success: true, access_token, refresh_token, user_info, ... }
+      // All fields are at top level, not wrapped in data
+      const successResponse = response as ApiSuccess<VerifyOTPResponse>;
+
+      // Store tokens and user info in sessionStorage
+      const authData = {
+        access_token: successResponse.access_token,
+        refresh_token: successResponse.refresh_token,
+        token_type: successResponse.token_type,
+        expires_in: successResponse.expires_in,
+      };
+
+      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
+      
+      // Extract user_info from response (fields are at top level)
+      if (successResponse.user_info) {
+        setUser(successResponse.user_info);
+        sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(successResponse.user_info));
+      }
+
+      // Clear pending auth
+      sessionStorage.removeItem(PENDING_AUTH_KEY);
+      setPendingAuth(null);
+      
+      return true;
+    } catch (error) {
+      return false;
     }
-    
-    return false;
   };
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem(USER_STORAGE_KEY);
+    sessionStorage.removeItem(USER_STORAGE_KEY);
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
     sessionStorage.removeItem(PENDING_AUTH_KEY);
+    setPendingAuth(null);
     router.push('/login');
   };
 

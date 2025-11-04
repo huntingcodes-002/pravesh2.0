@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp';
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { CircleCheck, ShieldAlert, RotateCcw, Loader } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label'; // <-- ADDED IMPORT FOR LABEL
@@ -24,7 +24,7 @@ export default function OtpVerificationPage() {
   // Redirect if no pending auth data
   useEffect(() => {
     if (!pendingAuth) {
-      router.replace('/leads');
+      router.replace('/login');
     }
   }, [pendingAuth, router]);
 
@@ -41,36 +41,46 @@ export default function OtpVerificationPage() {
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (otp.length !== 6) {
+    if (otp.length !== 4) {
       toast({
         title: 'Error',
-        description: 'Please enter the 6-digit OTP.',
+        description: 'Please enter the 4-digit OTP.',
         variant: 'destructive',
       });
       return;
     }
 
-    setIsVerifying(true);
-    
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 500)); 
+    if (!pendingAuth) {
+      toast({
+        title: 'Error',
+        description: 'Session expired. Please login again.',
+        variant: 'destructive',
+      });
+      router.push('/login');
+      return;
+    }
 
-    const success = await verifyOtpAndSignIn(otp);
+    setIsVerifying(true);
+
+    const success = await verifyOtpAndSignIn(pendingAuth.email, otp);
     
     if (success) {
       toast({
         title: 'Verification Successful',
-        description: 'Mobile number verified. Redirecting to Leads.',
+        description: 'Email verified. Redirecting to Leads.',
         className: 'bg-green-50 border-green-200',
         action: <CircleCheck className='h-4 w-4'/>
       });
       
-      // Redirect to the Leads page
-      router.replace('/leads'); 
+      // Wait a moment for state to update before redirecting
+      // This ensures the AuthContext has time to set the user state
+      setTimeout(() => {
+        router.replace('/leads'); 
+      }, 100);
     } else {
       toast({
         title: 'Verification Failed',
-        description: 'The OTP entered is incorrect. Please try again.',
+        description: 'Failed to verify OTP. Please try again.',
         variant: 'destructive',
       });
       setOtp(''); // Clear OTP on failure
@@ -79,10 +89,11 @@ export default function OtpVerificationPage() {
   };
   
   const handleResend = () => {
+    // Resend OTP functionality will be implemented later
     setResendTimer(60); // Reset timer to 60 seconds
     toast({
       title: 'OTP Resent',
-      description: 'A new OTP has been sent to your registered mobile number.',
+      description: 'A new OTP has been sent to your email address.',
       className: 'bg-blue-50 border-blue-200',
       action: <RotateCcw className='h-4 w-4'/>
     });
@@ -92,7 +103,17 @@ export default function OtpVerificationPage() {
     return null;
   }
   
-  const isOtpValidLength = otp.length === 6;
+  const isOtpValidLength = otp.length === 4;
+  
+  // Mask email for display
+  const maskEmail = (email: string) => {
+    const [localPart, domain] = email.split('@');
+    if (localPart.length <= 2) {
+      return `${'*'.repeat(localPart.length)}@${domain}`;
+    }
+    const masked = localPart[0] + '*'.repeat(localPart.length - 2) + localPart[localPart.length - 1];
+    return `${masked}@${domain}`;
+  };
   const buttonClass = cn(
     'w-full h-14 py-4 rounded-xl font-semibold text-lg transition-colors flex items-center justify-center',
     isVerifying && 'opacity-70 cursor-not-allowed',
@@ -117,17 +138,17 @@ export default function OtpVerificationPage() {
           </div>
           <CardTitle className="text-2xl font-bold text-[#003366]">Verify Your Identity</CardTitle>
           <CardDescription className="text-sm text-[#6B7280] px-4">
-            An OTP has been sent to your registered mobile number ending with ****{pendingAuth.user.phone.slice(-4)}
+            An OTP has been sent to your email address {maskEmail(pendingAuth.email)}
           </CardDescription>
         </CardHeader>
         <CardContent className='px-6 py-4'>
           <form onSubmit={handleVerify} className="space-y-6">
             
             <div className="space-y-4">
-                <Label className={labelClass}>Enter 6-digit OTP</Label>
+                <Label className={labelClass}>Enter 4-digit OTP</Label>
                 <div id="otp-inputs" className={otpGroupClass}>
                     <InputOTP 
-                        maxLength={6}
+                        maxLength={4}
                         value={otp}
                         onChange={(value) => setOtp(value)}
                         disabled={isVerifying}
@@ -138,8 +159,6 @@ export default function OtpVerificationPage() {
                             <InputOTPSlot index={1} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
                             <InputOTPSlot index={2} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
                             <InputOTPSlot index={3} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
-                            <InputOTPSlot index={4} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
-                            <InputOTPSlot index={5} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
                         </InputOTPGroup>
                     </InputOTP>
                 </div>

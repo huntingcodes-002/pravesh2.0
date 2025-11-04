@@ -52,11 +52,18 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           <div className="p-6 border-b bg-gradient-to-r from-blue-50 to-green-50">
             <div className="flex items-center space-x-3 mb-4">
               <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-lg">
-                {user?.name.charAt(0) || 'A'}
+                {user?.first_name?.charAt(0) || user?.email?.charAt(0).toUpperCase() || 'A'}
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">{user?.name}</h3>
-                <p className="text-sm text-gray-600">{user?.rmId}</p>
+                <h3 className="font-semibold text-gray-900">
+                  {user?.first_name && user?.last_name 
+                    ? `${user.first_name} ${user.last_name}` 
+                    : user?.username || 'User'}
+                </h3>
+                <p className="text-sm text-gray-600">{user?.employee_code || user?.username}</p>
+                {user?.designation && (
+                  <p className="text-xs text-gray-500">{user.designation}</p>
+                )}
               </div>
             </div>
             <div className="space-y-1 text-sm text-gray-700">
@@ -64,10 +71,18 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 <span className="font-medium w-16">Email:</span>
                 <span>{user?.email}</span>
               </p>
-              <p className="flex items-center">
-                <span className="font-medium w-16">Phone:</span>
-                <span>{user?.phone}</span>
-              </p>
+              {user?.branch && (
+                <p className="flex items-center">
+                  <span className="font-medium w-16">Branch:</span>
+                  <span>{user.branch.name} ({user.branch.code})</span>
+                </p>
+              )}
+              {user?.state && (
+                <p className="flex items-center">
+                  <span className="font-medium w-16">State:</span>
+                  <span>{user.state.name}</span>
+                </p>
+              )}
             </div>
           </div>
 

@@ -88,8 +88,26 @@ export default function LeadsDashboardPage() {
 
   // Auth Redirect Check
   useEffect(() => {
-    if (!authLoading && !user) {
-      router.replace('/login');
+    if (!authLoading) {
+      // Check if user is authenticated via sessionStorage (in case AuthContext hasn't loaded yet)
+      if (typeof window !== 'undefined') {
+        const storedAuth = sessionStorage.getItem('auth');
+        const storedUser = sessionStorage.getItem('user');
+        
+        // If we have auth data in sessionStorage but user state is null, wait a bit for AuthContext to load
+        if (storedAuth && storedUser && !user) {
+          // Give AuthContext a moment to load from sessionStorage
+          return;
+        }
+      }
+      
+      // Only redirect if we truly don't have a user and no auth data in sessionStorage
+      if (!user && typeof window !== 'undefined') {
+        const storedAuth = sessionStorage.getItem('auth');
+        if (!storedAuth) {
+          router.replace('/login');
+        }
+      }
     }
   }, [user, authLoading, router]);
 

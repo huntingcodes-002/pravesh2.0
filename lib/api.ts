@@ -2,7 +2,7 @@
  * API utility functions for backend integration
  */
 
-const API_BASE_URL = 'http://10.40.30.29:8080/api/lead-collection';
+const API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/';
 
 export interface ApiError {
   success: false;
@@ -19,6 +19,8 @@ export interface ApiSuccess<T = any> {
   workflow_id?: string;
   next_step?: string;
   data?: T;
+  // Allow additional fields for auth endpoints that return data at top level
+  [key: string]: any;
 }
 
 export type ApiResponse<T = any> = ApiSuccess<T> | ApiError;
@@ -28,6 +30,24 @@ export type ApiResponse<T = any> = ApiSuccess<T> | ApiError;
  */
 export function isApiError(response: ApiResponse): response is ApiError {
   return !response.success;
+}
+
+/**
+ * Helper function to get access token from sessionStorage
+ */
+function getAccessToken(): string | null {
+  if (typeof window !== 'undefined') {
+    const authData = sessionStorage.getItem('auth');
+    if (authData) {
+      try {
+        const parsed = JSON.parse(authData);
+        return parsed.access_token || null;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -63,11 +83,15 @@ async function apiFetch<T = any>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
+    // Get access token if available
+    const accessToken = getAccessToken();
+    
     // Build fetch options ensuring method from options takes precedence
     const fetchOptions: RequestInit = {
       ...options, // Spread options first (includes method if specified)
       headers: {
         'Content-Type': 'application/json',
+        ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         ...options.headers, // Allow custom headers to override
       },
     };
@@ -101,10 +125,19 @@ async function apiFetchFormData<T = any>(
   formData: FormData
 ): Promise<ApiResponse<T>> {
   try {
+    // Get access token if available
+    const accessToken = getAccessToken();
+    
+    const headers: HeadersInit = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+    // Don't set Content-Type header - browser will set it with boundary
+    
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',
+      headers,
       body: formData,
-      // Don't set Content-Type header - browser will set it with boundary
     });
 
     const data = await response.json();
@@ -117,6 +150,75 @@ async function apiFetchFormData<T = any>(
   } catch (error: any) {
     return handleApiError(error);
   }
+}
+
+// ============================================================================
+// Authentication API Endpoints
+// ============================================================================
+
+/**
+ * Authentication: Request Login OTP
+ * POST /api/lead-collection/auth/login/
+ */
+export interface LoginRequest {
+  email: string;
+}
+
+export interface LoginResponse {
+  success: true;
+  message: string;
+  email_masked: string;
+  expires_in_minutes: number;
+}
+
+export async function requestLoginOTP(data: LoginRequest): Promise<ApiResponse<LoginResponse>> {
+  return apiFetch<LoginResponse>('auth/login/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Authentication: Verify OTP
+ * POST /api/lead-collection/auth/verify-otp/
+ */
+export interface VerifyOTPRequest {
+  email: string;
+  otp: string;
+}
+
+export interface VerifyOTPResponse {
+  success: true;
+  message: string;
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+  user_info: {
+    user_id: number;
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    employee_code: string;
+    designation: string | null;
+    branch: {
+      id: number;
+      name: string;
+      code: string;
+    } | null;
+    state: {
+      id: number;
+      name: string;
+    } | null;
+  };
+}
+
+export async function verifyOTP(data: VerifyOTPRequest): Promise<ApiResponse<VerifyOTPResponse>> {
+  return apiFetch<VerifyOTPResponse>('auth/verify-otp/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 // ============================================================================
@@ -137,6 +239,8 @@ export interface NewLeadRequest {
 
 export interface NewLeadResponse {
   application_id: string;
+  workflow_id?: string;
+  next_step?: string;
   product_type: string;
   application_type: string;
   mobile_number: string;
@@ -145,7 +249,7 @@ export interface NewLeadResponse {
 }
 
 export async function createNewLead(data: NewLeadRequest): Promise<ApiResponse<NewLeadResponse>> {
-  return apiFetch<NewLeadResponse>('/applications/new-lead/', {
+  return apiFetch<NewLeadResponse>('applications/new-lead/', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -161,9 +265,10 @@ export interface VerifyMobileRequest {
 }
 
 export interface VerifyMobileResponse {
-  success: boolean;
-  mobile_verified?: boolean;
-  application_id?: string;
+  success: true;
+  message: string;
+  application_id: string;
+  mobile_verified: boolean;
   next_step?: string;
   data?: {
     customer_id?: string;
@@ -173,7 +278,7 @@ export interface VerifyMobileResponse {
 }
 
 export async function verifyMobileOTP(data: VerifyMobileRequest): Promise<ApiResponse<VerifyMobileResponse>> {
-  return apiFetch<VerifyMobileResponse>('/applications/verify-mobile/', {
+  return apiFetch<VerifyMobileResponse>('applications/verify-mobile/', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -217,7 +322,7 @@ export interface PersonalInfoResponse {
 }
 
 export async function submitPersonalInfo(data: PersonalInfoRequest): Promise<ApiResponse<PersonalInfoResponse>> {
-  return apiFetch<PersonalInfoResponse>('/applications/personal-info/', {
+  return apiFetch<PersonalInfoResponse>('applications/personal-info/', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -247,7 +352,7 @@ export interface AddressDetailsResponse {
 }
 
 export async function submitAddressDetails(data: AddressDetailsRequest): Promise<ApiResponse<AddressDetailsResponse>> {
-  return apiFetch<AddressDetailsResponse>('/applications/address-details/', {
+  return apiFetch<AddressDetailsResponse>('applications/address-details/', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -309,7 +414,7 @@ export async function uploadDocument(data: DocumentUploadRequest): Promise<ApiRe
     formData.append('metadata', JSON.stringify(data.metadata));
   }
 
-  return apiFetchFormData<DocumentUploadResponse>('/applications/document-upload/', formData);
+  return apiFetchFormData<DocumentUploadResponse>('applications/document-upload/', formData);
 }
 
 /**
@@ -400,7 +505,7 @@ export interface DetailedInfoResponse {
 }
 
 export async function getDetailedInfo(application_id: string): Promise<ApiResponse<DetailedInfoResponse>> {
-  return apiFetch<DetailedInfoResponse>(`/applications/${application_id}/detailed-info/`, {
+  return apiFetch<DetailedInfoResponse>(`applications/${application_id}/detailed-info/`, {
     method: 'GET',
   });
 }

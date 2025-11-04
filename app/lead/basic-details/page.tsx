@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Calendar, CheckCircle, AlertTriangle, Loader, Edit, X } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { submitPersonalInfo, isApiError } from '@/lib/api';
+import { submitPersonalInfo, isApiError, getDetailedInfo } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -164,6 +164,10 @@ export default function Step2Page() {
   const [isNameEditOpen, setIsNameEditOpen] = useState(false);
   const [localFirstName, setLocalFirstName] = useState(currentLead?.customerFirstName || '');
   const [localLastName, setLocalLastName] = useState(currentLead?.customerLastName || '');
+  const [isLoadingOcrData, setIsLoadingOcrData] = useState(false);
+  const hasFetchedOcrData = useRef<string | null>(null);
+  const [isAutoFilledViaPAN, setIsAutoFilledViaPAN] = useState(currentLead?.formData?.step2?.autoFilledViaPAN || false);
+  const [isAutoFilledViaAadhaar, setIsAutoFilledViaAadhaar] = useState(currentLead?.formData?.step2?.autoFilledViaAadhaar || false);
 
 
   useEffect(() => {
@@ -181,6 +185,9 @@ export default function Step2Page() {
         setLocalFirstName(currentLead.customerFirstName || '');
         setLocalLastName(currentLead.customerLastName || '');
         setNameMismatchReason(step2Data.nameMismatchReason || '');
+        // Sync auto-population flags from context
+        setIsAutoFilledViaPAN(step2Data.autoFilledViaPAN || false);
+        setIsAutoFilledViaAadhaar(step2Data.autoFilledViaAadhaar || false);
         
         if (currentLead.panNumber) {
             setIsPanTouched(true);
@@ -188,6 +195,211 @@ export default function Step2Page() {
         }
     }
   }, [currentLead]);
+
+  // Auto-populate PAN and DOB from OCR data if available (only if page not submitted)
+  useEffect(() => {
+    const fetchAndPopulateOcrData = async () => {
+      // Only auto-populate if:
+      // 1. Page was not manually submitted (step2Completed !== true)
+      // 2. We have an application ID
+      // 3. We're not already loading
+      // 4. We haven't already fetched OCR data for this application ID
+      const appId = currentLead?.appId;
+      if (isCompleted || !appId || isLoadingOcrData || hasFetchedOcrData.current === appId) {
+        return;
+      }
+
+      setIsLoadingOcrData(true);
+
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+
+        if (isApiError(response)) {
+          toast({
+            title: 'Error',
+            description: response.error || 'Failed to fetch document data. Please try again.',
+            variant: 'destructive',
+          });
+          setIsLoadingOcrData(false);
+          return;
+        }
+
+        // Backend response structure: { success: true, application_id, workflow_state: { pan_ocr_data: {...} }, ... }
+        // All fields are at top level
+        const successResponse = response as any;
+
+        // Check if PAN OCR data exists for PAN and DOB
+        const panExtractedFields = successResponse.workflow_state?.pan_ocr_data?.extracted_fields;
+        
+        // Check if Aadhaar OCR data exists for gender
+        const aadhaarExtractedFields = successResponse.workflow_state?.aadhaar_ocr_data?.extracted_fields;
+        
+        // Process PAN data if available
+        if (panExtractedFields) {
+          // Helper function to convert DD/MM/YYYY to YYYY-MM-DD format
+          const convertDDMMYYYYToISO = (dateStr: string): string => {
+            if (!dateStr) return '';
+            
+            // If already in ISO format (YYYY-MM-DD), return as is
+            if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              return dateStr;
+            }
+            
+            // If in DD/MM/YYYY format (e.g., "24/08/2002"), convert to YYYY-MM-DD
+            const slashMatch = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            if (slashMatch) {
+              const [, day, month, year] = slashMatch;
+              return `${year}-${month}-${day}`;
+            }
+            
+            return dateStr; // Return as-is if conversion fails
+          };
+
+          // Extract PAN number
+          let panNumber: string | null = null;
+          if (panExtractedFields.pan_number) {
+            const panValue = String(panExtractedFields.pan_number).trim();
+            if (panValue && panValue.length > 0) {
+              panNumber = panValue;
+            }
+          }
+
+          // Extract date of birth and convert from DD/MM/YYYY to YYYY-MM-DD
+          let dateOfBirth: string | null = null;
+          if (panExtractedFields.date_of_birth) {
+            const dobValue = String(panExtractedFields.date_of_birth).trim();
+            if (dobValue && dobValue.length > 0) {
+              dateOfBirth = convertDDMMYYYYToISO(dobValue);
+            }
+          }
+
+          // Only populate if we have at least one field
+          if (panNumber || dateOfBirth) {
+            // Calculate age if DOB is available
+            let calculatedAge = 0;
+            if (dateOfBirth) {
+              try {
+                const today = new Date();
+                const birthDate = new Date(dateOfBirth);
+                if (!isNaN(birthDate.getTime())) {
+                  calculatedAge = today.getFullYear() - birthDate.getFullYear();
+                  const m = today.getMonth() - birthDate.getMonth();
+                  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                    calculatedAge--;
+                  }
+                }
+              } catch (e) {
+                console.error('Error calculating age:', e);
+              }
+            }
+
+            // Overwrite existing values with OCR data
+            setFormData(prev => ({
+              ...prev,
+              pan: panNumber || prev.pan,
+              dob: dateOfBirth || prev.dob,
+              age: calculatedAge || prev.age,
+            }));
+
+            // Set local state immediately for instant UI update
+            setIsAutoFilledViaPAN(true);
+            
+            // Update lead context with auto-population flag
+            if (currentLead) {
+              updateLead(currentLead.id, {
+                panNumber: panNumber || currentLead.panNumber || '',
+                dob: dateOfBirth || currentLead.dob || '',
+                age: calculatedAge || currentLead.age || 0,
+                formData: {
+                  ...currentLead.formData,
+                  step2: {
+                    ...currentLead.formData?.step2,
+                    pan: panNumber || currentLead.formData?.step2?.pan || '',
+                    dob: dateOfBirth || currentLead.formData?.step2?.dob || '',
+                    age: calculatedAge || currentLead.formData?.step2?.age || 0,
+                    autoFilledViaPAN: true, // Mark as auto-filled via PAN
+                  },
+                },
+              });
+            }
+
+            toast({
+              title: 'Auto-populated',
+              description: 'PAN number and Date of Birth have been auto-populated from uploaded document.',
+              className: 'bg-blue-50 border-blue-200',
+            });
+          }
+        }
+
+        // Process Aadhaar data if available (for gender)
+        let genderValue: string | null = null;
+        if (aadhaarExtractedFields?.gender) {
+          const gender = String(aadhaarExtractedFields.gender).trim().toLowerCase();
+          // Map common gender values to form values
+          if (gender === 'male' || gender === 'm') {
+            genderValue = 'male';
+          } else if (gender === 'female' || gender === 'f') {
+            genderValue = 'female';
+          } else if (gender === 'other' || gender === 'o') {
+            genderValue = 'other';
+          } else if (gender === 'not-specified' || gender === 'not specified') {
+            genderValue = 'not-specified';
+          }
+        }
+
+        // Populate gender if available
+        if (genderValue) {
+          setFormData(prev => ({
+            ...prev,
+            gender: genderValue,
+          }));
+
+          // Set local state immediately for instant UI update
+          setIsAutoFilledViaAadhaar(true);
+          
+          // Update lead context with auto-population flag for gender
+          if (currentLead) {
+            updateLead(currentLead.id, {
+              gender: genderValue,
+              formData: {
+                ...currentLead.formData,
+                step2: {
+                  ...currentLead.formData?.step2,
+                  gender: genderValue,
+                  autoFilledViaAadhaar: true, // Mark gender as auto-filled via Aadhaar
+                },
+              },
+            });
+          }
+
+          toast({
+            title: 'Auto-populated',
+            description: 'Gender has been auto-populated from uploaded Aadhaar document.',
+            className: 'bg-blue-50 border-blue-200',
+          });
+        }
+        
+        // Mark as fetched for this application ID to prevent re-fetching
+        hasFetchedOcrData.current = appId;
+      } catch (error: any) {
+        toast({
+          title: 'Error',
+          description: error.message || 'Failed to fetch document data. Please try again.',
+          variant: 'destructive',
+        });
+        // Mark as fetched even on error to prevent infinite retries
+        hasFetchedOcrData.current = appId;
+      } finally {
+        setIsLoadingOcrData(false);
+      }
+    };
+
+    // Only fetch if we have application ID and page is not completed
+    if (currentLead?.appId && !isCompleted) {
+      fetchAndPopulateOcrData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentLead?.appId, isCompleted]); // Only run when appId changes or completion status changes
 
   // Removed: PAN validation should only trigger after DOB is set, not on PAN input change
   
@@ -510,8 +722,11 @@ export default function Step2Page() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6 mb-4">
-            <div className="border-b border-gray-100 pb-2 mb-6">
+            <div className="border-b border-gray-100 pb-2 mb-6 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-[#003366]">Identity Verification</h3>
+                {(isAutoFilledViaPAN || currentLead?.formData?.step2?.autoFilledViaPAN) && (
+                  <Badge className="bg-green-100 text-green-700 text-xs">Verified via PAN</Badge>
+                )}
             </div>
           
             <div className="space-y-6">
@@ -556,10 +771,10 @@ export default function Step2Page() {
                                     className={cn("w-full h-12 px-4 py-3 border-gray-300 rounded-xl uppercase tracking-wider", panValidationStatus === 'invalid' && 'border-red-500', isCompleted && 'bg-gray-50 cursor-not-allowed')}
                                 />
                                 <div className="absolute right-3 h-full flex items-center">
-                                    {isVerifyingPan && <Loader className="text-[#0072CE] animate-spin w-5 h-5" />}
-                                    {!isVerifyingPan && panValidationStatus === 'valid' && <CheckCircle className="text-[#16A34A] w-5 h-5" />}
-                                    {!isVerifyingPan && panValidationStatus === 'invalid' && <X className="text-[#DC2626] w-5 h-5" />}
-                                    {!isVerifyingPan && panValidationStatus === 'mismatch' && <AlertTriangle className="text-yellow-600 w-5 h-5" />}
+                                    {(isVerifyingPan || isLoadingOcrData) && <Loader className="text-[#0072CE] animate-spin w-5 h-5" />}
+                                    {!isVerifyingPan && !isLoadingOcrData && panValidationStatus === 'valid' && <CheckCircle className="text-[#16A34A] w-5 h-5" />}
+                                    {!isVerifyingPan && !isLoadingOcrData && panValidationStatus === 'invalid' && <X className="text-[#DC2626] w-5 h-5" />}
+                                    {!isVerifyingPan && !isLoadingOcrData && panValidationStatus === 'mismatch' && <AlertTriangle className="text-yellow-600 w-5 h-5" />}
                                 </div>
                              </div>
                              {panFormatError && (
@@ -597,6 +812,9 @@ export default function Step2Page() {
                                     </div>
                                 </div>
                             </div>
+                        )}
+                        {(isAutoFilledViaPAN || currentLead?.formData?.step2?.autoFilledViaPAN) && (
+                          <p className="text-xs text-gray-400 mt-2">Auto-filled and verified via PAN & NSDL workflow</p>
                         )}
                 </div>
             
@@ -643,6 +861,9 @@ export default function Step2Page() {
                         <Label htmlFor="g-other" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all", formData.gender === 'other' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300', isCompleted ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}><RadioGroupItem value="other" id="g-other" className="sr-only" disabled={isCompleted} />Other</Label>
                         <Label htmlFor="g-not-specified" className={cn("flex items-center justify-center gap-2 p-3 border rounded-xl transition-all", formData.gender === 'not-specified' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300', isCompleted ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}><RadioGroupItem value="not-specified" id="g-not-specified" className="sr-only" disabled={isCompleted} />Not Specified</Label>
                     </RadioGroup>
+                    {(isAutoFilledViaAadhaar || currentLead?.formData?.step2?.autoFilledViaAadhaar) && (
+                      <p className="text-xs text-gray-400 mt-2">Auto-filled and verified via Aadhaar OCR workflow</p>
+                    )}
                 </div>
                  <div>
                     <Label htmlFor="email-input" className="text-sm font-medium text-[#003366] mb-2 block">Email</Label>
