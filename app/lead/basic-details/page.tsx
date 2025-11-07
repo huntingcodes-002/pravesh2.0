@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, CheckCircle, AlertTriangle, Loader, Edit, X } from 'lucide-react';
+import { CheckCircle, AlertTriangle, Loader, Edit, X } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
 import { submitPersonalInfo, isApiError, getDetailedInfo } from '@/lib/api';
@@ -11,11 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar as DatePicker } from '@/components/ui/calendar';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -152,6 +148,43 @@ export default function Step2Page() {
     email: currentLead?.formData?.step2?.email || '',
   });
 
+  // Helper function to convert YYYY-MM-DD to DD/MM/YYYY format
+  const convertISOToDDMMYYYY = (dobString: string): string => {
+    if (!dobString) return '';
+    try {
+      const date = new Date(dobString);
+      if (isNaN(date.getTime())) return '';
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear().toString();
+      return `${day}/${month}/${year}`;
+    } catch {
+      return '';
+    }
+  };
+
+  // Helper function to convert DD/MM/YYYY to YYYY-MM-DD format
+  const convertDDMMYYYYToISO = (dateStr: string): string => {
+    if (!dateStr) return '';
+    
+    // If already in ISO format (YYYY-MM-DD), return as is
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return dateStr;
+    }
+    
+    // If in DD/MM/YYYY format (e.g., "24/08/2002"), convert to YYYY-MM-DD
+    const slashMatch = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (slashMatch) {
+      const [, day, month, year] = slashMatch;
+      return `${year}-${month}-${day}`;
+    }
+    
+    return dateStr; // Return as-is if conversion fails
+  };
+
+  // State for formatted DOB input in DD/MM/YYYY format
+  const [dobFormatted, setDobFormatted] = useState(convertISOToDDMMYYYY(currentLead?.dob || ''));
+
   const [panValidationStatus, setPanValidationStatus] = useState<ValidationStatus>('pending');
   const [panApiName, setPanApiName] = useState('');
   const [nameMismatchReason, setNameMismatchReason] = useState(currentLead?.formData?.step2?.nameMismatchReason || '');
@@ -170,18 +203,75 @@ export default function Step2Page() {
   const [isAutoFilledViaAadhaar, setIsAutoFilledViaAadhaar] = useState(currentLead?.formData?.step2?.autoFilledViaAadhaar || false);
 
 
+  // Helper function to update DOB and calculate age from DD/MM/YYYY format
+  const updateDOBFromFormatted = (formattedDate: string) => {
+    const isoDate = convertDDMMYYYYToISO(formattedDate);
+    if (isoDate && isoDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      try {
+        const date = new Date(isoDate);
+        if (!isNaN(date.getTime())) {
+          const today = new Date();
+          let age = today.getFullYear() - date.getFullYear();
+          const m = today.getMonth() - date.getMonth();
+          if (m < 0 || (m === 0 && today.getDate() < date.getDate())) {
+            age--;
+          }
+          setFormData(prev => ({ ...prev, dob: isoDate, age: age }));
+          return true;
+        }
+      } catch (e) {
+        // Invalid date, don't update
+      }
+    }
+    return false;
+  };
+
+  // Helper function to get dynamic placeholder based on current input
+  const getDynamicPlaceholder = (value: string): string => {
+    const digitsOnly = value.replace(/\//g, '');
+    const length = digitsOnly.length;
+    
+    if (length === 0) return 'DD/MM/YYYY';
+    if (length <= 2) {
+      // User has entered day, show remaining parts
+      const dayPart = digitsOnly.padEnd(2, 'D');
+      return `${dayPart}/MM/YYYY`;
+    }
+    if (length <= 4) {
+      // User has entered day and month, show remaining parts
+      const dayPart = digitsOnly.slice(0, 2);
+      const monthPart = digitsOnly.slice(2, 4).padEnd(2, 'M');
+      return `${dayPart}/${monthPart}/YYYY`;
+    }
+    if (length <= 8) {
+      // User has entered day, month, and partial year
+      const dayPart = digitsOnly.slice(0, 2);
+      const monthPart = digitsOnly.slice(2, 4);
+      const yearPart = digitsOnly.slice(4, 8).padEnd(4, 'Y');
+      return `${dayPart}/${monthPart}/${yearPart}`;
+    }
+    return 'DD/MM/YYYY';
+  };
+
   useEffect(() => {
     if (currentLead) {
         const step2Data = currentLead.formData?.step2 || {};
+        const newPan = currentLead.panNumber || '';
+        const panChanged = newPan !== formData.pan;
+        
         setFormData(prev => ({
             ...prev,
             customerType: 'individual',
-            pan: currentLead.panNumber || '',
+            pan: newPan,
             dob: currentLead.dob || '',
             age: currentLead.age || 0,
             gender: currentLead.gender || '',
             email: currentLead.formData?.step2?.email || '',
         }));
+        
+        // Update formatted DOB when currentLead changes
+        setDobFormatted(convertISOToDDMMYYYY(currentLead.dob || ''));
+        
         setLocalFirstName(currentLead.customerFirstName || '');
         setLocalLastName(currentLead.customerLastName || '');
         setNameMismatchReason(step2Data.nameMismatchReason || '');
@@ -191,9 +281,17 @@ export default function Step2Page() {
         
         if (currentLead.panNumber) {
             setIsPanTouched(true);
-            // PAN validation now only happens via API when user clicks "Validate Pan"
         }
+        
+        // Only reset validation status if PAN actually changed and we're not in the middle of saving
+        // Don't reset if validation is already 'valid' and PAN hasn't changed
+        if (panChanged && panValidationStatus === 'valid' && !isVerifyingPan) {
+            // If PAN changed from a validated state, reset to pending
+            setPanValidationStatus('pending');
+        }
+        // If PAN hasn't changed and is already validated, keep it as 'valid'
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentLead]);
 
   // Auto-populate PAN and DOB from OCR data if available (only if page not submitted)
@@ -300,6 +398,11 @@ export default function Step2Page() {
               dob: dateOfBirth || prev.dob,
               age: calculatedAge || prev.age,
             }));
+
+            // Update formatted DOB when auto-populated (convert YYYY-MM-DD to DD/MM/YYYY)
+            if (dateOfBirth) {
+              setDobFormatted(convertISOToDDMMYYYY(dateOfBirth));
+            }
 
             // Set local state immediately for instant UI update
             setIsAutoFilledViaPAN(true);
@@ -422,37 +525,93 @@ export default function Step2Page() {
     }
   };
 
-  const handleDateChange = (date: Date | undefined) => {
-    if (date) {
-      const dobString = format(date, 'yyyy-MM-dd');
-      const today = new Date();
-      const birthDate = new Date(dobString);
-      let age = today.getFullYear() - birthDate.getFullYear();
-      const m = today.getMonth() - birthDate.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-        age--;
+  // Handler for formatted DOB input (DD/MM/YYYY)
+  const handleDOBInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isCompleted) return;
+    
+    let value = e.target.value;
+    // Remove all non-digit characters
+    const digitsOnly = value.replace(/[^0-9]/g, '');
+    
+    // Limit to 8 digits (DDMMYYYY)
+    const limitedDigits = digitsOnly.slice(0, 8);
+    
+    // Format with slashes
+    let formatted = '';
+    for (let i = 0; i < limitedDigits.length; i++) {
+      if (i === 2 || i === 4) {
+        formatted += '/';
       }
-      setFormData({ ...formData, dob: dobString, age: age });
-      // PAN validation will be triggered via button now, not automatically
+      formatted += limitedDigits[i];
+    }
+    
+    setDobFormatted(formatted);
+    
+    // Real-time validation as user types
+    if (limitedDigits.length >= 2) {
+      const day = limitedDigits.slice(0, 2);
+      const dayNum = parseInt(day, 10);
+      
+      // Validate day: cannot be > 31 or < 1
+      if (dayNum > 31 || dayNum < 1) {
+        // Invalid day - don't update formData
+        return;
+      }
+    }
+    
+    if (limitedDigits.length >= 4) {
+      const day = limitedDigits.slice(0, 2);
+      const month = limitedDigits.slice(2, 4);
+      const dayNum = parseInt(day, 10);
+      const monthNum = parseInt(month, 10);
+      
+      // Validate month: cannot be > 12 or < 1
+      if (monthNum > 12 || monthNum < 1) {
+        // Invalid month - don't update formData
+        return;
+      }
+      
+      // Validate day again with context (e.g., cannot have day 31 in month 2)
+      if (dayNum > 31 || dayNum < 1) {
+        return;
+      }
+    }
+    
+    // Validate and update DOB when complete (8 digits)
+    if (limitedDigits.length >= 8) {
+      const day = limitedDigits.slice(0, 2);
+      const month = limitedDigits.slice(2, 4);
+      const year = limitedDigits.slice(4, 8);
+      
+      const dayNum = parseInt(day, 10);
+      const monthNum = parseInt(month, 10);
+      const yearNum = parseInt(year, 10);
+      
+      // Final validation
+      if (dayNum > 31 || dayNum < 1 || monthNum > 12 || monthNum < 1) {
+        return;
+      }
+      
+      // Try to create a valid date
+      try {
+        const date = new Date(yearNum, monthNum - 1, dayNum);
+        // Check if date is valid (handles invalid dates like Feb 30)
+        if (date.getDate() === dayNum && date.getMonth() === monthNum - 1 && date.getFullYear() === yearNum) {
+          updateDOBFromFormatted(formatted);
+        }
+      } catch (e) {
+        // Invalid date, don't update
+      }
     }
   };
 
-  const handleValidatePan = async () => {
+  const handleValidatePan = () => {
     // Prevent validation if section is already completed
     if (isCompleted) {
       toast({
         title: 'Section Completed',
         description: 'This section has already been completed and submitted. It is now read-only.',
         variant: 'default',
-      });
-      return;
-    }
-
-    if (!currentLead?.appId) {
-      toast({
-        title: 'Error',
-        description: 'Application ID not found. Please create a new lead first.',
-        variant: 'destructive',
       });
       return;
     }
@@ -469,8 +628,65 @@ export default function Step2Page() {
     setIsVerifyingPan(true);
     setPanValidationStatus('pending');
 
+    // Only do format validation - no API call
+    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+    
+    setTimeout(() => {
+      if (!panRegex.test(formData.pan)) {
+        setPanFormatError('Invalid Pan');
+        setPanValidationStatus('invalid');
+        setIsVerifyingPan(false);
+        toast({
+          title: 'Validation Failed',
+          description: 'Invalid PAN format. Expected format: ABCDE1234F',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Format is valid - mark as valid
+      setPanFormatError('');
+      setPanValidationStatus('valid');
+      setPanApiName('Verified');
+      setIsVerifyingPan(false);
+      
+      toast({
+        title: 'Validation Successful',
+        description: 'PAN format validated successfully. Click "Save Information" to save.',
+        className: 'bg-green-50 border-green-200',
+      });
+    }, 500);
+  };
+
+  const handleSave = async () => {
+    if (!currentLead) return;
+    
+    if (panValidationStatus !== 'valid') {
+      toast({
+        title: 'Validation Required',
+        description: 'Please validate PAN first before saving.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!currentLead.appId) {
+      toast({
+        title: 'Error',
+        description: 'Application ID not found. Please create a new lead first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Prevent any validation from being triggered during save
+    setIsVerifyingPan(true);
+    
+    // Ensure validation status stays 'valid' during save process
+    // This prevents any side effects from resetting validation status
+
     try {
-      // Endpoint 3: Submit Personal Info
+      // Endpoint 3: Submit Personal Info - Save to backend
       const response = await submitPersonalInfo({
         application_id: currentLead.appId,
         customer_type: 'individual',
@@ -481,209 +697,68 @@ export default function Step2Page() {
       });
 
       if (isApiError(response)) {
-        // On API error, don't mark as completed - allow retry
-        if (currentLead) {
-          updateLead(currentLead.id, {
-            step2Completed: false, // Ensure not marked as completed on error
-          });
-        }
-        
         toast({
-          title: 'Validation Failed',
-          description: response.error || 'Failed to validate PAN. Please try again.',
+          title: 'Save Failed',
+          description: response.error || 'Failed to save personal information. Please try again.',
           variant: 'destructive',
         });
-        setPanValidationStatus('invalid');
         setIsVerifyingPan(false);
         return;
       }
 
-      // Debug: Log the full response
-      console.log('PAN Validation Response:', response);
-      console.log('Response structure:', {
-        success: response.success,
-        hasData: !!(response as any).data,
-        dataKeys: response.success ? Object.keys((response as any).data || {}) : [],
-      });
-
-      // Success response - apiFetch returns the backend response as ApiSuccess<PersonalInfoResponse>
-      // The backend response structure: { success: true, message, application_id, next_step, data: { ... } }
-      // apiFetch wraps it, so response.data is PersonalInfoResponse which has its own data field
+      // Success response
       if (response.success) {
-        // Try multiple ways to access the response data
-        // The response might be: response.data.data or just response.data
         const personalInfoResponse = (response as any).data;
         const responseData = personalInfoResponse?.data || personalInfoResponse;
         
-        console.log('PersonalInfoResponse:', personalInfoResponse);
-        console.log('Response data:', responseData);
-        console.log('PAN Verification Status:', responseData?.pan_verification_status);
-        
-        // Check if we have pan_verification_status in the response
-        const panVerificationStatus = responseData?.pan_verification_status;
-        
-        if (!panVerificationStatus) {
-          // If pan_verification_status is not found, don't set to invalid - just log and wait
-          console.warn('PAN verification status not found in response. Response structure:', {
-            personalInfoResponse,
-            responseData,
-            responseKeys: response.success ? Object.keys((response as any) || {}) : [],
-          });
-          // Keep the status as pending rather than invalid
-          setPanValidationStatus('pending');
-          setIsVerifyingPan(false);
-          toast({
-            title: 'Warning',
-            description: 'PAN verification status not found in response. Please try again.',
-            variant: 'destructive',
-          });
-          return;
-        }
-        
-        // Update validation status based on PAN verification status
-        if (panVerificationStatus === 'verified') {
-          console.log('Setting PAN validation status to valid');
-          setPanValidationStatus('valid');
-          
-          // Extract name from masked PAN response if available
-          if (responseData.pan_number) {
-            // PAN is masked like "AEE***1A", we can't extract name from this
-            // But we can mark it as verified
-            setPanApiName('Verified'); // Placeholder since name isn't in response
-          }
-          
-          // Update lead context with response data and mark as completed
-          if (currentLead) {
-            updateLead(currentLead.id, {
-              panNumber: responseData.pan_number || formData.pan,
-              dob: responseData.date_of_birth || formData.dob,
-              gender: responseData.gender || formData.gender,
-              step2Completed: true, // Mark section as completed
-              formData: {
-                ...currentLead.formData,
-                step2: {
-                  ...formData,
-                  email: responseData.email || formData.email,
-                },
-              },
-            });
-          }
-
-          toast({
-            title: 'Success',
-            description: 'PAN verified successfully. Personal information saved and marked as completed.',
-            className: 'bg-green-50 border-green-200',
-          });
-        } else {
-          // PAN verification status exists but is not 'verified'
-          console.log('Setting PAN validation status to mismatch - status:', panVerificationStatus);
-          setPanValidationStatus('mismatch');
-          
-          // Update lead context with response data even on mismatch
-          // Don't mark as completed if there's a mismatch - allow retry
-          if (currentLead) {
-            updateLead(currentLead.id, {
-              panNumber: responseData.pan_number || formData.pan,
-              dob: responseData.date_of_birth || formData.dob,
-              gender: responseData.gender || formData.gender,
-              step2Completed: false, // Don't mark as completed on mismatch - allow retry
-              formData: {
-                ...currentLead.formData,
-                step2: {
-                  ...formData,
-                  email: responseData.email || formData.email,
-                },
-              },
-            });
-          }
-
-          toast({
-            title: 'Validation Issue',
-            description: 'PAN verification found mismatches. Please review the details.',
-            variant: 'destructive',
-          });
-        }
-      } else {
-        // Response is not successful (shouldn't happen if isApiError didn't catch it)
-        console.error('Response is not successful:', response);
-        setPanValidationStatus('pending');
-      }
-
-      setIsVerifyingPan(false);
-    } catch (error: any) {
-      // On error, don't mark as completed - allow retry
-      if (currentLead) {
+        // Update lead context with saved data and mark as completed
         updateLead(currentLead.id, {
-          step2Completed: false, // Ensure not marked as completed on error
+          customerFirstName: localFirstName,
+          customerLastName: localLastName,
+          panNumber: responseData?.pan_number || formData.pan,
+          dob: responseData?.date_of_birth || formData.dob,
+          age: formData.age,
+          gender: responseData?.gender || formData.gender,
+          step2Completed: true, // Mark section as completed
+          formData: { 
+            ...currentLead.formData, 
+            step2: { 
+              ...formData, 
+              nameMismatchReason,
+              email: responseData?.email || formData.email,
+            },
+          },
         });
+
+        toast({
+          title: 'Success',
+          description: 'Personal information saved successfully.',
+          className: 'bg-green-50 border-green-200',
+        });
+
+        // Navigate immediately after save
+        router.push('/lead/new-lead-info');
       }
-      
+    } catch (error: any) {
       toast({
-        title: 'Validation Failed',
-        description: error.message || 'Failed to validate PAN. Please try again.',
+        title: 'Save Failed',
+        description: error.message || 'Failed to save personal information. Please try again.',
         variant: 'destructive',
       });
-      setPanValidationStatus('invalid');
+    } finally {
       setIsVerifyingPan(false);
     }
-  };
-
-  const handleSave = () => {
-    if (!currentLead) return;
-    
-    if (panValidationStatus === 'invalid') {
-      return;
-    }
-    
-    updateLead(currentLead.id, {
-      formData: { 
-        ...currentLead.formData, 
-        step2: { ...formData, nameMismatchReason },
-      },
-      customerFirstName: localFirstName,
-      customerLastName: localLastName,
-      panNumber: formData.pan,
-      dob: formData.dob,
-      age: formData.age,
-      gender: formData.gender,
-    });
-    
-    router.push('/lead/new-lead-info');
   };
 
   const handleExit = () => {
     router.push('/lead/new-lead-info');
   };
   
-  // Check if PAN validation needs to be done - only show Validate Pan button if not already verified
-  const needsPanValidation = formData.pan.length === 10 && formData.dob && panValidationStatus !== 'valid' && (panValidationStatus === 'pending' || panValidationStatus === 'mismatch');
+  // Check if PAN validation needs to be done - show "Validate Pan" button if not already validated
+  const needsPanValidation = formData.pan.length === 10 && formData.dob && formData.gender && panValidationStatus !== 'valid';
   
-  // Enable Save Information button when:
-  // 1. PAN is verified (panValidationStatus === 'valid') - enable immediately
-  // 2. Otherwise, require all fields and no DOB mismatch
-  const canProceed = (() => {
-    // If PAN is verified by API, enable button immediately (backend has validated everything)
-    if (panValidationStatus === 'valid') {
-      return true; // Enable immediately when verified
-    }
-    
-    // If PAN is not verified yet, check required fields
-    const hasRequiredFields = formData.dob && formData.gender && formData.pan.length === 10;
-    return hasRequiredFields && !dobMismatch && (panValidationStatus === 'mismatch' || panValidationStatus === 'pending');
-  })();
-  
-  // Debug logging
-  React.useEffect(() => {
-    console.log('Save Information Button Debug:', {
-      canProceed,
-      panValidationStatus,
-      hasDOB: !!formData.dob,
-      hasGender: !!formData.gender,
-      panLength: formData.pan.length,
-      dobMismatch,
-      needsPanValidation,
-    });
-  }, [canProceed, panValidationStatus, formData.dob, formData.gender, formData.pan.length, dobMismatch, needsPanValidation]);
+  // Enable Save Information button only when PAN is validated
+  const canSave = panValidationStatus === 'valid';
 
   return (
     <DashboardLayout title="Customer Details" showNotifications={false} showExitButton={true} onExit={handleExit}>
@@ -742,7 +817,13 @@ export default function Step2Page() {
                                         if (isCompleted) return; // Prevent editing when completed
                                         setIsPanTouched(true);
                                         const newPan = e.target.value.toUpperCase();
+                                        const panChanged = newPan !== formData.pan;
                                         setFormData(prev => ({...prev, pan: newPan}));
+                                        
+                                        // Only reset validation status if PAN actually changed
+                                        if (!panChanged && panValidationStatus === 'valid') {
+                                            return; // Don't reset validation if PAN hasn't changed and is already validated
+                                        }
                                         
                                         // Check format validation immediately when 10 characters entered
                                         if (newPan.length === 10) {
@@ -754,14 +835,19 @@ export default function Step2Page() {
                                                 setDobMismatch(false);
                                             } else {
                                                 setPanFormatError('');
-                                                // Clear validation status to allow manual validation
-                                                setPanValidationStatus('pending');
+                                                // Only reset validation status if PAN changed or not yet validated
+                                                if (panChanged || panValidationStatus !== 'valid') {
+                                                    setPanValidationStatus('pending');
+                                                }
                                                 setNameMismatch(false);
                                                 setDobMismatch(false);
                                             }
                                         } else {
                                             setPanFormatError('');
-                                            setPanValidationStatus('pending');
+                                            // Only reset validation status if PAN changed or not yet validated
+                                            if (panChanged || panValidationStatus !== 'valid') {
+                                                setPanValidationStatus('pending');
+                                            }
                                             setNameMismatch(false);
                                             setDobMismatch(false);
                                         }
@@ -825,23 +911,36 @@ export default function Step2Page() {
                         Date of Birth *
                         {dobMismatch && formData.dob && <AlertTriangle className="text-yellow-600 w-4 h-4" />}
                     </Label>
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button 
-                                variant={"outline"} 
-                                disabled={isCompleted}
-                                className={cn("w-full justify-start text-left font-normal h-12 rounded-xl", !formData.dob && "text-muted-foreground", isCompleted && "bg-gray-50 cursor-not-allowed")}
-                            >
-                                <Calendar className="mr-2 h-4 w-4" />
-                                {formData.dob ? format(new Date(formData.dob), "PPP") : <span>Pick a date</span>}
-                            </Button>
-                        </PopoverTrigger>
-                        {!isCompleted && (
-                          <PopoverContent className="w-auto p-0">
-                            <DatePicker mode="single" selected={formData.dob ? new Date(formData.dob) : undefined} onSelect={handleDateChange} captionLayout="dropdown-buttons" fromYear={1920} toYear={new Date().getFullYear()} />
-                          </PopoverContent>
-                        )}
-                    </Popover>
+                    <Input
+                      type="text"
+                      placeholder={getDynamicPlaceholder(dobFormatted)}
+                      value={dobFormatted}
+                      onChange={handleDOBInputChange}
+                      onKeyDown={(e) => {
+                        // Allow backspace, delete, arrow keys, tab, etc.
+                        if (
+                          e.key === 'Backspace' ||
+                          e.key === 'Delete' ||
+                          e.key === 'ArrowLeft' ||
+                          e.key === 'ArrowRight' ||
+                          e.key === 'Tab' ||
+                          e.key === 'Home' ||
+                          e.key === 'End'
+                        ) {
+                          return;
+                        }
+                        // Allow digits only
+                        if (!/[0-9]/.test(e.key)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      disabled={isCompleted}
+                      maxLength={10}
+                      className={cn(
+                        "h-12 rounded-xl",
+                        isCompleted && "bg-gray-50 cursor-not-allowed"
+                      )}
+                    />
                     {formData.age > 0 && <div className="mt-3"><Badge className="bg-[#E6F0FA] text-[#0072CE]">Age: {formData.age} years</Badge></div>}
                 </div>
                  <div>
@@ -891,7 +990,7 @@ export default function Step2Page() {
           {needsPanValidation ? (
             <Button 
               onClick={handleValidatePan} 
-              disabled={isCompleted || !formData.dob || isVerifyingPan}
+              disabled={isCompleted || !formData.dob || !formData.gender || isVerifyingPan}
               className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
               {isVerifyingPan ? 'Validating...' : 'Validate Pan'}
@@ -899,10 +998,10 @@ export default function Step2Page() {
           ) : (
             <Button 
               onClick={handleSave} 
-              disabled={isCompleted || (panValidationStatus !== 'valid' && !canProceed)}
+              disabled={isCompleted || !canSave || isVerifyingPan}
               className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              Save Information
+              {isVerifyingPan ? 'Saving...' : 'Save Information'}
             </Button>
           )}
         </div>

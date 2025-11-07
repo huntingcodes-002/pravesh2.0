@@ -103,7 +103,7 @@ export default function ApplicationPreview({ lead, onClose }: ApplicationPreview
             <header className="p-3 sm:p-4 border-b flex justify-between items-center sticky top-0 bg-white z-10 shadow-sm">
                 <div className="min-w-0 flex-1 pr-2">
                     <h2 className="text-lg sm:text-xl font-bold text-gray-900 truncate">Application Preview</h2>
-                    <p className="text-xs sm:text-sm text-gray-500 truncate">{appId}</p>
+                    <p className="text-xs sm:text-sm text-gray-500 truncate">{appId || 'Pending Application ID'}</p>
                 </div>
                 <Button onClick={onClose} variant="ghost" size="icon" className="text-gray-500 hover:text-gray-900 flex-shrink-0">
                     <X className="w-5 h-5" />
@@ -139,7 +139,7 @@ export default function ApplicationPreview({ lead, onClose }: ApplicationPreview
                         <InfoGrid>
                             <DetailItem label="Product Type" value={formData?.step1?.productType} icon={Target} />
                             <DetailItem label="Application Type" value={formData?.step1?.applicationType} icon={FileText} />
-                            <DetailItem label="Application ID" value={appId} />
+                            <DetailItem label="Application ID" value={appId || 'N/A'} />
                             <DetailItem label="Created Date" value={new Date(lead.createdAt).toLocaleDateString()} icon={Calendar} />
                         </InfoGrid>
                     </CollapsibleSection>

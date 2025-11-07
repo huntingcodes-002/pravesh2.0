@@ -3,7 +3,7 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
-import { useLead } from '@/contexts/LeadContext';
+import { useLead, type Lead } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,10 +13,10 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { useToast } from '@/hooks/use-toast'; // Import useToast
 import { cn } from '@/lib/utils';
 import { Send, CheckCircle, Loader, Edit } from 'lucide-react';
-import { createNewLead, verifyMobileOTP, isApiError, type ApiSuccess, type NewLeadResponse } from '@/lib/api';
+import { createNewLead, verifyMobileOTP, isApiError, type ApiSuccess, type NewLeadResponse, type VerifyMobileResponse } from '@/lib/api';
 
 function Step1PageContent() {
-  const { currentLead, updateLead } = useLead();
+  const { currentLead, updateLead, addLeadToArray } = useLead();
   const router = useRouter();
   const { toast } = useToast(); // Initialize useToast
 
@@ -107,25 +107,23 @@ function Step1PageContent() {
       }
 
       // Backend response structure: { success: true, application_id, workflow_id, next_step, data: {...} }
-      // application_id is at top level
+      // Note: Application ID will be set after OTP verification, not here
       const successResponse = response as ApiSuccess<NewLeadResponse>;
       
-      // Store application_id from top level
-      const applicationId = successResponse.application_id;
+      // Store application_id temporarily for OTP verification step
+      const tempApplicationId = successResponse.application_id;
       
-      if (applicationId) {
-        setApplicationId(applicationId);
-        
-        // Update lead with application_id
+      if (tempApplicationId) {
+        setApplicationId(tempApplicationId);
+        // Update formData but NOT appId - appId will be set after OTP verification
         if (currentLead) {
           updateLead(currentLead.id, {
-            appId: applicationId,
             formData: {
               ...currentLead.formData,
               step1: {
                 ...formData,
                 isMobileVerified,
-                applicationId: applicationId,
+                applicationId: tempApplicationId, // Store temporarily for verification step
               },
             },
           });
@@ -186,23 +184,56 @@ function Step1PageContent() {
       }
 
       // Backend response structure: { success: true, message, application_id, mobile_verified, next_step, data }
-      // OTP verified successfully
+      // OTP verified successfully - extract application_id from response
+      const successResponse = response as ApiSuccess<VerifyMobileResponse>;
+      const verifiedApplicationId = successResponse.application_id;
+      
       setIsMobileVerified(true);
       setIsOtpModalOpen(false);
       setOtp('');
       
-      // Update lead state
-      if (currentLead) {
-        updateLead(currentLead.id, {
+      // Update lead state with application_id from backend response
+      if (currentLead && verifiedApplicationId) {
+        // Update both appId and local state
+        setApplicationId(verifiedApplicationId);
+        
+        // Create the updated lead object with all changes
+        const updatedLead: Lead = {
+          ...currentLead,
+          appId: verifiedApplicationId, // Set the actual Application ID from backend
+          customerName: `${formData.firstName || currentLead.customerFirstName || ''} ${formData.lastName || currentLead.customerLastName || ''}`.trim() || currentLead.customerName,
+          customerMobile: formData.mobile || currentLead.customerMobile,
+          customerFirstName: formData.firstName || currentLead.customerFirstName,
+          customerLastName: formData.lastName || currentLead.customerLastName,
           formData: {
             ...currentLead.formData,
             step1: {
               ...formData,
               isMobileVerified: true,
-              applicationId: applicationId,
+              applicationId: verifiedApplicationId,
+            },
+          },
+          updatedAt: new Date().toISOString(),
+        };
+        
+        // Update the currentLead state
+        updateLead(currentLead.id, {
+          appId: verifiedApplicationId,
+          customerMobile: formData.mobile,
+          customerFirstName: formData.firstName,
+          customerLastName: formData.lastName,
+          formData: {
+            ...currentLead.formData,
+            step1: {
+              ...formData,
+              isMobileVerified: true,
+              applicationId: verifiedApplicationId,
             },
           },
         });
+        
+        // Add lead to leads array only after successful OTP verification
+        addLeadToArray(updatedLead);
       }
 
       toast({

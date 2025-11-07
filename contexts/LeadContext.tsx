@@ -72,6 +72,7 @@ interface LeadContextType {
   currentLead: Lead | null;
   createLead: () => void;
   updateLead: (leadId: string, data: Partial<Lead>) => void;
+  addLeadToArray: (lead: Lead) => void; // Add lead to leads array (after OTP verification)
   submitLead: (leadId: string) => void;
   updateLeadStatus: (leadId: string, status: LeadStatus) => void;
   setCurrentLead: (lead: Lead | null) => void;
@@ -113,7 +114,7 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
   const createLead = () => {
     const newLead: Lead = {
       id: Date.now().toString(),
-      appId: `APP-2025-${String(leads.length + 1).padStart(3, '0')}`,
+      appId: '', // Application ID will be set after OTP verification from backend
       status: 'Draft',
       customerName: '',
       customerMobile: '',
@@ -125,28 +126,51 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    const updatedLeads = [...leads, newLead];
-    saveLeads(updatedLeads);
+    // Only set currentLead - don't add to leads array until OTP verification is complete
     setCurrentLead(newLead);
   };
 
   const updateLead = (leadId: string, data: Partial<Lead>) => {
     let updatedCurrent: Lead | undefined;
-    const updatedLeads = leads.map(lead => {
-      if (lead.id === leadId) {
-        updatedCurrent = {
-            ...lead,
-            ...data,
-            customerName: `${data.customerFirstName || lead.customerFirstName || ''} ${data.customerLastName || lead.customerLastName || ''}`.trim() || lead.customerName,
-            updatedAt: new Date().toISOString()
-        };
-        return updatedCurrent;
-      }
-      return lead;
-    });
-    saveLeads(updatedLeads);
-    if (currentLead?.id === leadId && updatedCurrent) {
+    
+    // Check if lead exists in leads array
+    const leadExistsInArray = leads.some(lead => lead.id === leadId);
+    
+    if (leadExistsInArray) {
+      // Lead is in array - update it in array
+      const updatedLeads = leads.map(lead => {
+        if (lead.id === leadId) {
+          updatedCurrent = {
+              ...lead,
+              ...data,
+              customerName: `${data.customerFirstName || lead.customerFirstName || ''} ${data.customerLastName || lead.customerLastName || ''}`.trim() || lead.customerName,
+              updatedAt: new Date().toISOString()
+          };
+          return updatedCurrent;
+        }
+        return lead;
+      });
+      saveLeads(updatedLeads);
+    }
+    
+    // Always update currentLead if it matches
+    if (currentLead?.id === leadId) {
+      updatedCurrent = {
+          ...currentLead,
+          ...data,
+          customerName: `${data.customerFirstName || currentLead.customerFirstName || ''} ${data.customerLastName || currentLead.customerLastName || ''}`.trim() || currentLead.customerName,
+          updatedAt: new Date().toISOString()
+      };
       setCurrentLead(updatedCurrent);
+    }
+  };
+
+  const addLeadToArray = (lead: Lead) => {
+    // Check if lead already exists in array
+    const leadExists = leads.some(l => l.id === lead.id);
+    if (!leadExists) {
+      const updatedLeads = [...leads, lead];
+      saveLeads(updatedLeads);
     }
   };
 
@@ -336,6 +360,7 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
         currentLead,
         createLead,
         updateLead,
+        addLeadToArray,
         submitLead,
         updateLeadStatus,
         setCurrentLead,

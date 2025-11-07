@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { LogIn, LayoutGrid } from 'lucide-react';
+import { LogIn, LayoutGrid, Loader2 } from 'lucide-react';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -125,7 +125,17 @@ export default function LoginPage() {
                     className={buttonClass}
                     disabled={!isFormValid || isSubmitting}
                 >
-                    {isSubmitting ? <LogIn className="w-5 h-5 animate-spin" /> : 'Login'}
+                    {isSubmitting ? (
+                        <>
+                            <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                            <span>Logging in...</span>
+                        </>
+                    ) : (
+                        <>
+                            <LogIn className="w-5 h-5 mr-2" />
+                            <span>Login</span>
+                        </>
+                    )}
                 </Button>
               </div>
             </form>

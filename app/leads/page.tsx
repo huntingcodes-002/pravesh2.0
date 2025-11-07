@@ -114,7 +114,7 @@ export default function LeadsDashboardPage() {
   // Combined Filter and Search Logic
   const filteredLeads = leads.filter((lead) => {
     const searchMatch =
-        lead.appId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (lead.appId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.customerMobile.includes(searchTerm);
 
@@ -346,7 +346,7 @@ export default function LeadsDashboardPage() {
                     <div className="flex justify-between items-start">
                       <div className="space-y-1">
                         <div className="font-semibold text-gray-900 flex items-center gap-2">
-                          {lead.appId} 
+                          {lead.appId || 'Pending Application ID'} 
                           {getStatusBadge(lead.status)}
                         </div>
                         <p className="text-sm font-medium text-gray-700">{lead.customerName || 'New Lead'}</p>
