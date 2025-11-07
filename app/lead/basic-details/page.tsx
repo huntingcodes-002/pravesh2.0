@@ -17,6 +17,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { CheckCircle2 } from 'lucide-react';
+import { MaskedDateInput } from '@/components/MaskedDateInput';
 
 type ValidationStatus = 'pending' | 'valid' | 'invalid' | 'mismatch';
 
@@ -226,33 +227,6 @@ export default function Step2Page() {
     return false;
   };
 
-  // Helper function to get dynamic placeholder based on current input
-  const getDynamicPlaceholder = (value: string): string => {
-    const digitsOnly = value.replace(/\//g, '');
-    const length = digitsOnly.length;
-    
-    if (length === 0) return 'DD/MM/YYYY';
-    if (length <= 2) {
-      // User has entered day, show remaining parts
-      const dayPart = digitsOnly.padEnd(2, 'D');
-      return `${dayPart}/MM/YYYY`;
-    }
-    if (length <= 4) {
-      // User has entered day and month, show remaining parts
-      const dayPart = digitsOnly.slice(0, 2);
-      const monthPart = digitsOnly.slice(2, 4).padEnd(2, 'M');
-      return `${dayPart}/${monthPart}/YYYY`;
-    }
-    if (length <= 8) {
-      // User has entered day, month, and partial year
-      const dayPart = digitsOnly.slice(0, 2);
-      const monthPart = digitsOnly.slice(2, 4);
-      const yearPart = digitsOnly.slice(4, 8).padEnd(4, 'Y');
-      return `${dayPart}/${monthPart}/${yearPart}`;
-    }
-    return 'DD/MM/YYYY';
-  };
-
   useEffect(() => {
     if (currentLead) {
         const step2Data = currentLead.formData?.step2 || {};
@@ -334,25 +308,6 @@ export default function Step2Page() {
         
         // Process PAN data if available
         if (panExtractedFields) {
-          // Helper function to convert DD/MM/YYYY to YYYY-MM-DD format
-          const convertDDMMYYYYToISO = (dateStr: string): string => {
-            if (!dateStr) return '';
-            
-            // If already in ISO format (YYYY-MM-DD), return as is
-            if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              return dateStr;
-            }
-            
-            // If in DD/MM/YYYY format (e.g., "24/08/2002"), convert to YYYY-MM-DD
-            const slashMatch = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-            if (slashMatch) {
-              const [, day, month, year] = slashMatch;
-              return `${year}-${month}-${day}`;
-            }
-            
-            return dateStr; // Return as-is if conversion fails
-          };
-
           // Extract PAN number
           let panNumber: string | null = null;
           if (panExtractedFields.pan_number) {
@@ -454,7 +409,7 @@ export default function Step2Page() {
         if (genderValue) {
           setFormData(prev => ({
             ...prev,
-            gender: genderValue,
+            gender: genderValue as string,
           }));
 
           // Set local state immediately for instant UI update
@@ -525,83 +480,35 @@ export default function Step2Page() {
     }
   };
 
-  // Handler for formatted DOB input (DD/MM/YYYY)
-  const handleDOBInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handler for MaskedDateInput (DD/MM/YYYY format)
+  const handleDOBChange = (value: string) => {
     if (isCompleted) return;
     
-    let value = e.target.value;
-    // Remove all non-digit characters
-    const digitsOnly = value.replace(/[^0-9]/g, '');
+    // Update the formatted display value
+    setDobFormatted(value);
     
-    // Limit to 8 digits (DDMMYYYY)
-    const limitedDigits = digitsOnly.slice(0, 8);
-    
-    // Format with slashes
-    let formatted = '';
-    for (let i = 0; i < limitedDigits.length; i++) {
-      if (i === 2 || i === 4) {
-        formatted += '/';
-      }
-      formatted += limitedDigits[i];
-    }
-    
-    setDobFormatted(formatted);
-    
-    // Real-time validation as user types
-    if (limitedDigits.length >= 2) {
-      const day = limitedDigits.slice(0, 2);
-      const dayNum = parseInt(day, 10);
-      
-      // Validate day: cannot be > 31 or < 1
-      if (dayNum > 31 || dayNum < 1) {
-        // Invalid day - don't update formData
-        return;
-      }
-    }
-    
-    if (limitedDigits.length >= 4) {
-      const day = limitedDigits.slice(0, 2);
-      const month = limitedDigits.slice(2, 4);
-      const dayNum = parseInt(day, 10);
-      const monthNum = parseInt(month, 10);
-      
-      // Validate month: cannot be > 12 or < 1
-      if (monthNum > 12 || monthNum < 1) {
-        // Invalid month - don't update formData
-        return;
-      }
-      
-      // Validate day again with context (e.g., cannot have day 31 in month 2)
-      if (dayNum > 31 || dayNum < 1) {
-        return;
-      }
-    }
-    
-    // Validate and update DOB when complete (8 digits)
-    if (limitedDigits.length >= 8) {
-      const day = limitedDigits.slice(0, 2);
-      const month = limitedDigits.slice(2, 4);
-      const year = limitedDigits.slice(4, 8);
-      
-      const dayNum = parseInt(day, 10);
-      const monthNum = parseInt(month, 10);
-      const yearNum = parseInt(year, 10);
-      
-      // Final validation
-      if (dayNum > 31 || dayNum < 1 || monthNum > 12 || monthNum < 1) {
-        return;
-      }
-      
-      // Try to create a valid date
-      try {
-        const date = new Date(yearNum, monthNum - 1, dayNum);
-        // Check if date is valid (handles invalid dates like Feb 30)
-        if (date.getDate() === dayNum && date.getMonth() === monthNum - 1 && date.getFullYear() === yearNum) {
-          updateDOBFromFormatted(formatted);
+    // Convert to ISO format and update formData when complete (10 chars: DD/MM/YYYY)
+    if (value.length === 10) {
+      const isoDate = convertDDMMYYYYToISO(value);
+      if (isoDate && isoDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        try {
+          const date = new Date(isoDate);
+          if (!isNaN(date.getTime())) {
+            const today = new Date();
+            let age = today.getFullYear() - date.getFullYear();
+            const m = today.getMonth() - date.getMonth();
+            if (m < 0 || (m === 0 && today.getDate() < date.getDate())) {
+              age--;
+            }
+            setFormData(prev => ({ ...prev, dob: isoDate, age: age }));
+          }
+        } catch (e) {
+          // Invalid date, don't update
         }
-      } catch (e) {
-        // Invalid date, don't update
       }
+    } else {
+      // Incomplete date, clear the ISO value but keep formatted for display
+      setFormData(prev => ({ ...prev, dob: '', age: 0 }));
     }
   };
 
@@ -911,33 +818,13 @@ export default function Step2Page() {
                         Date of Birth *
                         {dobMismatch && formData.dob && <AlertTriangle className="text-yellow-600 w-4 h-4" />}
                     </Label>
-                    <Input
-                      type="text"
-                      placeholder={getDynamicPlaceholder(dobFormatted)}
+                    <MaskedDateInput
+                      id="dob-input"
                       value={dobFormatted}
-                      onChange={handleDOBInputChange}
-                      onKeyDown={(e) => {
-                        // Allow backspace, delete, arrow keys, tab, etc.
-                        if (
-                          e.key === 'Backspace' ||
-                          e.key === 'Delete' ||
-                          e.key === 'ArrowLeft' ||
-                          e.key === 'ArrowRight' ||
-                          e.key === 'Tab' ||
-                          e.key === 'Home' ||
-                          e.key === 'End'
-                        ) {
-                          return;
-                        }
-                        // Allow digits only
-                        if (!/[0-9]/.test(e.key)) {
-                          e.preventDefault();
-                        }
-                      }}
+                      onChange={handleDOBChange}
+                      placeholder="DD/MM/YYYY"
                       disabled={isCompleted}
-                      maxLength={10}
                       className={cn(
-                        "h-12 rounded-xl",
                         isCompleted && "bg-gray-50 cursor-not-allowed"
                       )}
                     />

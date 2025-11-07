@@ -1,7 +1,14 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation'; // <-- ADDED import useRouter
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import {
+  fetchApplicationsSummary,
+  getDetailedInfo,
+  isApiError,
+  type ApplicationsSummaryResponse,
+  type ApplicationSummaryItem,
+  type DetailedInfoResponse,
+} from '@/lib/api';
 
 export type LeadStatus = 'Draft' | 'Submitted' | 'Approved' | 'Disbursed' | 'Rejected';
 
@@ -65,11 +72,21 @@ export interface Lead {
   payments: PaymentSession[];
   createdAt: string;
   updatedAt: string;
+  hasDetails?: boolean;
+}
+
+export interface LeadSummaryStats {
+  total: number;
+  draft: number;
+  completed: number;
 }
 
 interface LeadContextType {
   leads: Lead[];
   currentLead: Lead | null;
+  loading: boolean;
+  error: string | null;
+  summaryStats: LeadSummaryStats;
   createLead: () => void;
   updateLead: (leadId: string, data: Partial<Lead>) => void;
   addLeadToArray: (lead: Lead) => void; // Add lead to leads array (after OTP verification)
@@ -80,6 +97,8 @@ interface LeadContextType {
   addPaymentToLead: (leadId: string, payment: PaymentSession) => void;
   updatePaymentInLead: (leadId: string, paymentId: string, paymentUpdate: Partial<PaymentSession>) => void;
   deletePaymentFromLead: (leadId: string, paymentId: string) => void;
+  refreshLeads: () => Promise<void>;
+  fetchLeadDetails: (applicationId: string, options?: { force?: boolean }) => Promise<Lead | null>;
   
   // Co-Applicant specific functions
   createCoApplicant: (leadId: string, relationship: string) => CoApplicant;
@@ -92,272 +111,662 @@ interface LeadContextType {
 
 const LeadContext = createContext<LeadContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'leads';
+const DEFAULT_SUMMARY_STATS: LeadSummaryStats = { total: 0, draft: 0, completed: 0 };
+
+const STEP_NAME_TO_INDEX: Record<string, number> = {
+  new_lead: 1,
+  consent_mobile: 1,
+  personal_info: 2,
+  address_details: 3,
+  employment_info: 4,
+  collateral_details: 5,
+  loan_details: 6,
+  document_upload: 7,
+  documents: 7,
+  review: 8,
+  summary: 9,
+};
+
+function composeCustomerName(first?: string | null, last?: string | null, fallback?: string) {
+  const parts = [first, last].filter(Boolean) as string[];
+  const full = parts.join(' ').trim();
+  return full || (fallback ?? '');
+}
+
+function calculateAge(dob?: string | null): number | undefined {
+  if (!dob) return undefined;
+  const birthDate = new Date(dob);
+  if (Number.isNaN(birthDate.getTime())) return undefined;
+  const now = new Date();
+  let age = now.getFullYear() - birthDate.getFullYear();
+  const monthDiff = now.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+  return age >= 0 ? age : undefined;
+}
+
+function pickLatestTimestamp(timestamps: Array<string | null | undefined>, fallback: string): string {
+  const valid = timestamps.filter((value): value is string => Boolean(value));
+  if (valid.length === 0) {
+    return fallback;
+  }
+  return valid.reduce((latest, current) =>
+    new Date(current).getTime() > new Date(latest).getTime() ? current : latest
+  );
+}
+
+function mapWorkflowStatusToLeadStatus(status?: string | null): LeadStatus {
+  const normalized = status?.toLowerCase() ?? '';
+  switch (normalized) {
+    case 'completed':
+    case 'completed_success':
+    case 'submitted':
+      return 'Submitted';
+    case 'approved':
+      return 'Approved';
+    case 'disbursed':
+      return 'Disbursed';
+    case 'rejected':
+    case 'failed':
+      return 'Rejected';
+    default:
+      return 'Draft';
+  }
+}
+
+function mapApiStepToNumber(step?: string | null): number {
+  if (!step) return 1;
+  const normalized = step.toLowerCase();
+  return STEP_NAME_TO_INDEX[normalized] ?? 1;
+}
+
+function mapSummaryItemToLead(item: ApplicationSummaryItem): Lead {
+  const firstName = item.first_name ?? '';
+  const lastName = item.last_name ?? '';
+  const createdTimestamp = item.created_on ?? new Date().toISOString();
+
+  return {
+    id: item.application_id,
+    appId: item.application_id,
+    status: 'Draft',
+    customerName: composeCustomerName(firstName, lastName, 'New Lead'),
+    customerMobile: item.mobile_number ?? '',
+    customerFirstName: firstName || undefined,
+    customerLastName: lastName || undefined,
+    currentStep: 1,
+    formData: {
+      coApplicants: [],
+      step1: {
+        firstName,
+        lastName,
+        mobile: item.mobile_number ?? '',
+      },
+    },
+    payments: [],
+    createdAt: createdTimestamp,
+    updatedAt: createdTimestamp,
+    hasDetails: false,
+  };
+}
+
+function createLeadSkeleton(applicationId: string): Lead {
+  const now = new Date().toISOString();
+  return {
+    id: applicationId,
+    appId: applicationId,
+    status: 'Draft',
+    customerName: 'New Lead',
+    customerMobile: '',
+    currentStep: 1,
+    formData: {
+      coApplicants: [],
+    },
+    payments: [],
+    createdAt: now,
+    updatedAt: now,
+    hasDetails: false,
+  };
+}
+
+function mergeLeadData(base: Lead, updates: Partial<Lead>): Lead {
+  const mergedFormData = {
+    ...base.formData,
+    ...(updates.formData ?? {}),
+    coApplicants: updates.formData?.coApplicants ?? base.formData.coApplicants ?? [],
+    step1: updates.formData?.step1 ?? base.formData.step1,
+    step2: updates.formData?.step2 ?? base.formData.step2,
+    step3: updates.formData?.step3 ?? base.formData.step3,
+    step4: updates.formData?.step4 ?? base.formData.step4,
+    step5: updates.formData?.step5 ?? base.formData.step5,
+    step6: updates.formData?.step6 ?? base.formData.step6,
+    step7: updates.formData?.step7 ?? base.formData.step7,
+    step8: updates.formData?.step8 ?? base.formData.step8,
+    step9_eval: updates.formData?.step9_eval ?? base.formData.step9_eval,
+    step10: updates.formData?.step10 ?? base.formData.step10,
+  };
+
+  const firstName = updates.customerFirstName ?? mergedFormData?.step1?.firstName ?? base.customerFirstName;
+  const lastName = updates.customerLastName ?? mergedFormData?.step1?.lastName ?? base.customerLastName;
+  const customerName = composeCustomerName(firstName, lastName, updates.customerName ?? base.customerName);
+
+  return {
+    ...base,
+    ...updates,
+    customerFirstName: firstName || undefined,
+    customerLastName: lastName || undefined,
+    customerName: customerName || base.customerName,
+    formData: mergedFormData,
+    payments: updates.payments ?? base.payments,
+    hasDetails: updates.hasDetails ?? base.hasDetails,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Lead {
+  const workflowStatus = detail.workflow_state?.status ?? detail.workflow_status;
+  const status = mapWorkflowStatusToLeadStatus(workflowStatus);
+  const stepName = detail.workflow_state?.current_step ?? detail.current_step;
+  const currentStep = mapApiStepToNumber(stepName);
+
+  const newLeadData = detail.new_lead_data;
+  const personalInfo = detail.personal_info;
+  const addressInfo = detail.address_info;
+  const stepData = detail.workflow_state?.step_data ?? {};
+
+  const firstName = newLeadData?.first_name ?? baseLead.customerFirstName ?? '';
+  const lastName = newLeadData?.last_name ?? baseLead.customerLastName ?? '';
+  const mobileNumber = newLeadData?.mobile_number ?? baseLead.customerMobile;
+  const customerName = composeCustomerName(firstName, lastName, baseLead.customerName);
+
+  const completedSteps = detail.completed_steps ?? {};
+
+  const loanDetails: any = (stepData as any).loan_details ?? {};
+  const collateralDetails: any = (stepData as any).collateral_details ?? {};
+  const documentsData: any = (stepData as any).documents ?? {};
+  const coApplicantsData: any = (stepData as any).co_applicant_details;
+
+  const addresses =
+    addressInfo?.addresses?.map((addr, index) => ({
+      id: `${detail.application_id}-address-${index}`,
+      addressType: addr.address_type ?? '',
+      addressLine1: addr.address_line_1 ?? '',
+      addressLine2: addr.address_line_2 ?? '',
+      addressLine3: addr.address_line_3 ?? '',
+      cityId: addr.city_id,
+      postalCode: addr.pincode ?? '',
+      isPrimary: addr.is_primary ?? false,
+      latitude: addr.latitude,
+      longitude: addr.longitude,
+    })) ?? baseLead.formData.step3?.addresses;
+
+  const coApplicants =
+    Array.isArray(coApplicantsData?.coApplicants) && coApplicantsData?.coApplicants.length > 0
+      ? coApplicantsData.coApplicants
+      : baseLead.formData.coApplicants ?? [];
+
+  const dob = personalInfo?.date_of_birth ?? baseLead.dob;
+  const age = calculateAge(dob);
+
+  const updatedAt = pickLatestTimestamp(
+    [
+      newLeadData?.created_at,
+      personalInfo?.submitted_at,
+      addressInfo?.submitted_at,
+      loanDetails?.submitted_at,
+      collateralDetails?.submitted_at,
+    ],
+    baseLead.updatedAt
+  );
+
+  return {
+    ...baseLead,
+    hasDetails: true,
+    status,
+    currentStep,
+    customerName,
+    customerFirstName: firstName || undefined,
+    customerLastName: lastName || undefined,
+    customerMobile: mobileNumber ?? '',
+    panNumber: personalInfo?.pan_number ?? baseLead.panNumber,
+    dob,
+    age: age ?? baseLead.age,
+    gender: personalInfo?.gender ?? baseLead.gender,
+    loanAmount: loanDetails?.loan_amount ? Number(loanDetails.loan_amount) : baseLead.loanAmount,
+    loanPurpose: loanDetails?.loan_purpose ?? baseLead.loanPurpose,
+    step2Completed: completedSteps.personal_info ?? baseLead.step2Completed,
+    step3Completed: completedSteps.address_details ?? baseLead.step3Completed,
+    createdAt: newLeadData?.created_at ?? baseLead.createdAt,
+    updatedAt,
+    formData: {
+      ...baseLead.formData,
+      coApplicants,
+      step1: {
+        ...baseLead.formData.step1,
+        productType: newLeadData?.product_type ?? baseLead.formData.step1?.productType,
+        applicationType: newLeadData?.application_type ?? baseLead.formData.step1?.applicationType,
+        mobile: mobileNumber ?? baseLead.formData.step1?.mobile,
+        isMobileVerified: completedSteps.consent_mobile ?? baseLead.formData.step1?.isMobileVerified,
+        firstName,
+        lastName,
+        createdAt: newLeadData?.created_at ?? baseLead.formData.step1?.createdAt,
+      },
+      step2: personalInfo
+        ? {
+            ...baseLead.formData.step2,
+            hasPan: personalInfo.pan_number ? 'yes' : baseLead.formData.step2?.hasPan ?? 'no',
+            autoFilledViaPAN: personalInfo.pan_number ? true : baseLead.formData.step2?.autoFilledViaPAN,
+            panNumber: personalInfo.pan_number ?? baseLead.formData.step2?.panNumber,
+            date_of_birth: personalInfo.date_of_birth ?? baseLead.formData.step2?.date_of_birth,
+            dob: personalInfo.date_of_birth ?? baseLead.formData.step2?.dob,
+            gender: personalInfo.gender ?? baseLead.formData.step2?.gender,
+            alternateIdType: personalInfo.alternate_id_type ?? baseLead.formData.step2?.alternateIdType,
+            documentNumber: personalInfo.alternate_id_number ?? baseLead.formData.step2?.documentNumber,
+          }
+        : baseLead.formData.step2,
+      step3: addresses
+        ? {
+            ...baseLead.formData.step3,
+            addresses,
+          }
+        : baseLead.formData.step3,
+      step6:
+        collateralDetails && Object.keys(collateralDetails).length > 0
+          ? {
+              ...baseLead.formData.step6,
+              collateralType: collateralDetails.collateral_type ?? baseLead.formData.step6?.collateralType,
+              collateralSubType: collateralDetails.collateral_sub_type ?? baseLead.formData.step6?.collateralSubType,
+              ownershipType: collateralDetails.ownership_type ?? baseLead.formData.step6?.ownershipType,
+              propertyValue: collateralDetails.property_value ?? baseLead.formData.step6?.propertyValue,
+              location: collateralDetails.location ?? baseLead.formData.step6?.location,
+              description: collateralDetails.description ?? baseLead.formData.step6?.description,
+            }
+          : baseLead.formData.step6,
+      step7:
+        loanDetails && Object.keys(loanDetails).length > 0
+          ? {
+              ...baseLead.formData.step7,
+              loanAmount: loanDetails.loan_amount ? Number(loanDetails.loan_amount) : baseLead.formData.step7?.loanAmount,
+              loanPurpose: loanDetails.loan_purpose ?? baseLead.formData.step7?.loanPurpose,
+              purposeDescription: loanDetails.purpose_description ?? baseLead.formData.step7?.purposeDescription,
+              interestRate: loanDetails.interest_rate ?? baseLead.formData.step7?.interestRate,
+              tenure: loanDetails.tenure ?? baseLead.formData.step7?.tenure,
+              sourcingChannel: loanDetails.sourcing_channel ?? baseLead.formData.step7?.sourcingChannel,
+            }
+          : baseLead.formData.step7,
+      step8:
+        documentsData && documentsData.files
+          ? {
+              ...baseLead.formData.step8,
+              files: documentsData.files,
+            }
+          : baseLead.formData.step8,
+    },
+  };
+}
 
 export function LeadProvider({ children }: { children: React.ReactNode }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [currentLead, setCurrentLead] = useState<Lead | null>(null);
-  const router = useRouter(); // Initialize router here
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [summaryStats, setSummaryStats] = useState<LeadSummaryStats>(DEFAULT_SUMMARY_STATS);
 
-  useEffect(() => {
-    const storedLeads = localStorage.getItem(STORAGE_KEY);
-    if (storedLeads) {
-      setLeads(JSON.parse(storedLeads));
+  const refreshLeads = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchApplicationsSummary();
+      if (isApiError(response)) {
+        throw new Error(response.error || 'Failed to load applications.');
+      }
+
+      const data = response as ApplicationsSummaryResponse;
+
+      setSummaryStats({
+        total: data.total_applications ?? 0,
+        draft: data.draft_applications ?? 0,
+        completed: data.completed_applications ?? 0,
+      });
+
+      setLeads(prevLeads => {
+        const prevMap = new Map(prevLeads.map(lead => [lead.appId || lead.id, lead]));
+        const summaryIds = new Set<string>();
+
+        const mapped = data.applications.map(item => {
+          const baseLead = mapSummaryItemToLead(item);
+          summaryIds.add(baseLead.appId);
+          const existing = prevMap.get(baseLead.appId);
+          if (existing) {
+            return {
+              ...existing,
+              customerName: baseLead.customerName,
+              customerFirstName: baseLead.customerFirstName,
+              customerLastName: baseLead.customerLastName,
+              customerMobile: baseLead.customerMobile,
+              createdAt: baseLead.createdAt,
+              updatedAt: existing.updatedAt ?? baseLead.updatedAt,
+            };
+          }
+          return baseLead;
+        });
+
+        const preserved = prevLeads.filter(lead => {
+          const identifier = lead.appId || lead.id;
+          return identifier && !summaryIds.has(identifier);
+        });
+
+        return [...mapped, ...preserved];
+      });
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load applications.');
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  const saveLeads = (updatedLeads: Lead[]) => {
-    setLeads(updatedLeads);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedLeads));
-  };
+  useEffect(() => {
+    void refreshLeads();
+  }, [refreshLeads]);
 
-  const createLead = () => {
+  const fetchLeadDetails = useCallback(
+    async (applicationId: string, options?: { force?: boolean }) => {
+      const identifier = applicationId;
+      const existing = leads.find(lead => (lead.appId || lead.id) === identifier);
+
+      if (existing?.hasDetails && !options?.force) {
+        return existing;
+      }
+
+      try {
+        const response = await getDetailedInfo(identifier);
+        if (isApiError(response)) {
+          throw new Error(response.error || 'Failed to load application details.');
+        }
+
+        const base = existing ?? createLeadSkeleton(identifier);
+        const detailedLead = mapDetailedInfoToLead(base, response);
+
+        setLeads(prevLeads => {
+          const index = prevLeads.findIndex(lead => (lead.appId || lead.id) === detailedLead.appId);
+          if (index >= 0) {
+            const updated = [...prevLeads];
+            updated[index] = detailedLead;
+            return updated;
+          }
+          return [...prevLeads, detailedLead];
+        });
+
+        if (currentLead && (currentLead.appId === detailedLead.appId || currentLead.id === detailedLead.id)) {
+          setCurrentLead(detailedLead);
+        }
+
+        return detailedLead;
+      } catch (err: any) {
+        throw err instanceof Error ? err : new Error(err?.message || 'Failed to load application details.');
+      }
+    },
+    [leads, currentLead]
+  );
+
+  const createLead = useCallback(() => {
+    const now = new Date().toISOString();
     const newLead: Lead = {
       id: Date.now().toString(),
-      appId: '', // Application ID will be set after OTP verification from backend
+      appId: '',
       status: 'Draft',
       customerName: '',
       customerMobile: '',
       currentStep: 1,
       formData: {
-          coApplicants: []
+        coApplicants: [],
       },
       payments: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      createdAt: now,
+      updatedAt: now,
+      hasDetails: false,
     };
-    // Only set currentLead - don't add to leads array until OTP verification is complete
     setCurrentLead(newLead);
-  };
+  }, []);
 
-  const updateLead = (leadId: string, data: Partial<Lead>) => {
-    let updatedCurrent: Lead | undefined;
-    
-    // Check if lead exists in leads array
-    const leadExistsInArray = leads.some(lead => lead.id === leadId);
-    
-    if (leadExistsInArray) {
-      // Lead is in array - update it in array
-      const updatedLeads = leads.map(lead => {
-        if (lead.id === leadId) {
-          updatedCurrent = {
-              ...lead,
-              ...data,
-              customerName: `${data.customerFirstName || lead.customerFirstName || ''} ${data.customerLastName || lead.customerLastName || ''}`.trim() || lead.customerName,
-              updatedAt: new Date().toISOString()
-          };
-          return updatedCurrent;
+  const updateLead = useCallback(
+    (leadId: string, data: Partial<Lead>) => {
+      setLeads(prevLeads => prevLeads.map(lead => (lead.id === leadId ? mergeLeadData(lead, data) : lead)));
+      setCurrentLead(prev => (prev && prev.id === leadId ? mergeLeadData(prev, data) : prev));
+    },
+    []
+  );
+
+  const addLeadToArray = useCallback(
+    (lead: Lead) => {
+      setLeads(prevLeads => {
+        const index = prevLeads.findIndex(l => l.id === lead.id || (lead.appId && l.appId === lead.appId));
+        if (index >= 0) {
+          const updated = [...prevLeads];
+          updated[index] = mergeLeadData(updated[index], lead);
+          return updated;
         }
-        return lead;
+        return [...prevLeads, lead];
       });
-      saveLeads(updatedLeads);
-    }
-    
-    // Always update currentLead if it matches
-    if (currentLead?.id === leadId) {
-      updatedCurrent = {
-          ...currentLead,
-          ...data,
-          customerName: `${data.customerFirstName || currentLead.customerFirstName || ''} ${data.customerLastName || currentLead.customerLastName || ''}`.trim() || currentLead.customerName,
-          updatedAt: new Date().toISOString()
-      };
-      setCurrentLead(updatedCurrent);
-    }
-  };
 
-  const addLeadToArray = (lead: Lead) => {
-    // Check if lead already exists in array
-    const leadExists = leads.some(l => l.id === lead.id);
-    if (!leadExists) {
-      const updatedLeads = [...leads, lead];
-      saveLeads(updatedLeads);
-    }
-  };
+      void refreshLeads();
+    },
+    [refreshLeads]
+  );
 
-  const submitLead = (leadId: string) => {
-    const updatedLeads = leads.map(lead =>
-      lead.id === leadId
-        ? { ...lead, status: 'Submitted' as const, currentStep: 9, updatedAt: new Date().toISOString() }
-        : lead
+  const submitLead = useCallback((leadId: string) => {
+    const updatedAt = new Date().toISOString();
+    setLeads(prevLeads =>
+      prevLeads.map(lead =>
+        lead.id === leadId ? { ...lead, status: 'Submitted', currentStep: 9, updatedAt } : lead
+      )
     );
-    saveLeads(updatedLeads);
-  };
-
-  const updateLeadStatus = (leadId: string, status: LeadStatus) => {
-    const updatedLeads = leads.map(lead =>
-      lead.id === leadId
-        ? { ...lead, status: status, updatedAt: new Date().toISOString() }
-        : lead
+    setCurrentLead(prev =>
+      prev && prev.id === leadId ? { ...prev, status: 'Submitted', currentStep: 9, updatedAt } : prev
     );
-    saveLeads(updatedLeads);
-  };
+  }, []);
 
-  const deleteLead = (leadId: string) => {
-    const updatedLeads = leads.filter(lead => lead.id !== leadId);
-    saveLeads(updatedLeads);
+  const updateLeadStatus = useCallback((leadId: string, status: LeadStatus) => {
+    const updatedAt = new Date().toISOString();
+    setLeads(prevLeads =>
+      prevLeads.map(lead => (lead.id === leadId ? { ...lead, status, updatedAt } : lead))
+    );
+    setCurrentLead(prev => (prev && prev.id === leadId ? { ...prev, status, updatedAt } : prev));
+  }, []);
+
+  const deleteLead = useCallback(
+    (leadId: string) => {
+      setLeads(prevLeads => prevLeads.filter(lead => lead.id !== leadId));
     if (currentLead?.id === leadId) {
       setCurrentLead(null);
     }
-  };
+    },
+    [currentLead]
+  );
 
-  const addPaymentToLead = (leadId: string, payment: PaymentSession) => {
-    let updatedLead: Lead | undefined;
-    const updatedLeads = leads.map(lead => {
-      if (lead.id === leadId) {
-        updatedLead = { ...lead, payments: [...(lead.payments || []), payment], updatedAt: new Date().toISOString() };
-        return updatedLead;
-      }
-      return lead;
-    });
-    saveLeads(updatedLeads);
-    if (currentLead?.id === leadId && updatedLead) {
-        setCurrentLead(updatedLead);
-    }
-  };
+  const addPaymentToLead = useCallback((leadId: string, payment: PaymentSession) => {
+    const updatedAt = new Date().toISOString();
+    setLeads(prevLeads =>
+      prevLeads.map(lead =>
+        lead.id === leadId
+          ? { ...lead, payments: [...(lead.payments || []), payment], updatedAt }
+          : lead
+      )
+    );
+    setCurrentLead(prev =>
+      prev && prev.id === leadId
+        ? { ...prev, payments: [...(prev.payments || []), payment], updatedAt }
+        : prev
+    );
+  }, []);
 
-  const updatePaymentInLead = (leadId: string, paymentId: string, paymentUpdate: Partial<PaymentSession>) => {
-    let updatedLead: Lead | undefined;
-    const updatedLeads = leads.map(lead => {
-      if (lead.id === leadId) {
-        const updatedPayments = (lead.payments || []).map(p => // Safely access payments
-          p.id === paymentId ? { ...p, ...paymentUpdate, updatedAt: new Date().toISOString() } : p
-        );
-        updatedLead = { ...lead, payments: updatedPayments, updatedAt: new Date().toISOString() };
-        return updatedLead;
-      }
-      return lead;
-    });
-    saveLeads(updatedLeads);
-    if (currentLead?.id === leadId && updatedLead) {
-        setCurrentLead(updatedLead);
-    }
-  };
-  
-  const deletePaymentFromLead = (leadId: string, paymentId: string) => {
-    let updatedLead: Lead | undefined;
-    const updatedLeads = leads.map(lead => {
-        if (lead.id === leadId) {
-            const updatedPayments = (lead.payments || []).filter(p => p.id !== paymentId); // Safely filter payments
-            updatedLead = { ...lead, payments: updatedPayments, updatedAt: new Date().toISOString() };
-            return updatedLead;
-        }
-        return lead;
-    });
-    saveLeads(updatedLeads);
-    if (currentLead?.id === leadId && updatedLead) {
-        setCurrentLead(updatedLead);
-    }
-  };
-  
-  // --- Co-Applicant Logic ---
-  
-  const createCoApplicant = (leadId: string, relationship: string): CoApplicant => {
+  const updatePaymentInLead = useCallback(
+    (leadId: string, paymentId: string, paymentUpdate: Partial<PaymentSession>) => {
+      const updatedAt = new Date().toISOString();
+      const updatePayments = (payments: PaymentSession[]) =>
+        payments.map(payment => (payment.id === paymentId ? { ...payment, ...paymentUpdate } : payment));
+
+      setLeads(prevLeads =>
+        prevLeads.map(lead =>
+          lead.id === leadId
+            ? { ...lead, payments: updatePayments(lead.payments || []), updatedAt }
+            : lead
+        )
+      );
+
+      setCurrentLead(prev =>
+        prev && prev.id === leadId
+          ? { ...prev, payments: updatePayments(prev.payments || []), updatedAt }
+          : prev
+      );
+    },
+    []
+  );
+
+  const deletePaymentFromLead = useCallback((leadId: string, paymentId: string) => {
+    const updatedAt = new Date().toISOString();
+    const filterPayments = (payments: PaymentSession[]) => payments.filter(payment => payment.id !== paymentId);
+
+    setLeads(prevLeads =>
+      prevLeads.map(lead =>
+        lead.id === leadId
+          ? { ...lead, payments: filterPayments(lead.payments || []), updatedAt }
+          : lead
+      )
+    );
+
+    setCurrentLead(prev =>
+      prev && prev.id === leadId
+        ? { ...prev, payments: filterPayments(prev.payments || []), updatedAt }
+        : prev
+    );
+  }, []);
+
+  const createCoApplicant = useCallback((leadId: string, relationship: string): CoApplicant => {
       const newCoApplicant: CoApplicant = {
           id: Date.now().toString(),
           relationship,
           currentStep: 1,
           isComplete: false,
-          data: {}
+      data: {},
+    };
+
+    setLeads(prevLeads =>
+      prevLeads.map(lead => {
+        if (lead.id !== leadId) return lead;
+        const coApplicants = [...(lead.formData.coApplicants ?? []), newCoApplicant];
+        return {
+          ...lead,
+          formData: {
+            ...lead.formData,
+            coApplicants,
+          },
+          updatedAt: new Date().toISOString(),
+        };
+      })
+    );
+
+    setCurrentLead(prev => {
+      if (!prev || prev.id !== leadId) return prev;
+      const coApplicants = [...(prev.formData.coApplicants ?? []), newCoApplicant];
+      return {
+        ...prev,
+                  formData: {
+          ...prev.formData,
+          coApplicants,
+        },
+        updatedAt: new Date().toISOString(),
       };
-      
-      let updatedCoApplicant: CoApplicant | undefined; // Capture the newly created co-applicant
-      
-      const updatedLeads = leads.map((l: Lead) => {
-          if (l.id === leadId) {
-              const currentCoApplicants: CoApplicant[] = l.formData.coApplicants || [];
-              updatedCoApplicant = newCoApplicant;
-              
-              const updatedCoApplicantsList = [...currentCoApplicants, newCoApplicant];
-              
-              const updatedLead = {
-                  ...l,
-                  formData: {
-                      ...l.formData,
-                      coApplicants: updatedCoApplicantsList
-                  },
-                  updatedAt: new Date().toISOString()
-              };
-              
-              // Ensure currentLead state is updated immediately to reflect the new ID
-              if (currentLead && currentLead.id === leadId) {
-                  setCurrentLead(updatedLead);
-              }
-              
-              return updatedLead;
-          }
-          return l;
-      });
-      saveLeads(updatedLeads);
-      
-      return newCoApplicant; // Return the newly created object for routing
-  };
-  
-  const updateCoApplicant = (leadId: string, coApplicantId: string, data: Partial<CoApplicant>) => {
-      const updatedLeads = leads.map((l: Lead) => {
-          if (l.id === leadId) {
-              const updatedCoApplicants = (l.formData.coApplicants || []).map((coApp: CoApplicant) => {
-                  if (coApp.id === coApplicantId) {
-                      return { ...coApp, ...data };
-                  }
-                  return coApp;
-              });
-              return {
-                  ...l,
-                  formData: {
-                      ...l.formData,
-                      coApplicants: updatedCoApplicants
-                  },
-                  updatedAt: new Date().toISOString()
-              };
-          }
-          return l;
-      });
-      saveLeads(updatedLeads);
-      
-      const updatedCurrent = updatedLeads.find((l: Lead) => l.id === leadId);
-      if (updatedCurrent) {
-        setCurrentLead(updatedCurrent);
-      }
-  };
+    });
 
-  const deleteCoApplicant = (leadId: string, coApplicantId: string) => {
-      const updatedLeads = leads.map((l: Lead) => {
-          if (l.id === leadId) {
-              const updatedCoApplicants = (l.formData.coApplicants || []).filter((coApp: CoApplicant) => coApp.id !== coApplicantId);
+    return newCoApplicant;
+  }, []);
+
+  const updateCoApplicant = useCallback(
+    (leadId: string, coApplicantId: string, data: Partial<CoApplicant>) => {
+      const updater = (coApps: CoApplicant[]) =>
+        coApps.map(coApp => (coApp.id === coApplicantId ? { ...coApp, ...data } : coApp));
+
+      setLeads(prevLeads =>
+        prevLeads.map(lead => {
+          if (lead.id !== leadId) return lead;
+          const coApplicants = updater(lead.formData.coApplicants ?? []);
+          return {
+            ...lead,
+            formData: {
+              ...lead.formData,
+              coApplicants,
+            },
+            updatedAt: new Date().toISOString(),
+          };
+        })
+      );
+
+      setCurrentLead(prev => {
+        if (!prev || prev.id !== leadId) return prev;
+        const coApplicants = updater(prev.formData.coApplicants ?? []);
               return {
-                  ...l,
+          ...prev,
                   formData: {
-                      ...l.formData,
-                      coApplicants: updatedCoApplicants
-                  },
-                  updatedAt: new Date().toISOString()
-              };
-          }
-          return l;
+            ...prev.formData,
+            coApplicants,
+          },
+          updatedAt: new Date().toISOString(),
+        };
       });
-      saveLeads(updatedLeads);
-      
-      const updatedCurrent = updatedLeads.find((l: Lead) => l.id === leadId);
-      if (updatedCurrent) {
-        setCurrentLead(updatedCurrent);
-      }
-  };
-  
-  // NEW FUNCTION: Handles creation and returns co-applicant ID
-  const startCoApplicantFlow = (leadId: string, defaultRelationship: string) => {
-      // 1. Create co-applicant and update global state
+    },
+    []
+  );
+
+  const deleteCoApplicant = useCallback((leadId: string, coApplicantId: string) => {
+    const filterer = (coApps: CoApplicant[]) => coApps.filter(coApp => coApp.id !== coApplicantId);
+
+    setLeads(prevLeads =>
+      prevLeads.map(lead => {
+        if (lead.id !== leadId) return lead;
+        const coApplicants = filterer(lead.formData.coApplicants ?? []);
+        return {
+          ...lead,
+          formData: {
+            ...lead.formData,
+            coApplicants,
+          },
+          updatedAt: new Date().toISOString(),
+        };
+      })
+    );
+
+    setCurrentLead(prev => {
+      if (!prev || prev.id !== leadId) return prev;
+      const coApplicants = filterer(prev.formData.coApplicants ?? []);
+              return {
+        ...prev,
+                  formData: {
+          ...prev.formData,
+          coApplicants,
+        },
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  }, []);
+
+  const startCoApplicantFlow = useCallback(
+    (leadId: string, defaultRelationship: string) => {
       const newCoApplicant = createCoApplicant(leadId, defaultRelationship); 
-      
-      // 2. Return the co-applicant ID so the caller can start the flow
       return newCoApplicant.id;
-  }
-
+    },
+    [createCoApplicant]
+  );
 
   return (
     <LeadContext.Provider
       value={{
         leads,
         currentLead,
+        loading,
+        error,
+        summaryStats,
         createLead,
         updateLead,
         addLeadToArray,
@@ -368,10 +777,12 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
         addPaymentToLead,
         updatePaymentInLead,
         deletePaymentFromLead,
+        refreshLeads,
+        fetchLeadDetails,
         createCoApplicant,
         updateCoApplicant,
         deleteCoApplicant,
-        startCoApplicantFlow, // <-- EXPOSED NEW FUNCTION
+        startCoApplicantFlow,
       }}
     >
       {children}

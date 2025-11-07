@@ -25,6 +25,26 @@ export interface ApiSuccess<T = any> {
 
 export type ApiResponse<T = any> = ApiSuccess<T> | ApiError;
 
+// =========================================================================
+// Shared Application Types
+// =========================================================================
+
+export interface ApplicationSummaryItem {
+  application_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  mobile_number: string | null;
+  created_on: string;
+}
+
+export interface ApplicationsSummaryResponse {
+  success: true;
+  total_applications: number;
+  draft_applications: number;
+  completed_applications: number;
+  applications: ApplicationSummaryItem[];
+}
+
 /**
  * Helper function to check if response is an error
  */
@@ -506,6 +526,16 @@ export interface DetailedInfoResponse {
 
 export async function getDetailedInfo(application_id: string): Promise<ApiResponse<DetailedInfoResponse>> {
   return apiFetch<DetailedInfoResponse>(`applications/${application_id}/detailed-info/`, {
+    method: 'GET',
+  });
+}
+
+/**
+ * Endpoint: Applications Summary
+ * GET /api/lead-collection/applications/summary/
+ */
+export async function fetchApplicationsSummary(): Promise<ApiResponse<ApplicationsSummaryResponse>> {
+  return apiFetch<ApplicationsSummaryResponse>('applications/summary/', {
     method: 'GET',
   });
 }

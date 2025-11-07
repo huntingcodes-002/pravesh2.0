@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Filter, Plus, Eye, Phone, Edit, Calendar, RotateCcw, ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { Search, Filter, Plus, Eye, Phone, Edit, Calendar, RotateCcw, ChevronLeft, ChevronRight, Play, Loader2 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLead, Lead, LeadStatus } from '@/contexts/LeadContext';
@@ -57,7 +57,15 @@ const SummaryCard = ({ title, count, color, bg }: { title: string, count: number
 
 export default function LeadsDashboardPage() {
   const { user, loading: authLoading } = useAuth();
-  const { leads, setCurrentLead, createLead } = useLead();
+  const {
+    leads,
+    setCurrentLead,
+    createLead,
+    loading: leadsLoading,
+    error: leadsError,
+    summaryStats,
+    fetchLeadDetails,
+  } = useLead();
   const router = useRouter();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -67,6 +75,9 @@ export default function LeadsDashboardPage() {
   const [emblaRef, emblaApi] = useEmblaCarousel({ dragFree: true, skipSnaps: true, loop: false });
   const [canScrollPrev, setCanScrollPrev] = useState(false);
   const [canScrollNext, setCanScrollNext] = useState(false);
+  const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
+  const [isFetchingLead, setIsFetchingLead] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   // Embla Carousel Controls
   const onSelect = useCallback(() => {
@@ -132,22 +143,42 @@ export default function LeadsDashboardPage() {
     router.push('/lead'); // Changed from '/lead/step1' to '/lead'
   };
 
-  const handleAction = (lead: Lead, action: 'view' | 'edit' | 'call') => {
-    setCurrentLead(lead);
-    
-    if (action === 'view') {
-        setPreviewLead(lead); // Open preview modal
-        return;
-    } 
-    
+  const handleAction = async (lead: Lead, action: 'view' | 'edit' | 'call') => {
     if (action === 'call') {
-        // No action - call functionality disabled
-        return;
+      setCurrentLead(lead);
+      return;
     }
 
-    if (action === 'edit') {
-        // Navigate to unified lead flow
+    if (isFetchingLead) {
+      return;
+    }
+
+    setDetailError(null);
+    setActiveLeadId(lead.id);
+    setIsFetchingLead(true);
+
+    try {
+      const fullLead = await fetchLeadDetails(lead.appId || lead.id);
+
+      if (!fullLead) {
+        setDetailError('Unable to load application details.');
+        return;
+      }
+
+      setCurrentLead(fullLead);
+
+      if (action === 'view') {
+        setPreviewLead(fullLead);
+      }
+
+      if (action === 'edit') {
         router.push('/lead');
+      }
+    } catch (err: any) {
+      setDetailError(err?.message || 'Unable to load application details.');
+    } finally {
+      setIsFetchingLead(false);
+      setActiveLeadId(null);
     }
   };
   
@@ -166,17 +197,19 @@ export default function LeadsDashboardPage() {
   };
   
   // Summary Data for Carousel
-  const totalLeads = leads.length;
-  const leadsInDraft = leads.filter(l => l.status === 'Draft').length;
+  const totalLeads = summaryStats.total ?? leads.length;
+  const leadsInDraft = summaryStats.draft ?? leads.filter(l => l.status === 'Draft').length;
+  const leadsCompleted = summaryStats.completed ?? leads.filter(l => l.status === 'Submitted').length;
   const leadsSubmitted = leads.filter(l => l.status === 'Submitted').length;
   const leadsApproved = leads.filter(l => l.status === 'Approved').length;
   const leadsRejected = leads.filter(l => l.status === 'Rejected').length;
   const leadsDisbursed = leads.filter(l => l.status === 'Disbursed').length;
 
   const dashboardCards = [
-    { title: 'Total Leads', count: totalLeads, color: 'text-blue-900', bg: 'bg-blue-100' },
-    { title: 'In Draft', count: leadsInDraft, color: 'text-gray-700', bg: 'bg-gray-100' },
-    { title: 'Submitted', count: leadsSubmitted, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { title: 'Total Applications', count: totalLeads, color: 'text-blue-900', bg: 'bg-blue-100' },
+    { title: 'Draft Applications', count: leadsInDraft, color: 'text-gray-700', bg: 'bg-gray-100' },
+    { title: 'Completed Applications', count: leadsCompleted, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { title: 'Submitted', count: leadsSubmitted, color: 'text-blue-500', bg: 'bg-blue-50/70' },
     { title: 'Approved', count: leadsApproved, color: 'text-green-600', bg: 'bg-green-50' },
     { title: 'Rejected', count: leadsRejected, color: 'text-red-600', bg: 'bg-red-50' },
     { title: 'Disbursed', count: leadsDisbursed, color: 'text-teal-600', bg: 'bg-teal-50' },
@@ -225,6 +258,18 @@ export default function LeadsDashboardPage() {
                 <ChevronRight className="h-4 w-4" />
             </Button>
         </div>
+
+        {leadsError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {leadsError}
+          </div>
+        )}
+
+        {detailError && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+            {detailError}
+          </div>
+        )}
 
         {/* Search and Filter */}
         <div className="flex items-center space-x-3">
@@ -328,7 +373,12 @@ export default function LeadsDashboardPage() {
 
         {/* Lead List */}
         <div className="space-y-4">
-          {filteredLeads.length === 0 ? (
+          {leadsLoading ? (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+              <Loader2 className="w-6 h-6 animate-spin mb-3" />
+              <p>Loading applications...</p>
+            </div>
+          ) : filteredLeads.length === 0 ? (
             <p className="text-center text-gray-500 py-8">No leads found matching your filters.</p>
           ) : (
             filteredLeads.map((lead) => {
@@ -339,7 +389,7 @@ export default function LeadsDashboardPage() {
                 <CardContent className="p-4">
                   <div 
                     className="flex flex-col space-y-3"
-                    onClick={() => handleAction(lead, 'view')}
+                    onClick={() => void handleAction(lead, 'view')}
                   >
                     
                     {/* Row 1: App ID & Status */}
@@ -356,14 +406,19 @@ export default function LeadsDashboardPage() {
                       <Button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleAction(lead, 'view');
+                          void handleAction(lead, 'view');
                         }}
                         variant="outline"
                         size="icon"
                         className="w-10 h-10 rounded-full text-blue-600 hover:bg-blue-50 border-blue-200 flex-shrink-0"
+                        disabled={isFetchingLead && activeLeadId === lead.id}
                         title="Application Preview"
                       >
-                        <Eye className="w-5 h-5" />
+                        {isFetchingLead && activeLeadId === lead.id ? (
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                          <Eye className="w-5 h-5" />
+                        )}
                       </Button>
                     </div>
 
@@ -382,7 +437,7 @@ export default function LeadsDashboardPage() {
                       <Button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleAction(lead, 'call');
+                          void handleAction(lead, 'call');
                         }}
                         className="h-12 bg-green-500 hover:bg-green-600 text-white font-semibold text-xs sm:text-sm"
                         title="Call Customer"
@@ -395,9 +450,9 @@ export default function LeadsDashboardPage() {
                       <Button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleAction(lead, 'edit');
+                          void handleAction(lead, 'edit');
                         }}
-                        disabled={isFinalized}
+                        disabled={isFinalized || (isFetchingLead && activeLeadId === lead.id)}
                         className={cn(
                             "h-12 font-semibold text-xs sm:text-sm",
                             isFinalized ? 
@@ -406,7 +461,11 @@ export default function LeadsDashboardPage() {
                         )}
                         title={isFinalized ? `Application is ${lead.status}` : buttonText}
                       >
-                        {buttonIcon}
+                        {isFetchingLead && activeLeadId === lead.id ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          buttonIcon
+                        )}
                         <span className="truncate">{buttonText}</span>
                       </Button>
                       
