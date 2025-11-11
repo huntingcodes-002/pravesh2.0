@@ -210,8 +210,6 @@ export default function NewLeadInfoPage() {
       requiredDocs.push(`Adhaar_${coApplicantId}`);
     });
 
-    requiredDocs.push('CollateralPapers');
-
     return requiredDocs;
   };
 
@@ -246,12 +244,15 @@ export default function NewLeadInfoPage() {
   const handleSubmit = () => {
     if (!currentLead) return;
     
-    const allCompleted = completedCount === totalModules;
+    const requiredSectionsCompleted =
+      getApplicantDetailsStatus() === 'completed' &&
+      getCollateralStatus() === 'completed' &&
+      getLoanRequirementStatus() === 'completed';
     
-    if (!allCompleted) {
+    if (!requiredSectionsCompleted) {
       toast({
         title: 'Cannot Submit',
-        description: 'Please complete all sections before submitting.',
+        description: 'Please complete all required sections before submitting.',
         variant: 'destructive'
       });
       return;
@@ -323,6 +324,11 @@ export default function NewLeadInfoPage() {
   const coApplicants = currentLead?.formData?.coApplicants || [];
   const coApplicantCount = coApplicants.length;
   const hasCoApplicants = coApplicantCount > 0;
+  const requiredSectionsCompleted =
+    applicantStatus === 'completed' &&
+    collateralStatus === 'completed' &&
+    loanStatus === 'completed';
+  const canSubmitApplication = requiredSectionsCompleted && areAllDocumentsUploaded;
 
   return (
     <DashboardLayout 
@@ -801,6 +807,12 @@ export default function NewLeadInfoPage() {
             </CardContent>
           </Card>
 
+          {requiredSectionsCompleted && !areAllDocumentsUploaded && (
+            <div className="mt-5 text-sm font-semibold text-red-600">
+              Please upload all required documents to submit
+            </div>
+          )}
+
         </div>
 
         {/* Fixed Submit Button Footer */}
@@ -808,21 +820,16 @@ export default function NewLeadInfoPage() {
           <div className="flex gap-3 max-w-2xl mx-auto">
             <Button
               onClick={handleSubmit}
-              disabled={completedCount < totalModules || !areAllDocumentsUploaded}
+              disabled={!canSubmitApplication}
               className={cn(
                 "flex-1 h-12 rounded-lg font-medium text-white",
-                completedCount === totalModules && areAllDocumentsUploaded
+                canSubmitApplication
                   ? "bg-[#0072CE] hover:bg-[#005a9e]" 
                   : "bg-gray-300 text-gray-600 cursor-not-allowed"
               )}
             >
               Submit Application
             </Button>
-            {completedCount === totalModules && !areAllDocumentsUploaded && (
-              <p className="text-xs text-red-600 mt-2 text-center w-full">
-                Please upload all required documents to submit
-              </p>
-            )}
           </div>
         </div>
       </div>

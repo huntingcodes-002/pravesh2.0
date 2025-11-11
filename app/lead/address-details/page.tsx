@@ -38,10 +38,16 @@ export default function Step3Page() {
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
   const [isLoadingOcrData, setIsLoadingOcrData] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const hasFetchedOcrData = useRef<string | null>(null);
   const [isAutoFilledViaAadhaar, setIsAutoFilledViaAadhaar] = useState(
     currentLead?.formData?.step3?.autoFilledViaAadhaar || 
     currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar || 
+    false
+  );
+  const [isAutoPopulatedFromSummary, setIsAutoPopulatedFromSummary] = useState(
+    currentLead?.formData?.step3?.autoPopulatedFromSummary ||
+    currentLead?.formData?.step3?.addresses?.[0]?.autoPopulatedFromSummary ||
     false
   );
 
@@ -86,6 +92,11 @@ export default function Step3Page() {
     setIsAutoFilledViaAadhaar(
       currentLead?.formData?.step3?.autoFilledViaAadhaar || 
       currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar || 
+      false
+    );
+    setIsAutoPopulatedFromSummary(
+      currentLead?.formData?.step3?.autoPopulatedFromSummary ||
+      currentLead?.formData?.step3?.addresses?.[0]?.autoPopulatedFromSummary ||
       false
     );
   }, [currentLead]);
@@ -289,6 +300,15 @@ export default function Step3Page() {
       return;
     }
 
+    if (!canProceed) {
+      toast({
+        title: 'Incomplete Details',
+        description: 'Please fill in all required address fields and ensure a primary address is selected.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const normalizedAddresses = addresses.some((addr: Address) => addr.isPrimary)
       ? addresses
       : addresses.map((addr, index) => ({
@@ -296,61 +316,51 @@ export default function Step3Page() {
           isPrimary: index === 0,
         }));
 
-    // Map frontend address format to backend format
-    // Remove address_line_3 - not required by backend
-    // Auto-send: city_id, latitude, longitude, is_primary, address_type (from dropdown)
-    const backendAddresses = normalizedAddresses.map((addr) => ({
-      address_type: addr.addressType || 'residential', // From dropdown
-      address_line_1: addr.addressLine1 || '',
-      address_line_2: addr.addressLine2 || '',
-      landmark: addr.landmark || '',
-      pincode: addr.postalCode || '',
-      city_id: 1, // Auto-send: default city_id
-      latitude: "90", // Auto-send: default latitude
-      longitude: "90", // Auto-send: default longitude
-      is_primary: !!addr.isPrimary, // Respect user selection
-    }));
+    const backendAddresses = normalizedAddresses.map((addr) => {
+      const addressLine1 = addr.addressLine1?.trim() ?? '';
+      const addressLine2 = addr.addressLine2?.trim() ?? '';
+      const landmark = addr.landmark?.trim() ?? '';
+      const postalCode = addr.postalCode?.trim() ?? '';
+
+      return {
+        address_type: addr.addressType || 'residential',
+        address_line_1: addressLine1,
+        address_line_2: addressLine2,
+        address_line_3: '',
+        landmark,
+        pincode: postalCode,
+        latitude: '-90',
+        longitude: '90',
+        is_primary: Boolean(addr.isPrimary),
+      };
+    });
+
+    setIsSaving(true);
 
     try {
-      // Endpoint 4: Submit address details
       const response = await submitAddressDetails({
         application_id: currentLead.appId,
         addresses: backendAddresses,
       });
 
       if (isApiError(response)) {
-        // On API error, don't mark as completed - allow retry
-        if (currentLead) {
-          updateLead(currentLead.id, {
-            step3Completed: false, // Ensure not marked as completed on error
-          });
-        }
-        
-        // Check if error is related to city_id validation
-        const errorDetails = (response as any).details?.validation_errors?.addresses;
-        let errorMessage = response.error || 'Failed to save address details. Please try again.';
-        
-        if (errorDetails) {
-          const cityError = Object.values(errorDetails).find((err: any) => err?.city_id);
-          if (cityError && (cityError as any).city_id) {
-            errorMessage = `City ID validation failed: ${(cityError as any).city_id[0]}. Please use a valid city ID from the database.`;
-          }
-        }
-        
+        updateLead(currentLead.id, {
+          step3Completed: false,
+        });
+
         toast({
           title: 'Save Failed',
-          description: errorMessage,
+          description: response.error || 'Failed to save address details. Please try again.',
           variant: 'destructive',
         });
         return;
       }
 
-      // Update local state and mark as completed
       const finalAddresses = normalizedAddresses.map(addr => ({ ...addr }));
       setAddresses(finalAddresses);
 
       updateLead(currentLead.id, {
-        step3Completed: true, // Mark section as completed
+        step3Completed: true,
         formData: {
           ...currentLead.formData,
           step3: { addresses: finalAddresses },
@@ -365,18 +375,17 @@ export default function Step3Page() {
 
       router.push('/lead/new-lead-info');
     } catch (error: any) {
-      // On error, don't mark as completed - allow retry
-      if (currentLead) {
-        updateLead(currentLead.id, {
-          step3Completed: false, // Ensure not marked as completed on error
-        });
-      }
-      
+      updateLead(currentLead.id, {
+        step3Completed: false,
+      });
+
       toast({
         title: 'Save Failed',
-        description: error.message || 'Failed to save address details. Please try again.',
+        description: error?.message || 'Failed to save address details. Please try again.',
         variant: 'destructive',
       });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -424,6 +433,9 @@ export default function Step3Page() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              {(isAutoPopulatedFromSummary || currentLead?.formData?.step3?.autoPopulatedFromSummary) && (
+                <Badge className="bg-blue-100 text-blue-700 text-xs">Auto-Populated</Badge>
+              )}
               {(isAutoFilledViaAadhaar || currentLead?.formData?.step3?.autoFilledViaAadhaar || currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar) && (
                 <Badge className="bg-green-100 text-green-700 text-xs">Verified via Aadhaar</Badge>
               )}
@@ -656,10 +668,22 @@ export default function Step3Page() {
           <div className="flex gap-3 max-w-2xl mx-auto">
             <Button
               onClick={handleSave}
-              disabled={isCompleted}
-              className={cn("flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white", isCompleted && "bg-gray-300 cursor-not-allowed")}
+              disabled={isCompleted || isSaving || !canProceed}
+              className={cn(
+                "flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white",
+                (isCompleted || isSaving || !canProceed) && "opacity-80 cursor-not-allowed"
+              )}
             >
-              {isCompleted ? 'Section Completed' : 'Save Information'}
+              {isCompleted
+                ? 'Section Completed'
+                : isSaving
+                  ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <Loader className="w-4 h-4 animate-spin" />
+                      Saving...
+                    </span>
+                  )
+                  : 'Save Information'}
             </Button>
           </div>
         </div>

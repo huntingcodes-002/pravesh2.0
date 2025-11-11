@@ -474,11 +474,12 @@ export interface AddressDetailsRequest {
     address_type: string; // From dropdown
     address_line_1: string;
     address_line_2?: string;
+    address_line_3?: string;
+    landmark?: string;
     pincode: string;
-    city_id: number; // Required: integer city ID from master data
-    latitude: string; // Auto-send: default latitude as string
-    longitude: string; // Auto-send: default longitude as string
-    is_primary: boolean; // Auto-send: first address is primary
+    latitude: string;
+    longitude: string;
+    is_primary: boolean;
   }>;
 }
 

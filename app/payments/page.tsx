@@ -40,11 +40,16 @@ export default function PaymentsPage() {
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
   const [displayMobile, setDisplayMobile] = useState(derivedMobile);
+  const [isResending, setIsResending] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
   const sendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasHydratedState = useRef(false);
 
   const createdOn = useMemo(() => new Date(), []);
   const [receivedOn, setReceivedOn] = useState<Date | null>(null);
+
+  const storageKey = applicationId ? `payment-state-${applicationId}` : null;
 
   useEffect(() => {
     if (!hasSentLink) {
@@ -59,6 +64,58 @@ export default function PaymentsPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!storageKey || hasHydratedState.current) return;
+    try {
+      const raw = sessionStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setHasSentLink(Boolean(parsed.hasSentLink));
+        setPaymentStatus(parsed.paymentStatus as PaymentStatus ?? 'Pending');
+        setPaymentUrl(parsed.paymentUrl ?? null);
+        setPaymentOrderId(parsed.paymentOrderId ?? null);
+        setDisplayMobile(parsed.displayMobile ?? derivedMobile);
+        setRemarks(parsed.remarks ?? '');
+        setReceivedOn(parsed.receivedOn ? new Date(parsed.receivedOn) : null);
+      }
+    } catch (error) {
+      console.warn('Failed to hydrate payment state', error);
+    } finally {
+      hasHydratedState.current = true;
+    }
+  }, [storageKey, derivedMobile]);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    if (!hasHydratedState.current) {
+      hasHydratedState.current = true;
+      return;
+    }
+    const payload = {
+      hasSentLink,
+      paymentStatus,
+      paymentUrl,
+      paymentOrderId,
+      displayMobile,
+      remarks,
+      receivedOn: receivedOn ? receivedOn.toISOString() : null,
+    };
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(payload));
+    } catch (error) {
+      console.warn('Failed to persist payment state', error);
+    }
+  }, [
+    storageKey,
+    hasSentLink,
+    paymentStatus,
+    paymentUrl,
+    paymentOrderId,
+    displayMobile,
+    remarks,
+    receivedOn,
+  ]);
 
   const handleSendToCustomer = async () => {
     if (isSending) return;
@@ -193,14 +250,57 @@ export default function PaymentsPage() {
     }
   };
 
-  const handleResendLink = () => {
-    toast({
-      title: 'Payment Link Resent',
-      description: 'The payment link has been resent to the customer.',
-    });
+  const handleResendPaymentLink = async () => {
+    if (isResending) return;
+
+    if (!applicationId || applicationId === 'N/A') {
+      toast({
+        title: 'Cannot resend link',
+        description: 'Application ID is missing.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsResending(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/payment-resend/`, {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+          Authorization: AUTH_TOKEN,
+        },
+        body: JSON.stringify({
+          application_id: applicationId,
+          actor: 'string',
+          reason: 'string',
+        }),
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Failed to resend payment link.');
+      }
+
+      toast({
+        title: 'Payment Link Resent',
+        description: 'The payment link has been resent to the customer.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Failed to resend payment link',
+        description: error?.message || 'Something went wrong while resending the payment link.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsResending(false);
+    }
   };
 
-  const handleDeleteLink = () => {
+  const resetPaymentState = () => {
     setHasSentLink(false);
     setPaymentStatus('Pending');
     setRemarks('');
@@ -209,11 +309,59 @@ export default function PaymentsPage() {
     setPaymentUrl(null);
     setPaymentOrderId(null);
     setDisplayMobile(derivedMobile);
-    toast({
-      title: 'Payment Link Deleted',
-      description: 'The payment link has been removed.',
-      variant: 'destructive',
-    });
+    if (storageKey) {
+      sessionStorage.removeItem(storageKey);
+    }
+  };
+
+  const handleDeleteLink = async () => {
+    if (isDeleting) return;
+
+    if (!applicationId || applicationId === 'N/A') {
+      toast({
+        title: 'Cannot delete link',
+        description: 'Application ID is missing.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsDeleting(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/payment-delete/`, {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+          Authorization: AUTH_TOKEN,
+        },
+        body: JSON.stringify({
+          application_id: applicationId,
+        }),
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Failed to delete payment link.');
+      }
+
+      resetPaymentState();
+
+      toast({
+        title: 'Payment Link Deleted',
+        description: 'The payment link has been removed.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Failed to delete payment link',
+        description: error?.message || 'Something went wrong while deleting the payment link.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const getStatusBadge = (status: PaymentStatus) => {
@@ -250,6 +398,7 @@ export default function PaymentsPage() {
 
   const displayedPaymentLink = paymentUrl ?? defaultPaymentLink;
   const maskedOrderId = paymentOrderId ? `****${paymentOrderId.slice(-4)}` : 'N/A';
+  const isPaymentCompleted = paymentStatus === 'Paid';
 
   const handleExit = () => {
     router.push('/lead/new-lead-info');
@@ -352,16 +501,18 @@ export default function PaymentsPage() {
                 <h3 className="text-xl font-bold text-[#003366]">Login / IMD Fee</h3>
                 <div className="flex items-center gap-2">
                   {getStatusBadge(paymentStatus)}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleRefreshStatus}
-                    className="h-8 w-8 text-gray-500 hover:text-gray-700"
-                    disabled={isRefreshing}
-                    aria-label="Refresh payment status"
-                  >
-                    <RefreshCw className={cn('w-4 h-4', isRefreshing && 'animate-spin')} />
-                  </Button>
+                  {!isPaymentCompleted && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleRefreshStatus}
+                      className="h-8 w-8 text-gray-500 hover:text-gray-700"
+                      disabled={isRefreshing}
+                      aria-label="Refresh payment status"
+                    >
+                      <RefreshCw className={cn('w-4 h-4', isRefreshing && 'animate-spin')} />
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -428,17 +579,33 @@ export default function PaymentsPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <Button
                       variant="outline"
-                      onClick={handleResendLink}
+                      onClick={handleResendPaymentLink}
                       className="h-11 border-2 border-[#0072CE] text-[#0072CE] hover:bg-blue-50 font-semibold"
+                      disabled={isResending}
                     >
-                      Resend Link
+                      {isResending ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Resending...
+                        </span>
+                      ) : (
+                        'Resend Link'
+                      )}
                     </Button>
                     <Button
                       variant="outline"
                       onClick={handleDeleteLink}
                       className="h-11 border-2 border-red-500 text-red-600 hover:bg-red-50 font-semibold"
+                      disabled={isDeleting}
                     >
-                      Delete Link
+                      {isDeleting ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Deleting...
+                        </span>
+                      ) : (
+                        'Delete Link'
+                      )}
                     </Button>
                   </div>
                 )}
@@ -447,15 +614,41 @@ export default function PaymentsPage() {
                   <Button
                     onClick={handleDeleteLink}
                     className="w-full h-11 bg-red-600 hover:bg-red-700 text-white font-semibold"
+                    disabled={isDeleting}
                   >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete Link
+                    {isDeleting ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Deleting...
+                      </span>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete Link
+                      </>
+                    )}
                   </Button>
                 )}
               </div>
             </CardContent>
           </Card>
         )}
+
+        {isPaymentCompleted && (
+          <div className="p-4 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 font-medium">
+            Payment has been completed. This page is now view only.
+          </div>
+        )}
+      </div>
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
+        <div className="flex gap-3 max-w-2xl mx-auto">
+          <Button
+            onClick={handleExit}
+            className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white"
+          >
+            Back to Hub
+          </Button>
+        </div>
       </div>
     </DashboardLayout>
   );

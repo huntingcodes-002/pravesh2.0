@@ -213,6 +213,9 @@ export default function Step2Page() {
   const hasFetchedOcrData = useRef<string | null>(null);
   const [isAutoFilledViaPAN, setIsAutoFilledViaPAN] = useState(currentLead?.formData?.step2?.autoFilledViaPAN || false);
   const [isAutoFilledViaAadhaar, setIsAutoFilledViaAadhaar] = useState(currentLead?.formData?.step2?.autoFilledViaAadhaar || false);
+  const [hasSummaryAutoPopulation, setHasSummaryAutoPopulation] = useState(
+    currentLead?.formData?.step2?.autoPopulatedFromSummary || false
+  );
 
   const isReadOnly = isCompleted || (formData.hasPan === 'yes' && isPanValidated);
 
@@ -271,6 +274,7 @@ export default function Step2Page() {
         // Sync auto-population flags from context
         setIsAutoFilledViaPAN(step2Data.autoFilledViaPAN || false);
         setIsAutoFilledViaAadhaar(step2Data.autoFilledViaAadhaar || false);
+        setHasSummaryAutoPopulation(step2Data.autoPopulatedFromSummary || false);
         
         if (currentLead.panNumber) {
             setIsPanTouched(true);
@@ -872,9 +876,14 @@ export default function Step2Page() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6 mb-4">
             <div className="border-b border-gray-100 pb-2 mb-6 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-[#003366]">Identity Verification</h3>
-                {(isAutoFilledViaPAN || currentLead?.formData?.step2?.autoFilledViaPAN) && (
-                  <Badge className="bg-green-100 text-green-700 text-xs">Verified via PAN</Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {(hasSummaryAutoPopulation || currentLead?.formData?.step2?.autoPopulatedFromSummary) && (
+                    <Badge className="bg-blue-100 text-blue-700 text-xs">Auto-Populated</Badge>
+                  )}
+                  {(isAutoFilledViaPAN || currentLead?.formData?.step2?.autoFilledViaPAN) && (
+                    <Badge className="bg-green-100 text-green-700 text-xs">Verified via PAN</Badge>
+                  )}
+                </div>
             </div>
           
             <div className="space-y-6">
@@ -1097,7 +1106,12 @@ export default function Step2Page() {
             </div>
 
             <div className="border-t border-gray-100 pt-6 mt-6 space-y-6">
-                 <h3 className="text-sm font-semibold text-[#003366]">Personal Details</h3>
+                 <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-[#003366]">Personal Details</h3>
+                    {(hasSummaryAutoPopulation || currentLead?.formData?.step2?.autoPopulatedFromSummary) && (
+                      <Badge className="bg-blue-100 text-blue-700 text-xs">Auto-Populated</Badge>
+                    )}
+                 </div>
                  <div>
                     <Label className="text-sm font-medium text-[#003366] mb-2 block flex items-center gap-2">
                         Date of Birth *

@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { RefreshCw } from 'lucide-react';
 
 export default function LoanRequirementPage() {
   const { currentLead, updateLead } = useLead();
@@ -18,10 +19,10 @@ export default function LoanRequirementPage() {
 
   const [formData, setFormData] = useState({
     loanAmount: currentLead?.loanAmount || 0,
-    loanPurpose: currentLead?.loanPurpose || '',
+    loanPurpose: currentLead?.loanPurpose || 'business_expansion',
     customPurpose: currentLead?.formData?.step7?.customPurpose || '',
     purposeDescription: currentLead?.formData?.step7?.purposeDescription || '',
-    productCode: currentLead?.formData?.step7?.productCode || '',
+    productCode: currentLead?.formData?.step7?.productCode || 'business_loan',
     schemeCode: currentLead?.formData?.step7?.schemeCode || '',
     interestRate: currentLead?.formData?.step7?.interestRate || '',
     tenure: currentLead?.formData?.step7?.tenure || '',
@@ -32,32 +33,43 @@ export default function LoanRequirementPage() {
     sourcingChannel: currentLead?.formData?.step7?.sourcingChannel || 'direct',
     sourcingBranch: currentLead?.formData?.step7?.sourcingBranch || '',
   });
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (currentLead?.formData?.step7) {
-      setFormData(currentLead.formData.step7);
+      const incoming = currentLead.formData.step7;
+      setFormData({
+        ...incoming,
+        loanPurpose: 'business_expansion',
+        productCode: 'business_loan',
+        sourcingChannel: 'direct',
+      });
     }
   }, [currentLead]);
 
   const setField = (key: string, value: string | number | string[]) => setFormData(prev => ({ ...prev, [key]: value }));
 
+  const API_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications/loan-details/';
+  const AUTH_TOKEN =
+    'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzYyOTM2OTAzLCJpYXQiOjE3NjI4NTA1MDMsImp0aSI6IjM5OTZiZDhhMDAxNzRiZjJhMTZkZWQ5ODk1MDg4YWViIiwidXNlcl9pZCI6NDF9.9qeKcZF_Mc9tdCbhSDvma3M-jTs7pkHhYWh3GqKeUD8';
+  const HARD_CODED_LOAN_PURPOSE = 'business_expansion';
+
   const formatNumberWithCommas = (value: number): string => {
-    if (isNaN(value) || value === 0) return '0';
-    const numStr = Math.floor(value).toString();
-    const lastThree = numStr.slice(-3);
-    const otherNums = numStr.slice(0, -3);
-    if (otherNums.length === 0) return lastThree;
-    const formatted = otherNums.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree;
-    return formatted;
+    if (isNaN(value) || value === 0) return '';
+    return value.toLocaleString('en-IN', {
+      minimumFractionDigits: value % 1 !== 0 ? 2 : 0,
+      maximumFractionDigits: value % 1 !== 0 ? 2 : 0,
+    });
   };
 
   const parseFormattedNumber = (formattedValue: string): number => {
-    const numericValue = formattedValue.replace(/,/g, '');
-    return parseInt(numericValue) || 0;
+    const numericValue = formattedValue.replace(/,/g, '').trim();
+    const parsed = parseFloat(numericValue);
+    return Number.isNaN(parsed) ? 0 : parsed;
   };
 
   const handleLoanAmountChange = (value: string) => {
-    const cleanValue = value.replace(/[^0-9,]/g, '');
+    const cleanValue = value.replace(/[^0-9.]/g, '');
     const numericValue = parseFormattedNumber(cleanValue);
     setField('loanAmount', numericValue);
   };
@@ -71,25 +83,107 @@ export default function LoanRequirementPage() {
     return `₹${(value / 1000).toFixed(0)}K`;
   };
 
-  const handleSave = () => {
-    if (!currentLead) return;
+  const handleSave = async () => {
+    if (!currentLead || isSaving) return;
 
-    updateLead(currentLead.id, {
-      formData: {
-        ...currentLead.formData,
-        step7: formData
-      },
-      loanAmount: formData.loanAmount,
-      loanPurpose: formData.loanPurpose,
-    });
+    if (!currentLead.appId) {
+      toast({
+        title: 'Missing Application ID',
+        description: 'Application ID is required to save loan details.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-    toast({
-      title: 'Information Saved',
-      description: 'Loan requirement details have been saved successfully.',
-      className: 'bg-green-50 border-green-200'
-    });
+    if (!formData.loanAmount || formData.loanAmount <= 0) {
+      toast({
+        title: 'Loan amount required',
+        description: 'Please enter a loan amount greater than zero.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-    router.push('/lead/new-lead-info');
+    if (!formData.interestRate && formData.interestRate !== 0) {
+      toast({
+        title: 'Interest rate required',
+        description: 'Please provide an interest rate.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!formData.tenure && formData.tenure !== 0) {
+      toast({
+        title: 'Tenure required',
+        description: 'Please provide the tenure in months.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsSaving(true);
+
+    const payload = {
+      application_id: currentLead.appId,
+      loan_amount_requested: Number(formData.loanAmount).toFixed(2),
+      loan_purpose: HARD_CODED_LOAN_PURPOSE,
+      loan_purpose_description: formData.purposeDescription?.trim() || 'string',
+      product_code: 'business_loan',
+      interest_rate: Number(formData.interestRate).toString(),
+      tenure_months: Number(formData.tenure),
+      sourcing_channel: 'direct',
+    };
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+          Authorization: AUTH_TOKEN,
+        },
+        body: JSON.stringify(payload),
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Failed to save loan details.');
+      }
+
+      const data = await response.json();
+
+      updateLead(currentLead.id, {
+        formData: {
+          ...currentLead.formData,
+          step7: {
+            ...formData,
+            loanPurpose: HARD_CODED_LOAN_PURPOSE,
+            productCode: 'business_loan',
+            sourcingChannel: 'direct',
+          },
+        },
+        loanAmount: formData.loanAmount,
+        loanPurpose: HARD_CODED_LOAN_PURPOSE,
+      });
+
+      toast({
+        title: 'Information Saved',
+        description: data?.message || 'Loan requirement details have been saved successfully.',
+        className: 'bg-green-50 border-green-200',
+      });
+
+      router.push('/lead/new-lead-info');
+    } catch (error: any) {
+      toast({
+        title: 'Failed to save information',
+        description: error?.message || 'Something went wrong while saving loan details.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleExit = () => {
@@ -223,9 +317,17 @@ export default function LoanRequirementPage() {
           <div className="flex gap-3 max-w-2xl mx-auto">
             <Button
               onClick={handleSave}
+              disabled={isSaving}
               className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white"
             >
-              Save Information
+              {isSaving ? (
+                <span className="flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Saving...
+                </span>
+              ) : (
+                'Save Information'
+              )}
             </Button>
           </div>
         </div>

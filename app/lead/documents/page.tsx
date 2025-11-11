@@ -7,7 +7,7 @@ import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-im
 import 'react-image-crop/dist/ReactCrop.css';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { uploadDocument, getDetailedInfo, submitPersonalInfo, isApiError } from '@/lib/api';
+import { uploadDocument, getDetailedInfo, submitPersonalInfo, isApiError, type ApiSuccess } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -88,6 +88,103 @@ const getAlternateDocumentLabel = (alternateIdType: string): string => {
         "Driving License": "Driving License"
     };
     return labelMapping[alternateIdType] || alternateIdType;
+};
+
+const convertDDMMYYYYToISO = (dateStr: string): string => {
+    if (!dateStr) return '';
+
+    if (typeof dateStr === 'string' && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        return dateStr;
+    }
+
+    const stringValue = String(dateStr).trim();
+    const slashMatch = stringValue.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (slashMatch) {
+        const [, day, month, year] = slashMatch;
+        return `${year}-${month}-${day}`;
+    }
+
+    const ddmmyyyyMatch = stringValue.match(/^(\d{2})(\d{2})(\d{4})$/);
+    if (ddmmyyyyMatch) {
+        const [, day, month, year] = ddmmyyyyMatch;
+        return `${year}-${month}-${day}`;
+    }
+
+    try {
+        const dateObj = new Date(stringValue);
+        if (!Number.isNaN(dateObj.getTime())) {
+            return dateObj.toISOString().split('T')[0];
+        }
+    } catch {
+        // ignore parse errors
+    }
+
+    return stringValue;
+};
+
+const getFieldValue = (field: any): string => {
+    if (field === null || field === undefined) return '';
+    if (typeof field === 'object' && 'value' in field && field.value !== undefined) {
+        return String(field.value).trim();
+    }
+    return String(field).trim();
+};
+
+const unwrapDetailedInfoResponse = (response: ApiSuccess<any> | any) => {
+    if (!response || typeof response !== 'object') {
+        return { baseData: null, applicationDetails: null, workflowState: null };
+    }
+
+    const data = (response as ApiSuccess<any>).data ?? response;
+    const applicationDetails = data?.application_details ?? data?.applicationDetails ?? null;
+    const workflowState = data?.workflow_state ?? applicationDetails?.workflow_state ?? null;
+
+    return { baseData: data, applicationDetails, workflowState };
+};
+
+const findPrimaryParticipant = (applicationDetails: any) => {
+    if (!applicationDetails || !Array.isArray(applicationDetails.participants)) return null;
+    return (
+        applicationDetails.participants.find(
+            (participant: any) => participant?.participant_type === 'primary_participant'
+        ) ?? applicationDetails.participants[0] ?? null
+    );
+};
+
+const getFirstAvailable = (source: any, keys: string[], fallback: any = '') => {
+    if (!source || typeof source !== 'object') return fallback;
+    for (const key of keys) {
+        if (source[key] !== undefined && source[key] !== null) {
+            const value = source[key];
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+                if (trimmed) return trimmed;
+            } else if (typeof value === 'number') {
+                return value;
+            } else if (typeof value === 'boolean') {
+                return value;
+            } else if (typeof value === 'object' && 'value' in value) {
+                const nested = value.value;
+                if (nested !== undefined && nested !== null && String(nested).trim() !== '') {
+                    return nested;
+                }
+            } else if (value) {
+                return value;
+            }
+        }
+    }
+    return fallback;
+};
+
+const normalizeGenderValue = (value?: string | null): string => {
+    if (!value) return '';
+    const normalized = String(value).trim().toLowerCase();
+    if (!normalized) return '';
+    if (['male', 'm'].includes(normalized)) return 'male';
+    if (['female', 'f'].includes(normalized)) return 'female';
+    if (['other', 'others', 'o'].includes(normalized)) return 'other';
+    if (['not-specified', 'not specified', 'na', 'n/a', 'unspecified'].includes(normalized)) return 'not-specified';
+    return normalized;
 };
 
 // Helper function to generate dynamic document list
@@ -479,83 +576,43 @@ export default function Step8Page() {
                 
                 const detailedResponse = await getDetailedInfo(currentLead.appId);
                 
-                if (!isApiError(detailedResponse) && detailedResponse.data) {
-                    const parsedData = detailedResponse.data;
-                    
-                    // Handle PAN document - populate Customer Details page with PAN number and DOB
+                if (!isApiError(detailedResponse)) {
+                    const { baseData: rawData = {}, applicationDetails, workflowState } = unwrapDetailedInfoResponse(detailedResponse as ApiSuccess<any>);
+                    const parsedData = rawData ?? {};
+                    const resolvedWorkflowState = workflowState ?? parsedData?.workflow_state ?? {};
+                    const primaryParticipant = findPrimaryParticipant(applicationDetails);
+                    const summaryPersonalInfo = primaryParticipant?.personal_info ?? null;
+                    const summaryAddresses = Array.isArray(primaryParticipant?.addresses) ? primaryParticipant.addresses : [];
+                    const isCoApplicantDocument = docInfo?.applicantType === 'coapplicant' && Boolean(documentCoApplicantId);
+
+                    const summaryPanNumberRaw = !isCoApplicantDocument && summaryPersonalInfo ? getFieldValue(summaryPersonalInfo.pan_number) : '';
+                    const summaryDobRaw = !isCoApplicantDocument && summaryPersonalInfo ? getFieldValue(summaryPersonalInfo.date_of_birth) : '';
+                    const summaryGenderNormalized = !isCoApplicantDocument && summaryPersonalInfo ? normalizeGenderValue(summaryPersonalInfo.gender) : '';
+                    const summaryAddressCount = !isCoApplicantDocument ? summaryAddresses.length : 0;
+
                     if (baseDocType === 'PAN') {
-                        // Helper function to convert DD/MM/YYYY format (e.g., "24/08/2002") to YYYY-MM-DD format
-                        const convertDDMMYYYYToISO = (dateStr: string): string => {
-                            if (!dateStr) return '';
-                            
-                            // If already in ISO format (YYYY-MM-DD), return as is
-                            if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                                return dateStr;
-                            }
-                            
-                            // If in DD/MM/YYYY format (e.g., "24/08/2002"), convert to YYYY-MM-DD
-                            const slashMatch = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-                            if (slashMatch) {
-                                const [, day, month, year] = slashMatch;
-                                return `${year}-${month}-${day}`;
-                            }
-                            
-                            // If in ddmmyyyy format (8 digits: 24082002), convert to YYYY-MM-DD
-                            const ddmmyyyyMatch = dateStr.match(/^(\d{2})(\d{2})(\d{4})$/);
-                            if (ddmmyyyyMatch) {
-                                const [, day, month, year] = ddmmyyyyMatch;
-                                return `${year}-${month}-${day}`;
-                            }
-                            
-                            // Try to parse as Date object and convert
-                            try {
-                                const dateObj = new Date(dateStr);
-                                if (!isNaN(dateObj.getTime())) {
-                                    return dateObj.toISOString().split('T')[0];
+                        let panNumber: string | null = summaryPanNumberRaw ? summaryPanNumberRaw.toUpperCase() : null;
+                        let dateOfBirth: string | null = summaryDobRaw ? convertDDMMYYYYToISO(summaryDobRaw) : null;
+                        const extractedFields = resolvedWorkflowState?.pan_ocr_data?.extracted_fields;
+
+                        if (extractedFields) {
+                            if (!panNumber && extractedFields.pan_number) {
+                                const extractedPan = getFieldValue(extractedFields.pan_number);
+                                if (extractedPan) {
+                                    panNumber = extractedPan.toUpperCase();
                                 }
-                            } catch (e) {
-                                // Ignore parse errors
                             }
-                            
-                            return dateStr; // Return as-is if conversion fails
-                        };
-                        
-                        // Extract PAN number and DOB from workflow_state.pan_ocr_data.extracted_fields
-                        // Response structure: workflow_state.pan_ocr_data.extracted_fields.pan_number and .date_of_birth
-                        const extractedFields = parsedData.workflow_state?.pan_ocr_data?.extracted_fields;
-                        
-                        // Extract PAN number - ensure it's a valid string
-                        let panNumber: string | null = null;
-                        if (extractedFields?.pan_number) {
-                            const panValue = String(extractedFields.pan_number).trim();
-                            if (panValue && panValue.length > 0) {
-                                panNumber = panValue;
+                            if (!dateOfBirth && extractedFields.date_of_birth) {
+                                const extractedDob = getFieldValue(extractedFields.date_of_birth);
+                                if (extractedDob) {
+                                    dateOfBirth = convertDDMMYYYYToISO(extractedDob);
+                                }
                             }
                         }
-                        
-                        // Extract date of birth and convert from DD/MM/YYYY to YYYY-MM-DD
-                        let dateOfBirth: string | null = null;
-                        if (extractedFields?.date_of_birth) {
-                            const dobValue = String(extractedFields.date_of_birth).trim();
-                            if (dobValue && dobValue.length > 0) {
-                                dateOfBirth = convertDDMMYYYYToISO(dobValue);
-                            }
-                        }
-                        
-                        // Debug: Log the extracted data
-                        console.log('Extracted PAN data from API:', {
-                            extractedFields: extractedFields,
-                            rawPanNumber: extractedFields?.pan_number,
-                            rawDateOfBirth: extractedFields?.date_of_birth,
-                            panNumber,
-                            dateOfBirth
-                        });
-                        
-                        // Only populate if we have at least one field with actual value
+
                         if (panNumber || dateOfBirth) {
-                            // Auto-populate Customer Details (Basic Details) page via LeadContext
                             if (currentLead) {
-                                if (docInfo?.applicantType === 'coapplicant' && documentCoApplicantId && updateCoApplicant) {
+                                if (isCoApplicantDocument && documentCoApplicantId && updateCoApplicant) {
                                     const coApplicants = currentLead.formData?.coApplicants || [];
                                     const coApplicant = coApplicants.find((coApp: any) => coApp.id === documentCoApplicantId);
                                     if (coApplicant) {
@@ -566,15 +623,15 @@ export default function Step8Page() {
                                             try {
                                                 const today = new Date();
                                                 const birthDate = new Date(updatedDob);
-                                                if (!isNaN(birthDate.getTime())) {
+                                                if (!Number.isNaN(birthDate.getTime())) {
                                                     calculatedAge = today.getFullYear() - birthDate.getFullYear();
-                                                    const m = today.getMonth() - birthDate.getMonth();
-                                                    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                                                    const monthDiff = today.getMonth() - birthDate.getMonth();
+                                                    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
                                                         calculatedAge--;
                                                     }
                                                 }
-                                            } catch (e) {
-                                                console.error('Error calculating age:', e);
+                                            } catch (error) {
+                                                console.error('Error calculating age:', error);
                                             }
                                         }
 
@@ -605,74 +662,59 @@ export default function Step8Page() {
                                         });
                                     }
                                 } else {
-                                    // Prepare update data - use extracted values if available, otherwise keep existing
-                                    const updatedPanNumber = panNumber || currentLead.panNumber || '';
-                                    const updatedDob = dateOfBirth || currentLead.dob || '';
-                                    
-                                    // Calculate age if DOB is available
-                                    let calculatedAge = currentLead.age || 0;
-                                    if (updatedDob) {
+                                    const existingStep2 = currentLead.formData?.step2 || {};
+                                    const resolvedPan = panNumber || existingStep2.pan || currentLead.panNumber || '';
+                                    const resolvedDob = dateOfBirth || existingStep2.dob || currentLead.dob || '';
+                                    let calculatedAge = existingStep2.age || currentLead.age || 0;
+
+                                    if (resolvedDob) {
                                         try {
                                             const today = new Date();
-                                            const birthDate = new Date(updatedDob);
-                                            if (!isNaN(birthDate.getTime())) {
+                                            const birthDate = new Date(resolvedDob);
+                                            if (!Number.isNaN(birthDate.getTime())) {
                                                 calculatedAge = today.getFullYear() - birthDate.getFullYear();
-                                                const m = today.getMonth() - birthDate.getMonth();
-                                                if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                                                const monthDiff = today.getMonth() - birthDate.getMonth();
+                                                if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
                                                     calculatedAge--;
                                                 }
                                             }
-                                        } catch (e) {
-                                            console.error('Error calculating age:', e);
+                                        } catch (error) {
+                                            console.error('Error calculating age:', error);
                                         }
                                     }
-                                    
+
                                     const updatedStep2 = {
-                                        ...currentLead.formData?.step2,
-                                        pan: updatedPanNumber,
-                                        dob: updatedDob,
+                                        ...existingStep2,
+                                        hasPan: 'yes',
+                                        pan: resolvedPan,
+                                        dob: resolvedDob,
                                         age: calculatedAge,
-                                        // Keep existing gender value
-                                        gender: currentLead.formData?.step2?.gender ?? currentLead.gender ?? '',
+                                        gender: existingStep2.gender ?? currentLead.gender ?? '',
+                                        autoFilledViaPAN: true,
+                                        autoPopulatedFromSummary: (summaryPanNumberRaw || summaryDobRaw ? true : existingStep2.autoPopulatedFromSummary) || false,
                                     };
-                                    
+
                                     updateLead(currentLead.id, {
-                                        panNumber: updatedPanNumber,
-                                        dob: updatedDob,
+                                        panNumber: resolvedPan,
+                                        dob: resolvedDob,
                                         age: calculatedAge,
-                                        // Keep existing gender value
-                                        gender: currentLead.gender ?? '',
+                                        gender: updatedStep2.gender,
                                         formData: {
                                             ...currentLead.formData,
                                             step2: updatedStep2,
                                         },
                                     });
 
-                                    console.log('PAN Data populated successfully:', { 
-                                        panNumber, 
-                                        dateOfBirth,
-                                        updatedPanNumber,
-                                        updatedDob,
-                                        currentLeadBeforeUpdate: {
-                                            panNumber: currentLead.panNumber,
-                                            dob: currentLead.dob
-                                        }
-                                    });
                                     toast({
-                                        title: 'Success',
-                                        description: 'PAN document processed successfully. PAN Number and Date of Birth populated in Customer Details page.',
+                                        title: 'Auto-populated',
+                                        description: summaryPanNumberRaw || summaryDobRaw
+                                            ? 'PAN number and Date of Birth were auto-populated from the uploaded document.'
+                                            : 'PAN document processed successfully and details have been populated.',
                                         className: 'bg-green-50 border-green-200',
                                     });
                                 }
                             }
                         } else {
-                            console.log('No PAN data found in response:', { 
-                                extractedFields,
-                                panNumber, 
-                                dateOfBirth,
-                                workflowStateKeys: Object.keys(parsedData.workflow_state || {}),
-                                panOcrData: parsedData.workflow_state?.pan_ocr_data
-                            });
                             toast({
                                 title: 'Upload Successful',
                                 description: 'Document uploaded successfully. Waiting for data parsing...',
@@ -681,45 +723,70 @@ export default function Step8Page() {
                         }
                     }
                     
-                    // Handle Aadhaar document - populate Address Details page with address data
-                    if (baseDocType === 'Adhaar' && parsedData.address_info) {
-                        // Try to get address from parsed_aadhaar_data or addresses array
-                        const aadhaarAddress = parsedData.address_info.parsed_aadhaar_data || 
-                                             parsedData.address_info.addresses?.[0];
-                        
-                        // Only populate if we have address data from backend
-                        if (aadhaarAddress) {
-                            const aadhaarLandmark = (aadhaarAddress as Record<string, any>)?.landmark || '';
-                            // Auto-populate Address Details page via LeadContext
-                            if (currentLead) {
-                                if (docInfo?.applicantType === 'coapplicant' && documentCoApplicantId && updateCoApplicant) {
+                    if (baseDocType === 'Adhaar') {
+                        let genderValue: string | null = summaryGenderNormalized || null;
+                        const extractedGenderRaw = getFieldValue(resolvedWorkflowState?.aadhaar_ocr_data?.extracted_fields?.gender);
+                        const normalizedFallbackGender = normalizeGenderValue(extractedGenderRaw);
+                        if (!genderValue && normalizedFallbackGender) {
+                            genderValue = normalizedFallbackGender;
+                        }
+
+                        let addressCandidates: any[] = [];
+                        let addressPopulatedFromSummary = false;
+                        if (!isCoApplicantDocument && summaryAddressCount > 0) {
+                            addressCandidates = summaryAddresses;
+                            addressPopulatedFromSummary = true;
+                        } else {
+                            const fallbackAddress =
+                                parsedData?.address_info?.parsed_aadhaar_data ??
+                                parsedData?.address_info?.addresses?.[0] ??
+                                resolvedWorkflowState?.aadhaar_extracted_address ??
+                                null;
+                            if (fallbackAddress) {
+                                addressCandidates = [fallbackAddress];
+                            }
+                        }
+
+                        const timestampBase = Date.now();
+                        const mappedAddresses = addressCandidates.map((addr: any, index: number) => {
+                            const addressLine1 = getFirstAvailable(addr, ['address_line_1', 'address_line_one', 'addressLine1'], '');
+                            const addressLine2 = getFirstAvailable(addr, ['address_line_2', 'address_line_two', 'addressLine2'], '');
+                            const landmark = getFirstAvailable(addr, ['landmark'], '');
+                            const postalCode = getFirstAvailable(addr, ['pincode', 'postal_code', 'zip'], '');
+                            const addressType = getFirstAvailable(addr, ['address_type', 'type'], 'residential') || 'residential';
+                            const isPrimaryFromSource = Boolean(getFirstAvailable(addr, ['is_primary', 'primary'], index === 0));
+
+                            return {
+                                id: `${timestampBase}-${index}`,
+                                addressType: String(addressType || 'residential'),
+                                addressLine1: String(addressLine1 || ''),
+                                addressLine2: String(addressLine2 || ''),
+                                postalCode: String(postalCode || ''),
+                                landmark: String(landmark || ''),
+                                isPrimary: index === 0 ? true : isPrimaryFromSource,
+                            };
+                        }).filter((addr: any) => addr.addressLine1 || addr.postalCode || addr.landmark);
+
+                        if (currentLead) {
+                            if (isCoApplicantDocument && documentCoApplicantId && updateCoApplicant) {
+                                if (mappedAddresses.length > 0) {
                                     const coApplicants = currentLead.formData?.coApplicants || [];
                                     const coApplicant = coApplicants.find((coApp: any) => coApp.id === documentCoApplicantId);
                                     if (coApplicant) {
                                         const existingAddresses = coApplicant.data?.step3?.addresses || [];
                                         const updatedAddresses = existingAddresses.length > 0
-                                            ? existingAddresses.map((addr: any, index: number) =>
-                                                index === 0
-                                                    ? {
-                                                        ...addr,
-                                                        addressLine1: aadhaarAddress.address_line_1 || addr.addressLine1 || '',
-                                                        addressLine2: aadhaarAddress.address_line_2 || addr.addressLine2 || '',
-                                                        addressLine3: aadhaarAddress.address_line_3 || addr.addressLine3 || '',
-                                                        landmark: aadhaarLandmark || addr.landmark || '',
-                                                        postalCode: aadhaarAddress.pincode || addr.postalCode || '',
-                                                    }
-                                                    : addr
-                                            )
-                                            : [{
-                                                id: Date.now().toString(),
-                                                addressType: 'residential',
-                                                addressLine1: aadhaarAddress.address_line_1 || '',
-                                                addressLine2: aadhaarAddress.address_line_2 || '',
-                                                addressLine3: aadhaarAddress.address_line_3 || '',
-                                                landmark: aadhaarLandmark || '',
-                                                postalCode: aadhaarAddress.pincode || '',
-                                                isPrimary: true,
-                                            }];
+                                            ? existingAddresses.map((addr: any, index: number) => {
+                                                const source = mappedAddresses[index] ?? (index === 0 ? mappedAddresses[0] : null);
+                                                if (!source) return addr;
+                                                return {
+                                                    ...addr,
+                                                    addressLine1: source.addressLine1 || addr.addressLine1 || '',
+                                                    addressLine2: source.addressLine2 || addr.addressLine2 || '',
+                                                    postalCode: source.postalCode || addr.postalCode || '',
+                                                    landmark: source.landmark || addr.landmark || '',
+                                                };
+                                            })
+                                            : mappedAddresses;
 
                                         updateCoApplicant(currentLead.id, documentCoApplicantId, {
                                             data: {
@@ -740,52 +807,104 @@ export default function Step8Page() {
                                         });
                                     }
                                 } else {
-                                    const existingAddresses = currentLead.formData?.step3?.addresses || [];
-                                    const updatedAddresses = existingAddresses.length > 0 
-                                        ? existingAddresses.map((addr: any, index: number) => 
-                                            index === 0 ? {
+                                    toast({
+                                        title: 'Upload Successful',
+                                        description: 'Aadhaar document uploaded successfully. Parsing in progress...',
+                                        className: 'bg-green-50 border-green-200',
+                                    });
+                                }
+                            } else {
+                                const existingStep2 = currentLead.formData?.step2 || {};
+                                const existingStep3 = currentLead.formData?.step3 || {};
+                                let updatedAddresses = existingStep3.addresses ? [...existingStep3.addresses] : [];
+
+                                if (mappedAddresses.length > 0) {
+                                    if (updatedAddresses.length > 0) {
+                                        updatedAddresses = updatedAddresses.map((addr: any, index: number) => {
+                                            const source = mappedAddresses[index] ?? (index === 0 ? mappedAddresses[0] : null);
+                                            if (!source) return addr;
+                                            return {
                                                 ...addr,
-                                                addressLine1: aadhaarAddress.address_line_1 || addr.addressLine1 || '',
-                                                addressLine2: aadhaarAddress.address_line_2 || addr.addressLine2 || '',
-                                                addressLine3: aadhaarAddress.address_line_3 || addr.addressLine3 || '',
-                                                landmark: aadhaarLandmark || addr.landmark || '',
-                                                postalCode: aadhaarAddress.pincode || addr.postalCode || '',
-                                            } : addr
-                                          )
-                                        : [{
-                                            id: Date.now().toString(),
-                                            addressType: 'residential',
-                                            addressLine1: aadhaarAddress.address_line_1 || '',
-                                            addressLine2: aadhaarAddress.address_line_2 || '',
-                                            addressLine3: aadhaarAddress.address_line_3 || '',
-                                            landmark: aadhaarLandmark,
-                                            postalCode: aadhaarAddress.pincode || '',
-                                        }];
-                                    
+                                                addressType: source.addressType || addr.addressType || 'residential',
+                                                addressLine1: source.addressLine1 || addr.addressLine1 || '',
+                                                addressLine2: source.addressLine2 || addr.addressLine2 || '',
+                                                postalCode: source.postalCode || addr.postalCode || '',
+                                                landmark: source.landmark || addr.landmark || '',
+                                                isPrimary: index === 0 ? true : addr.isPrimary,
+                                            };
+                                        });
+                                    } else {
+                                        updatedAddresses = mappedAddresses.map((addr: any, index: number) => ({
+                                            ...addr,
+                                            isPrimary: index === 0 ? true : addr.isPrimary,
+                                        }));
+                                    }
+                                }
+
+                                const addressesWithFlags = updatedAddresses.map(addr => ({
+                                    ...addr,
+                                    autoFilledViaAadhaar: mappedAddresses.length > 0 ? true : addr.autoFilledViaAadhaar,
+                                    autoPopulatedFromSummary: addressPopulatedFromSummary || addr.autoPopulatedFromSummary || false,
+                                }));
+
+                                const updatedStep3 = {
+                                    ...existingStep3,
+                                    addresses: addressesWithFlags,
+                                    autoFilledViaAadhaar: mappedAddresses.length > 0 ? true : existingStep3.autoFilledViaAadhaar,
+                                    autoPopulatedFromSummary: addressPopulatedFromSummary || existingStep3.autoPopulatedFromSummary || false,
+                                };
+
+                                const updatedStep2 = genderValue
+                                    ? {
+                                        ...existingStep2,
+                                        gender: genderValue,
+                                        autoFilledViaAadhaar: true,
+                                        autoPopulatedFromSummary: (summaryGenderNormalized ? true : existingStep2.autoPopulatedFromSummary) || false,
+                                    }
+                                    : existingStep2;
+
+                                if (mappedAddresses.length > 0 || genderValue) {
                                     updateLead(currentLead.id, {
+                                        gender: genderValue || existingStep2.gender || currentLead.gender || '',
                                         formData: {
                                             ...currentLead.formData,
-                                            step3: { addresses: updatedAddresses },
+                                            step2: updatedStep2,
+                                            step3: updatedStep3,
                                         },
                                     });
 
+                                    const messages: string[] = [];
+                                    if (mappedAddresses.length > 0) {
+                                        messages.push(
+                                            addressPopulatedFromSummary
+                                                ? 'Address details were auto-populated from the uploaded Aadhaar.'
+                                                : 'Address details have been populated from Aadhaar data.'
+                                        );
+                                    }
+                                    if (genderValue) {
+                                        messages.push(
+                                            summaryGenderNormalized
+                                                ? 'Gender was auto-populated from the uploaded Aadhaar.'
+                                                : 'Gender has been populated from Aadhaar data.'
+                                        );
+                                    }
+
                                     toast({
-                                        title: 'Success',
-                                        description: 'Aadhaar document processed successfully. Address populated in Address Details page.',
+                                        title: 'Auto-populated',
+                                        description: messages.join(' '),
+                                        className: 'bg-green-50 border-green-200',
+                                    });
+                                } else {
+                                    toast({
+                                        title: 'Upload Successful',
+                                        description: 'Aadhaar document uploaded successfully. Parsing in progress...',
                                         className: 'bg-green-50 border-green-200',
                                     });
                                 }
                             }
-                        } else {
-                            toast({
-                                title: 'Upload Successful',
-                                description: 'Aadhaar document uploaded successfully. Parsing address data...',
-                                className: 'bg-green-50 border-green-200',
-                            });
                         }
                     }
                 } else {
-                    // If detailed info fetch fails, still show success for upload but note parsing may be pending
                     if (baseDocType === 'PAN' || baseDocType === 'Adhaar') {
                         toast({
                             title: 'Upload Successful',
