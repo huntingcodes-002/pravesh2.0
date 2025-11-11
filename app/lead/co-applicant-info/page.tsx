@@ -14,18 +14,31 @@ import { useToast } from '@/hooks/use-toast';
 type SectionStatus = 'incomplete' | 'in-progress' | 'completed';
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
+  spouse: 'Spouse',
+  father: 'Father',
+  mother: 'Mother',
+  son: 'Son',
+  daughter: 'Daughter',
+  brother: 'Brother',
+  sister: 'Sister',
+  friend: 'Friend',
+  business_partner: 'Business Partner',
+  other: 'Other',
   Father: 'Father',
   Mother: 'Mother',
   Sister: 'Sister',
-  Husband: 'Husband',
-  Wife: 'Wife',
-  'Father in Law': 'Father in Law',
-  'Mother in Law': 'Mother in Law',
+  Brother: 'Brother',
+  Husband: 'Spouse',
+  Wife: 'Spouse',
   Son: 'Son',
   Daughter: 'Daughter',
-  Partner: 'Partner',
+  Partner: 'Friend',
+  Friend: 'Friend',
+  'Business Partner': 'Business Partner',
   Other: 'Other',
   Spouse: 'Spouse',
+  'Father in Law': 'Father',
+  'Mother in Law': 'Mother',
 };
 
 export default function CoApplicantInfoPage() {

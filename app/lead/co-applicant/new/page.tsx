@@ -12,21 +12,67 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { startCoApplicantWorkflow, submitCoApplicantConsentMobile, isApiError } from '@/lib/api';
 import { CheckCircle, Edit, Loader, Send } from 'lucide-react';
 
 const RELATIONSHIPS = [
-  { value: 'Father', label: 'Father' },
-  { value: 'Mother', label: 'Mother' },
-  { value: 'Sister', label: 'Sister' },
-  { value: 'Husband', label: 'Husband' },
-  { value: 'Wife', label: 'Wife' },
-  { value: 'Father in Law', label: 'Father in Law' },
-  { value: 'Mother in Law', label: 'Mother in Law' },
-  { value: 'Son', label: 'Son' },
-  { value: 'Daughter', label: 'Daughter' },
-  { value: 'Partner', label: 'Partner' },
-  { value: 'Other', label: 'Other' },
+  { value: 'spouse', label: 'Spouse' },
+  { value: 'father', label: 'Father' },
+  { value: 'mother', label: 'Mother' },
+  { value: 'son', label: 'Son' },
+  { value: 'daughter', label: 'Daughter' },
+  { value: 'brother', label: 'Brother' },
+  { value: 'sister', label: 'Sister' },
+  { value: 'friend', label: 'Friend' },
+  { value: 'business_partner', label: 'Business Partner' },
+  { value: 'other', label: 'Other' },
 ];
+
+const RELATIONSHIP_LABELS_MAP = RELATIONSHIPS.reduce<Record<string, string>>((acc, item) => {
+  acc[item.value] = item.label;
+  return acc;
+}, {});
+
+const LEGACY_RELATIONSHIP_MAP: Record<string, string> = {
+  Father: 'father',
+  Mother: 'mother',
+  Sister: 'sister',
+  Brother: 'brother',
+  Husband: 'spouse',
+  Wife: 'spouse',
+  Spouse: 'spouse',
+  Son: 'son',
+  Daughter: 'daughter',
+  Partner: 'friend',
+  'Business Partner': 'business_partner',
+  Friend: 'friend',
+  'Father in Law': 'father',
+  'Mother in Law': 'mother',
+  Other: 'other',
+};
+
+const normalizeRelationValue = (value?: string | null) => {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (RELATIONSHIP_LABELS_MAP[trimmed]) {
+    return trimmed;
+  }
+  const lower = trimmed.toLowerCase();
+  if (RELATIONSHIP_LABELS_MAP[lower]) {
+    return lower;
+  }
+  if (LEGACY_RELATIONSHIP_MAP[trimmed]) {
+    return LEGACY_RELATIONSHIP_MAP[trimmed];
+  }
+  return lower;
+};
+
+const areStepSectionsEqual = (current: any, next: Record<string, any>, keys: string[]) =>
+  keys.every(key => {
+    const currentValue = current?.[key];
+    const nextValue = next[key];
+    return currentValue === nextValue;
+  });
 
 const deriveNameParts = (fullName: string) => {
   const normalized = fullName.replace(/[^a-zA-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -44,18 +90,30 @@ export default function CoApplicantNewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
-  const coApplicantId = searchParams.get('coApplicantId');
-  const isEditingExisting = Boolean(coApplicantId);
+  const coApplicantIdFromQuery = searchParams.get('coApplicantId');
+  const [activeCoApplicantId, setActiveCoApplicantId] = useState<string | null>(coApplicantIdFromQuery);
+  const [isStartingWorkflow, setIsStartingWorkflow] = useState(false);
+
+  useEffect(() => {
+    if (coApplicantIdFromQuery && coApplicantIdFromQuery !== activeCoApplicantId) {
+      setActiveCoApplicantId(coApplicantIdFromQuery);
+    }
+  }, [coApplicantIdFromQuery, activeCoApplicantId]);
+
+  const isEditingExisting = Boolean(activeCoApplicantId);
 
   const coApplicant: CoApplicant | undefined = useMemo(() => {
-    if (!currentLead || !coApplicantId) return undefined;
-    return currentLead.formData?.coApplicants?.find((ca: CoApplicant) => ca.id === coApplicantId);
-  }, [currentLead, coApplicantId]);
+    if (!currentLead || !activeCoApplicantId) return undefined;
+    return currentLead.formData?.coApplicants?.find((ca: CoApplicant) => ca.id === activeCoApplicantId);
+  }, [currentLead, activeCoApplicantId]);
 
   const [formData, setFormData] = useState(() => {
     const basic = coApplicant?.data?.basicDetails ?? coApplicant?.data?.step1;
+    const initialRelation =
+      normalizeRelationValue(coApplicant?.relationship) ||
+      normalizeRelationValue(basic?.relation);
     return {
-      relation: coApplicant?.relationship || '',
+      relation: initialRelation,
       fullName: basic ? [basic.firstName, basic.lastName].filter(Boolean).join(' ') : '',
       mobile: basic?.mobile || '',
     };
@@ -73,12 +131,25 @@ export default function CoApplicantNewPage() {
   useEffect(() => {
     if (isEditingExisting && coApplicant) {
       const basic = coApplicant.data?.basicDetails ?? coApplicant.data?.step1 ?? {};
-      setFormData({
-        relation: coApplicant.relationship || basic.relation || '',
+      const nextForm = {
+        relation:
+          normalizeRelationValue(coApplicant.relationship) ||
+          normalizeRelationValue(basic.relation),
         fullName: [basic.firstName, basic.lastName].filter(Boolean).join(' '),
         mobile: basic.mobile || '',
+      };
+      setFormData(prev => {
+        if (
+          prev.relation === nextForm.relation &&
+          prev.fullName === nextForm.fullName &&
+          prev.mobile === nextForm.mobile
+        ) {
+          return prev;
+        }
+        return nextForm;
       });
-      setIsMobileVerified(Boolean(basic.isMobileVerified));
+      const nextVerified = Boolean(basic.isMobileVerified);
+      setIsMobileVerified(prev => (prev === nextVerified ? prev : nextVerified));
     }
   }, [coApplicant, isEditingExisting]);
 
@@ -87,10 +158,10 @@ export default function CoApplicantNewPage() {
       router.replace('/leads');
       return;
     }
-    if (isEditingExisting && coApplicantId && !coApplicant) {
+    if (isEditingExisting && activeCoApplicantId && !coApplicant) {
       router.replace('/lead/co-applicant-info');
     }
-  }, [currentLead, coApplicantId, coApplicant, isEditingExisting, router]);
+  }, [currentLead, activeCoApplicantId, coApplicant, isEditingExisting, router]);
 
   useEffect(() => {
     let timerId: NodeJS.Timeout;
@@ -100,8 +171,72 @@ export default function CoApplicantNewPage() {
     return () => clearTimeout(timerId);
   }, [isOtpModalOpen, resendTimer]);
 
-  const handleRelationChange = (value: string) => {
+  const handleRelationChange = async (value: string) => {
     setFormData(prev => ({ ...prev, relation: value }));
+
+    if (!currentLead) {
+      toast({
+        title: 'Lead Not Found',
+        description: 'Unable to start co-applicant workflow because lead details are missing.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    let targetId = activeCoApplicantId;
+
+    if (!targetId) {
+      const created = createCoApplicant(currentLead.id, value);
+      targetId = created.id;
+      setActiveCoApplicantId(created.id);
+      router.replace(`/lead/co-applicant/new?coApplicantId=${created.id}`);
+    } else {
+      updateCoApplicant(currentLead.id, targetId, { relationship: value });
+    }
+
+    if (!currentLead.appId) {
+      toast({
+        title: 'Application Not Found',
+        description: 'Application ID missing. Please create or refresh the lead before adding a co-applicant.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setIsStartingWorkflow(true);
+      const response = await startCoApplicantWorkflow({
+        application_id: currentLead.appId,
+        relationship_to_primary: value,
+      });
+
+      if (isApiError(response)) {
+        toast({
+          title: 'Co-applicant Setup Failed',
+          description: response.error || 'Unable to start co-applicant workflow. Please try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const { co_applicant_workflow_id, co_applicant_index } = response;
+
+      if (targetId && co_applicant_workflow_id) {
+        updateCoApplicant(currentLead.id, targetId, {
+          relationship: value,
+          workflowId: co_applicant_workflow_id,
+          workflowIndex: typeof co_applicant_index === 'number' ? co_applicant_index : undefined,
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Co-applicant Setup Failed',
+        description: error?.message || 'Unable to start co-applicant workflow. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsStartingWorkflow(false);
+    }
   };
 
   const handleFullNameChange = (value: string) => {
@@ -109,7 +244,7 @@ export default function CoApplicantNewPage() {
     setFormData(prev => ({ ...prev, fullName: sanitized }));
   };
 
-  const handleSendOtp = () => {
+  const handleSendOtp = async () => {
     if (!formData.relation || !formData.fullName.trim()) {
       toast({ title: 'Missing Information', description: 'Please select relation and enter full name.', variant: 'destructive' });
       return;
@@ -120,13 +255,69 @@ export default function CoApplicantNewPage() {
       return;
     }
 
+    if (!currentLead?.appId) {
+      toast({
+        title: 'Application Not Found',
+        description: 'Application ID missing. Please refresh the lead and try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (typeof coApplicant?.workflowIndex !== 'number') {
+      toast({
+        title: 'Co-applicant Setup Pending',
+        description: 'Unable to find the co-applicant workflow. Please re-select the relation and try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const parts = deriveNameParts(formData.fullName);
+    if (!parts.firstName || !parts.lastName) {
+      toast({
+        title: 'Incomplete Name',
+        description: 'Please enter both first name and last name for the co-applicant.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsVerifying(true);
-    setTimeout(() => {
-      setIsVerifying(false);
+    try {
+      const response = await submitCoApplicantConsentMobile({
+        application_id: currentLead.appId,
+        co_applicant_index: coApplicant.workflowIndex,
+        mobile_number: formData.mobile,
+        first_name: parts.firstName,
+        last_name: parts.lastName,
+      });
+
+      if (isApiError(response)) {
+        toast({
+          title: 'OTP Send Failed',
+          description: response.error || 'Failed to send consent OTP. Please try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       setIsOtpModalOpen(true);
       setResendTimer(30);
-      toast({ title: 'OTP Sent', description: 'OTP sent successfully.' });
-    }, 800);
+      toast({
+        title: 'OTP Sent',
+        description: response.message || 'Co-applicant consent OTP sent successfully.',
+        className: 'bg-blue-50 border-blue-200',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'OTP Send Failed',
+        description: error?.message || 'Failed to send consent OTP. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   const handleResendOtp = () => {
@@ -135,8 +326,8 @@ export default function CoApplicantNewPage() {
   };
 
   const handleVerifyOtp = () => {
-    if (otp.length !== 6) {
-      toast({ title: 'Verification Failed', description: 'Please enter a 6-digit OTP.', variant: 'destructive' });
+    if (otp.length !== 4) {
+      toast({ title: 'Verification Failed', description: 'Please enter a 4-digit OTP.', variant: 'destructive' });
       return;
     }
 
@@ -161,6 +352,53 @@ export default function CoApplicantNewPage() {
       base?.data ?? (coApplicant && coApplicant.id === targetId ? coApplicant.data : {});
     const currentStepValue =
       base?.currentStep ?? (coApplicant && coApplicant.id === targetId ? coApplicant.currentStep : 0);
+    const relationLabel = RELATIONSHIP_LABELS_MAP[formData.relation] ?? formData.relation;
+    const currentCoApplicant =
+      base ?? (coApplicant && coApplicant.id === targetId ? coApplicant : undefined);
+    const currentRelationship = currentCoApplicant?.relationship;
+
+    const nextStep1 = {
+      ...(existingData?.step1 ?? {}),
+      firstName: parts.firstName,
+      lastName: parts.lastName,
+      relation: relationLabel,
+      fullName: formData.fullName.trim(),
+      mobile: formData.mobile,
+      isMobileVerified,
+    };
+
+    const nextBasicDetails = {
+      ...(existingData?.basicDetails ?? {}),
+      ...parts,
+      fullName: formData.fullName.trim(),
+      relation: relationLabel,
+      mobile: formData.mobile,
+      isMobileVerified,
+    };
+
+    const shouldUpdate =
+      currentRelationship !== formData.relation ||
+      !areStepSectionsEqual(existingData?.step1, nextStep1, [
+        'firstName',
+        'lastName',
+        'relation',
+        'fullName',
+        'mobile',
+        'isMobileVerified',
+      ]) ||
+      !areStepSectionsEqual(existingData?.basicDetails, nextBasicDetails, [
+        'firstName',
+        'lastName',
+        'relation',
+        'fullName',
+        'mobile',
+        'isMobileVerified',
+      ]) ||
+      currentStepValue !== (currentCoApplicant?.currentStep ?? 0);
+
+    if (!shouldUpdate) {
+      return;
+    }
 
     updateCoApplicant(currentLead.id, targetId, {
       relationship: formData.relation,
@@ -168,33 +406,18 @@ export default function CoApplicantNewPage() {
       ...extra,
       data: {
         ...existingData,
-        step1: {
-          ...(existingData?.step1 ?? {}),
-          firstName: parts.firstName,
-          lastName: parts.lastName,
-          relation: formData.relation,
-          fullName: formData.fullName.trim(),
-          mobile: formData.mobile,
-          isMobileVerified,
-        },
-        basicDetails: {
-          ...(existingData?.basicDetails ?? {}),
-          ...parts,
-          fullName: formData.fullName.trim(),
-          relation: formData.relation,
-          mobile: formData.mobile,
-          isMobileVerified,
-        },
+        step1: nextStep1,
+        basicDetails: nextBasicDetails,
       },
     });
   };
 
   useEffect(() => {
-    if (isEditingExisting && coApplicant && coApplicantId) {
-      persistForm(coApplicantId, coApplicant);
+    if (isEditingExisting && coApplicant && activeCoApplicantId) {
+      persistForm(activeCoApplicantId, coApplicant);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.fullName, formData.relation, formData.mobile, isMobileVerified, coApplicant, coApplicantId, isEditingExisting]);
+  }, [formData.fullName, formData.relation, formData.mobile, isMobileVerified, coApplicant, activeCoApplicantId, isEditingExisting]);
 
   const handleExit = () => {
     router.push('/lead/co-applicant-info');
@@ -217,13 +440,15 @@ export default function CoApplicantNewPage() {
     }
 
     const parts = deriveNameParts(formData.fullName);
-    let targetId = coApplicantId || null;
+    let targetId = activeCoApplicantId;
     let baseData: CoApplicant | undefined = coApplicant;
 
-    if (!isEditingExisting) {
+    if (!targetId) {
       const created = createCoApplicant(currentLead.id, formData.relation);
       targetId = created.id;
       baseData = created;
+      setActiveCoApplicantId(created.id);
+      router.replace(`/lead/co-applicant/new?coApplicantId=${created.id}`);
     }
 
     if (!targetId) {
@@ -236,31 +461,57 @@ export default function CoApplicantNewPage() {
     }
 
     const existingData: any = baseData?.data ?? (coApplicant && coApplicant.id === targetId ? coApplicant.data : {});
+    const relationLabel = RELATIONSHIP_LABELS_MAP[formData.relation] ?? formData.relation;
 
-    updateCoApplicant(currentLead.id, targetId, {
-      relationship: formData.relation,
-      currentStep: baseData?.currentStep ?? 0,
-      data: {
-        ...existingData,
-        step1: {
-          ...(existingData?.step1 ?? {}),
-          firstName: parts.firstName,
-          lastName: parts.lastName,
-          relation: formData.relation,
-          fullName: formData.fullName.trim(),
-          mobile: formData.mobile,
-          isMobileVerified: true,
+    const nextStep1 = {
+      ...(existingData?.step1 ?? {}),
+      firstName: parts.firstName,
+      lastName: parts.lastName,
+      relation: relationLabel,
+      fullName: formData.fullName.trim(),
+      mobile: formData.mobile,
+      isMobileVerified: true,
+    };
+
+    const nextBasicDetails = {
+      ...(existingData?.basicDetails ?? {}),
+      ...parts,
+      fullName: formData.fullName.trim(),
+      relation: relationLabel,
+      mobile: formData.mobile,
+      isMobileVerified: true,
+    };
+
+    const shouldUpdate =
+      (baseData?.relationship ?? coApplicant?.relationship) !== formData.relation ||
+      !areStepSectionsEqual(existingData?.step1, nextStep1, [
+        'firstName',
+        'lastName',
+        'relation',
+        'fullName',
+        'mobile',
+        'isMobileVerified',
+      ]) ||
+      !areStepSectionsEqual(existingData?.basicDetails, nextBasicDetails, [
+        'firstName',
+        'lastName',
+        'relation',
+        'fullName',
+        'mobile',
+        'isMobileVerified',
+      ]);
+
+    if (shouldUpdate) {
+      updateCoApplicant(currentLead.id, targetId, {
+        relationship: formData.relation,
+        currentStep: baseData?.currentStep ?? 0,
+        data: {
+          ...existingData,
+          step1: nextStep1,
+          basicDetails: nextBasicDetails,
         },
-        basicDetails: {
-          ...(existingData?.basicDetails ?? {}),
-          ...parts,
-          fullName: formData.fullName.trim(),
-          relation: formData.relation,
-          mobile: formData.mobile,
-          isMobileVerified: true,
-        },
-      },
-    });
+      });
+    }
 
     router.push('/lead/co-applicant-info');
   };
@@ -288,10 +539,17 @@ export default function CoApplicantNewPage() {
           <h2 className="text-xl font-semibold text-[#003366] mb-6">Co-Applicant Details</h2>
           <div className="space-y-6">
             <div>
-              <Label htmlFor="relation" className="text-sm font-medium text-[#003366] mb-2 block">
-                Relation <span className="text-[#DC2626]">*</span>
+              <Label htmlFor="relation" className="text-sm font-medium text-[#003366] mb-2 block flex items-center gap-2">
+                <span>
+                  Relation <span className="text-[#DC2626]">*</span>
+                </span>
+                {isStartingWorkflow && <Loader className="w-4 h-4 animate-spin text-[#0072CE]" aria-hidden="true" />}
               </Label>
-              <Select value={formData.relation} onValueChange={handleRelationChange}>
+              <Select
+                value={formData.relation}
+                onValueChange={handleRelationChange}
+                disabled={isStartingWorkflow}
+              >
                 <SelectTrigger id="relation" className="h-12 rounded-lg">
                   <SelectValue placeholder="Select relation" />
                 </SelectTrigger>
@@ -349,7 +607,7 @@ export default function CoApplicantNewPage() {
               {!isMobileVerified ? (
                 <Button
                   onClick={handleSendOtp}
-                  disabled={!canSendOtp || isVerifying}
+                  disabled={!canSendOtp || isVerifying || isStartingWorkflow}
                   className="w-full h-12 bg-[#0072CE] hover:bg-[#005a9e] font-medium transition-colors rounded-lg"
                 >
                   {isVerifying ? <Loader className="w-5 h-5 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
@@ -372,6 +630,7 @@ export default function CoApplicantNewPage() {
             </Button>
             <Button
               onClick={handleNext}
+              disabled={isStartingWorkflow}
               className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e]"
             >
               Save & Continue
@@ -391,7 +650,7 @@ export default function CoApplicantNewPage() {
           <div className="space-y-6 py-4">
             <div className="flex justify-center">
               <InputOTP
-                maxLength={6}
+                maxLength={4}
                 value={otp}
                 onChange={value => {
                   const numbers = value.replace(/[^0-9]/g, '');
@@ -403,8 +662,6 @@ export default function CoApplicantNewPage() {
                   <InputOTPSlot className="h-14 w-10 text-2xl" index={1} />
                   <InputOTPSlot className="h-14 w-10 text-2xl" index={2} />
                   <InputOTPSlot className="h-14 w-10 text-2xl" index={3} />
-                  <InputOTPSlot className="h-14 w-10 text-2xl" index={4} />
-                  <InputOTPSlot className="h-14 w-10 text-2xl" index={5} />
                 </InputOTPGroup>
               </InputOTP>
             </div>
@@ -437,7 +694,7 @@ export default function CoApplicantNewPage() {
             <div className="space-y-3">
               <Button
                 onClick={handleVerifyOtp}
-                disabled={otp.length !== 6}
+                disabled={otp.length !== 4}
                 className="w-full h-12 bg-[#0072CE] text-white rounded-xl font-semibold text-lg hover:bg-[#005a9e] transition-colors"
               >
                 Verify & Continue

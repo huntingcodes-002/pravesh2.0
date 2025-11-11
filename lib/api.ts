@@ -349,6 +349,69 @@ export async function submitPersonalInfo(data: PersonalInfoRequest): Promise<Api
 }
 
 /**
+ * Endpoint: Start Co-Applicant Workflow
+ * POST /api/lead-collection/applications/co-applicant-management/
+ */
+export interface CoApplicantWorkflowRequest {
+  application_id: string;
+  relationship_to_primary: string;
+}
+
+export interface CoApplicantWorkflowResponse {
+  success: boolean;
+  message?: string;
+  co_applicant_workflow_id?: string;
+  co_applicant_index?: number;
+  next_step?: string;
+}
+
+export async function startCoApplicantWorkflow(
+  data: CoApplicantWorkflowRequest
+): Promise<ApiResponse<CoApplicantWorkflowResponse>> {
+  return apiFetch<CoApplicantWorkflowResponse>('applications/co-applicant-management/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Endpoint: Submit Co-Applicant Consent Mobile
+ * POST /api/lead-collection/applications/{application_id}/co-applicant-consent-mobile/{index}/
+ */
+export interface CoApplicantConsentMobileRequest {
+  application_id: string;
+  co_applicant_index: number;
+  mobile_number: string;
+  first_name: string;
+  last_name: string;
+}
+
+export interface CoApplicantConsentMobileResponse {
+  success: boolean;
+  message?: string;
+  application_id: string;
+  co_applicant_index: number;
+  otp_sent?: boolean;
+  data?: {
+    mobile_number?: string;
+    full_name?: string;
+  };
+}
+
+export async function submitCoApplicantConsentMobile(
+  data: CoApplicantConsentMobileRequest
+): Promise<ApiResponse<CoApplicantConsentMobileResponse>> {
+  const { application_id, co_applicant_index, ...payload } = data;
+  return apiFetch<CoApplicantConsentMobileResponse>(
+    `applications/${application_id}/co-applicant-consent-mobile/${co_applicant_index}/`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+/**
  * Endpoint 4: Submit Address Details
  * POST /api/lead-collection/applications/address-details/
  */

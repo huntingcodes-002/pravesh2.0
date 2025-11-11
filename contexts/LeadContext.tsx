@@ -35,6 +35,8 @@ export interface CoApplicant {
     relationship: string;
     currentStep: 0 | 1 | 2 | 3 | 4;
     isComplete: boolean;
+    workflowId?: string;
+    workflowIndex?: number;
     data: any;
 }
 
@@ -646,11 +648,13 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const createCoApplicant = useCallback((leadId: string, relationship: string): CoApplicant => {
-      const newCoApplicant: CoApplicant = {
-          id: Date.now().toString(),
-          relationship,
-          currentStep: 0,
-          isComplete: false,
+    const newCoApplicant: CoApplicant = {
+      id: Date.now().toString(),
+      relationship,
+      currentStep: 0,
+      isComplete: false,
+      workflowId: undefined,
+      workflowIndex: undefined,
       data: {},
     };
 
