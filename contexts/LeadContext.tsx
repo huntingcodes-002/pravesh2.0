@@ -103,12 +103,8 @@ interface LeadContextType {
   fetchLeadDetails: (applicationId: string, options?: { force?: boolean }) => Promise<Lead | null>;
   
   // Co-Applicant specific functions
-  createCoApplicant: (leadId: string, relationship: string) => CoApplicant;
   updateCoApplicant: (leadId: string, coApplicantId: string, data: Partial<CoApplicant>) => void;
   deleteCoApplicant: (leadId: string, coApplicantId: string) => void;
-  
-  // NEW FUNCTION FOR ROUTING FIX
-  startCoApplicantFlow: (leadId: string, defaultRelationship: string) => string; 
 }
 
 const LeadContext = createContext<LeadContextType | undefined>(undefined);
@@ -647,57 +643,49 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
-  const createCoApplicant = useCallback((leadId: string, relationship: string): CoApplicant => {
-    const newCoApplicant: CoApplicant = {
-      id: Date.now().toString(),
-      relationship,
-      currentStep: 0,
-      isComplete: false,
-      workflowId: undefined,
-      workflowIndex: undefined,
-      data: {},
-    };
-
-    setLeads(prevLeads =>
-      prevLeads.map(lead => {
-        if (lead.id !== leadId) return lead;
-        const coApplicants = [...(lead.formData.coApplicants ?? []), newCoApplicant];
-        return {
-          ...lead,
-          formData: {
-            ...lead.formData,
-            coApplicants,
-          },
-          updatedAt: new Date().toISOString(),
-        };
-      })
-    );
-
-    setCurrentLead(prev => {
-      if (!prev || prev.id !== leadId) return prev;
-      const coApplicants = [...(prev.formData.coApplicants ?? []), newCoApplicant];
-      return {
-        ...prev,
-                  formData: {
-          ...prev.formData,
-          coApplicants,
-        },
-        updatedAt: new Date().toISOString(),
-      };
-    });
-
-    return newCoApplicant;
-  }, []);
-
   const updateCoApplicant = useCallback(
     (leadId: string, coApplicantId: string, data: Partial<CoApplicant>) => {
-      const updater = (coApps: CoApplicant[]) =>
-        coApps.map(coApp => (coApp.id === coApplicantId ? { ...coApp, ...data } : coApp));
+      const upsert = (coApps: CoApplicant[]) => {
+        const index = coApps.findIndex(coApp => coApp.id === coApplicantId);
+        if (index !== -1) {
+          const existing = coApps[index];
+          const mergedData =
+            data.data !== undefined
+              ? { ...(existing.data ?? {}), ...data.data }
+              : existing.data;
+
+          const updated: CoApplicant = {
+            ...existing,
+            ...data,
+            relationship: data.relationship ?? existing.relationship,
+            currentStep: data.currentStep ?? existing.currentStep ?? 0,
+            isComplete: data.isComplete ?? existing.isComplete ?? false,
+            workflowId: data.workflowId ?? existing.workflowId,
+            workflowIndex:
+              data.workflowIndex !== undefined ? data.workflowIndex : existing.workflowIndex,
+            data: mergedData,
+          };
+
+          return coApps.map((coApp, idx) => (idx === index ? updated : coApp));
+        }
+
+        const newCoApplicant: CoApplicant = {
+          id: coApplicantId,
+          relationship: data.relationship ?? '',
+          currentStep: data.currentStep ?? 0,
+          isComplete: data.isComplete ?? false,
+          workflowId: data.workflowId,
+          workflowIndex: data.workflowIndex,
+          data: data.data ?? {},
+        };
+
+        return [...coApps, newCoApplicant];
+      };
 
       setLeads(prevLeads =>
         prevLeads.map(lead => {
           if (lead.id !== leadId) return lead;
-          const coApplicants = updater(lead.formData.coApplicants ?? []);
+          const coApplicants = upsert(lead.formData.coApplicants ?? []);
           return {
             ...lead,
             formData: {
@@ -711,10 +699,10 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
 
       setCurrentLead(prev => {
         if (!prev || prev.id !== leadId) return prev;
-        const coApplicants = updater(prev.formData.coApplicants ?? []);
-              return {
+        const coApplicants = upsert(prev.formData.coApplicants ?? []);
+        return {
           ...prev,
-                  formData: {
+          formData: {
             ...prev.formData,
             coApplicants,
           },
@@ -757,14 +745,6 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const startCoApplicantFlow = useCallback(
-    (leadId: string, defaultRelationship: string) => {
-      const newCoApplicant = createCoApplicant(leadId, defaultRelationship); 
-      return newCoApplicant.id;
-    },
-    [createCoApplicant]
-  );
-
   return (
     <LeadContext.Provider
       value={{
@@ -785,10 +765,8 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
         deletePaymentFromLead,
         refreshLeads,
         fetchLeadDetails,
-        createCoApplicant,
         updateCoApplicant,
         deleteCoApplicant,
-        startCoApplicantFlow,
       }}
     >
       {children}

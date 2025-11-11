@@ -86,7 +86,7 @@ const deriveNameParts = (fullName: string) => {
 };
 
 export default function CoApplicantNewPage() {
-  const { currentLead, createCoApplicant, updateCoApplicant } = useLead();
+  const { currentLead, updateCoApplicant } = useLead();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -183,17 +183,6 @@ export default function CoApplicantNewPage() {
       return;
     }
 
-    let targetId = activeCoApplicantId;
-
-    if (!targetId) {
-      const created = createCoApplicant(currentLead.id, value);
-      targetId = created.id;
-      setActiveCoApplicantId(created.id);
-      router.replace(`/lead/co-applicant/new?coApplicantId=${created.id}`);
-    } else {
-      updateCoApplicant(currentLead.id, targetId, { relationship: value });
-    }
-
     if (!currentLead.appId) {
       toast({
         title: 'Application Not Found',
@@ -221,13 +210,29 @@ export default function CoApplicantNewPage() {
 
       const { co_applicant_workflow_id, co_applicant_index } = response;
 
-      if (targetId && co_applicant_workflow_id) {
-        updateCoApplicant(currentLead.id, targetId, {
-          relationship: value,
-          workflowId: co_applicant_workflow_id,
-          workflowIndex: typeof co_applicant_index === 'number' ? co_applicant_index : undefined,
+      if (!co_applicant_workflow_id) {
+        toast({
+          title: 'Co-applicant Setup Failed',
+          description: 'Workflow ID not received from the server. Please try again.',
+          variant: 'destructive',
         });
+        return;
       }
+
+      updateCoApplicant(currentLead.id, co_applicant_workflow_id, {
+        relationship: value,
+        workflowId: co_applicant_workflow_id,
+        workflowIndex:
+          typeof co_applicant_index === 'number' ? co_applicant_index : undefined,
+        currentStep: coApplicant?.currentStep ?? 0,
+        isComplete: coApplicant?.isComplete ?? false,
+        data: coApplicant?.data ?? {},
+      });
+
+      setActiveCoApplicantId(co_applicant_workflow_id);
+      router.replace(
+        `/lead/co-applicant/new?coApplicantId=${encodeURIComponent(co_applicant_workflow_id)}`
+      );
     } catch (error: any) {
       toast({
         title: 'Co-applicant Setup Failed',
@@ -440,27 +445,19 @@ export default function CoApplicantNewPage() {
     }
 
     const parts = deriveNameParts(formData.fullName);
-    let targetId = activeCoApplicantId;
-    let baseData: CoApplicant | undefined = coApplicant;
-
-    if (!targetId) {
-      const created = createCoApplicant(currentLead.id, formData.relation);
-      targetId = created.id;
-      baseData = created;
-      setActiveCoApplicantId(created.id);
-      router.replace(`/lead/co-applicant/new?coApplicantId=${created.id}`);
-    }
-
-    if (!targetId) {
+    if (!activeCoApplicantId || !coApplicant) {
       toast({
-        title: 'Unable to continue',
-        description: 'Something went wrong while saving the co-applicant. Please try again.',
+        title: 'Co-applicant Not Ready',
+        description: 'Please start the co-applicant workflow and validate consent before continuing.',
         variant: 'destructive',
       });
       return;
     }
 
-    const existingData: any = baseData?.data ?? (coApplicant && coApplicant.id === targetId ? coApplicant.data : {});
+    const targetId = activeCoApplicantId;
+    const baseData: CoApplicant = coApplicant;
+
+    const existingData: any = baseData.data ?? {};
     const relationLabel = RELATIONSHIP_LABELS_MAP[formData.relation] ?? formData.relation;
 
     const nextStep1 = {
