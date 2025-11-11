@@ -10,11 +10,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Trash2, ChevronDown, ChevronUp, CheckCircle2, Loader } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp, CheckCircle2, Loader, Plus } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Badge } from '@/components/ui/badge';
 import { cn } from "@/lib/utils";
+import { Switch } from '@/components/ui/switch';
 
 interface Address {
   id: string;
@@ -22,6 +23,8 @@ interface Address {
   addressLine1: string;
   addressLine2: string;
   postalCode: string;
+  landmark: string;
+  isPrimary: boolean;
 }
 
 export default function Step3Page() {
@@ -44,8 +47,27 @@ export default function Step3Page() {
 
   useEffect(() => {
     if (currentLead?.formData?.step3?.addresses) {
-      // Remove isPrimary field if it exists
-      const cleanedAddresses = currentLead.formData.step3.addresses.map(({ isPrimary, ...rest }: any) => rest);
+      const cleanedAddresses = currentLead.formData.step3.addresses.map((addr: any, index: number) => {
+        const generatedId = addr.id ? String(addr.id) : `${Date.now()}-${index}`;
+        return {
+          id: generatedId,
+          addressType: addr.addressType || addr.address_type || 'residential',
+          addressLine1: addr.addressLine1 || addr.address_line_1 || '',
+          addressLine2: addr.addressLine2 || addr.address_line_2 || '',
+          postalCode: addr.postalCode || addr.pincode || '',
+          landmark: addr.landmark || '',
+          isPrimary: typeof addr.isPrimary === 'boolean'
+            ? addr.isPrimary
+            : typeof addr.is_primary === 'boolean'
+              ? addr.is_primary
+              : index === 0,
+        } as Address;
+      });
+
+      if (cleanedAddresses.length > 0 && !cleanedAddresses.some((addr: Address) => addr.isPrimary)) {
+        cleanedAddresses[0] = { ...cleanedAddresses[0], isPrimary: true };
+      }
+
       setAddresses(cleanedAddresses);
     } else {
       setAddresses([
@@ -55,6 +77,8 @@ export default function Step3Page() {
           addressLine1: '',
           addressLine2: '',
           postalCode: '',
+          landmark: '',
+          isPrimary: true,
         },
       ]);
     }
@@ -105,6 +129,7 @@ export default function Step3Page() {
           // Extract address fields
           const addressLine1 = aadhaarAddress.address_line_one || aadhaarAddress.address_line_1 || '';
           const addressLine2 = aadhaarAddress.address_line_two || aadhaarAddress.address_line_2 || '';
+          const landmark = aadhaarAddress.landmark || '';
           const pincode = aadhaarAddress.pincode || '';
           // Default to "residential" if address_type is null
           const addressType = aadhaarAddress.address_type || 'residential';
@@ -122,6 +147,8 @@ export default function Step3Page() {
                   addressLine1: addressLine1,
                   addressLine2: addressLine2,
                   postalCode: pincode,
+                  landmark: landmark,
+                  isPrimary: true,
                 }];
               } else {
                 // Overwrite first address with OCR data
@@ -132,6 +159,7 @@ export default function Step3Page() {
                     addressLine1: addressLine1 || addr.addressLine1,
                     addressLine2: addressLine2 || addr.addressLine2,
                     postalCode: pincode || addr.postalCode,
+                    landmark: landmark || addr.landmark,
                   } : addr
                 );
               }
@@ -198,16 +226,53 @@ export default function Step3Page() {
     setCollapsedAddresses(newCollapsed);
   };
 
+  const handleAddAddress = () => {
+    if (isCompleted) return;
+
+    setCollapsedAddresses(new Set(addresses.map((addr: Address) => addr.id)));
+    setAddresses(prev => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        addressType: 'residential',
+        addressLine1: '',
+        addressLine2: '',
+        postalCode: '',
+        landmark: '',
+        isPrimary: prev.length === 0,
+      },
+    ]);
+  };
+
   const handleRemoveAddress = (id: string) => {
     if (isCompleted) return; // Prevent removing addresses when completed
-    const remainingAddresses = addresses.filter((addr) => addr.id !== id);
-    setAddresses(remainingAddresses);
+
+    setAddresses(prev => {
+      const remainingAddresses = prev.filter((addr) => addr.id !== id);
+      if (remainingAddresses.length > 0 && !remainingAddresses.some((addr: Address) => addr.isPrimary)) {
+        remainingAddresses[0] = { ...remainingAddresses[0], isPrimary: true };
+      }
+      return remainingAddresses;
+    });
+
+    setCollapsedAddresses(prevSet => {
+      const updated = new Set(prevSet);
+      updated.delete(id);
+      return updated;
+    });
   };
 
   const handleAddressChange = (id: string, field: keyof Address, value: any) => {
     if (isCompleted) return; // Prevent editing when completed
-    setAddresses(
-      addresses.map((addr) => (addr.id === id ? { ...addr, [field]: value } : addr))
+    setAddresses(prev =>
+      prev.map((addr) => (addr.id === id ? { ...addr, [field]: value } : addr))
+    );
+  };
+
+  const handleSetPrimary = (id: string) => {
+    if (isCompleted) return;
+    setAddresses(prev =>
+      prev.map((addr: Address) => ({ ...addr, isPrimary: addr.id === id }))
     );
   };
 
@@ -224,18 +289,26 @@ export default function Step3Page() {
       return;
     }
 
+    const normalizedAddresses = addresses.some((addr: Address) => addr.isPrimary)
+      ? addresses
+      : addresses.map((addr, index) => ({
+          ...addr,
+          isPrimary: index === 0,
+        }));
+
     // Map frontend address format to backend format
-    // Remove address_line_3 and landmark - not required by backend
+    // Remove address_line_3 - not required by backend
     // Auto-send: city_id, latitude, longitude, is_primary, address_type (from dropdown)
-    const backendAddresses = addresses.map((addr, index) => ({
+    const backendAddresses = normalizedAddresses.map((addr) => ({
       address_type: addr.addressType || 'residential', // From dropdown
       address_line_1: addr.addressLine1 || '',
       address_line_2: addr.addressLine2 || '',
+      landmark: addr.landmark || '',
       pincode: addr.postalCode || '',
       city_id: 1, // Auto-send: default city_id
       latitude: "90", // Auto-send: default latitude
       longitude: "90", // Auto-send: default longitude
-      is_primary: index === 0, // Auto-send: first address is primary
+      is_primary: !!addr.isPrimary, // Respect user selection
     }));
 
     try {
@@ -273,11 +346,14 @@ export default function Step3Page() {
       }
 
       // Update local state and mark as completed
+      const finalAddresses = normalizedAddresses.map(addr => ({ ...addr }));
+      setAddresses(finalAddresses);
+
       updateLead(currentLead.id, {
         step3Completed: true, // Mark section as completed
         formData: {
           ...currentLead.formData,
-          step3: { addresses },
+          step3: { addresses: finalAddresses },
         },
       });
 
@@ -308,13 +384,17 @@ export default function Step3Page() {
     router.push('/lead/new-lead-info');
   };
 
-  const canProceed = addresses.every(
-    (addr) =>
-      addr.addressType &&
-      addr.addressLine1 &&
-      addr.postalCode &&
-      addr.postalCode.length === 6
-  );
+  const canProceed =
+    addresses.length > 0 &&
+    addresses.some((addr: Address) => addr.isPrimary) &&
+    addresses.every(
+      (addr) =>
+        addr.addressType &&
+        addr.addressLine1 &&
+        addr.landmark &&
+        addr.postalCode &&
+        addr.postalCode.length === 6
+    );
 
   return (
     <DashboardLayout
@@ -387,6 +467,12 @@ export default function Step3Page() {
                               </span>
                             )}
                           </h3>
+
+                          {address.isPrimary && (
+                            <span className="mt-1 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md font-medium w-fit">
+                              Primary
+                            </span>
+                          )}
 
 
                           {isCollapsed && address.addressLine1 && (
@@ -487,6 +573,24 @@ export default function Step3Page() {
                             />
                           </div>
 
+                          {/* Landmark */}
+                          <div>
+                            <Label className="text-sm font-medium text-[#003366] mb-2 block">
+                              Landmark <span className="text-red-500">*</span>
+                            </Label>
+                            <Input
+                              type="text"
+                              value={address.landmark}
+                              onChange={(e) =>
+                                handleAddressChange(address.id, 'landmark', e.target.value)
+                              }
+                              placeholder="Nearby landmark"
+                              disabled={isCompleted}
+                              className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}
+                              maxLength={255}
+                            />
+                          </div>
+
                           {/* Postal Code */}
                           <div>
                             <Label className="text-sm font-medium text-[#003366] mb-2 block">
@@ -505,6 +609,17 @@ export default function Step3Page() {
                             />
                           </div>
 
+                          <div className={cn("flex items-center justify-between p-4 bg-gray-50 rounded-lg border", isCompleted && "opacity-60")}>
+                            <Label className="text-base font-medium">
+                              Mark as Primary Address
+                            </Label>
+                            <Switch
+                              checked={address.isPrimary}
+                              onCheckedChange={() => handleSetPrimary(address.id)}
+                              disabled={isCompleted}
+                            />
+                          </div>
+
                         </div>
                       </CardContent>
                     </CollapsibleContent>
@@ -512,6 +627,21 @@ export default function Step3Page() {
                 </Card>
               );
             })}
+
+            <div className="pt-2">
+              <Button
+                variant="outline"
+                className={cn(
+                  "w-full h-12 text-[#0072CE] border-dashed border-[#0072CE]/50 hover:bg-[#E6F0FA] rounded-lg font-medium",
+                  isCompleted && "text-gray-400 border-gray-300 hover:bg-white cursor-not-allowed"
+                )}
+                onClick={handleAddAddress}
+                disabled={isCompleted}
+              >
+                <Plus className="w-5 h-5 mr-2" />
+                Add Another Address
+              </Button>
+            </div>
 
           </div>
           

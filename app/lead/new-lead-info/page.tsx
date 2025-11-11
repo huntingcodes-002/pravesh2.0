@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Eye, Image as ImageIcon } from 'lucide-react';
+import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Eye, Image as ImageIcon, Users } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -39,18 +39,36 @@ export default function NewLeadInfoPage() {
   const getStep2Status = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
     
-    // Check completion flag first (from successful API submission)
     if (currentLead.step2Completed === true) return 'completed';
     
-    // Fallback to data check for in-progress
     const step2 = currentLead.formData?.step2;
-    const hasData = step2 && 
-      step2.dob &&
-      currentLead.gender && // Gender is required
-      currentLead.panNumber && // PAN is always required
-      currentLead.panNumber.length === 10;
+    if (!step2) return 'incomplete';
+
+    const gender = currentLead.gender || step2.gender;
+    const dob = currentLead.dob || step2.dob;
+    const maritalStatus = step2.maritalStatus;
+
+    const hasAnyData = Boolean(
+      (step2.hasPan === 'yes' && (step2.pan || currentLead.panNumber)) ||
+      (step2.hasPan === 'no' && (step2.alternateIdType || step2.documentNumber || step2.panUnavailabilityReason)) ||
+      gender || dob || maritalStatus
+    );
+
+    const hasAllData = step2.hasPan === 'yes'
+      ? Boolean(
+          (currentLead.panNumber && currentLead.panNumber.length === 10) ||
+          (step2.pan && step2.pan.length === 10)
+        ) && Boolean(gender && dob)
+      : Boolean(
+          dob &&
+          gender &&
+          maritalStatus &&
+          step2.alternateIdType &&
+          step2.documentNumber &&
+          step2.panUnavailabilityReason
+        );
     
-    if (hasData) return 'in-progress';
+    if (hasAllData || hasAnyData) return 'in-progress';
     return 'incomplete';
   };
 
@@ -61,18 +79,24 @@ export default function NewLeadInfoPage() {
     // Check completion flag first (from successful API submission)
     if (currentLead.step3Completed === true) return 'completed';
     
-    // Fallback to data check for in-progress
     const step3 = currentLead.formData?.step3;
-    const hasData = step3?.addresses && 
-      step3.addresses.length > 0 &&
-      step3.addresses.every((addr: any) => 
-        addr.addressType && 
-        addr.addressLine1 && 
-        addr.postalCode && 
-        addr.postalCode.length === 6
-      );
+    const addresses = step3?.addresses || [];
+    const hasAnyData = addresses.length > 0 && addresses.some((addr: any) =>
+      addr.addressType ||
+      addr.addressLine1 ||
+      addr.addressLine2 ||
+      addr.landmark ||
+      addr.postalCode
+    );
+    const hasRequiredData = addresses.length > 0 && addresses.every((addr: any) =>
+      addr.addressType &&
+      addr.addressLine1 &&
+      addr.landmark &&
+      addr.postalCode &&
+      addr.postalCode.length === 6
+    );
     
-    if (hasData) return 'in-progress';
+    if (hasRequiredData || hasAnyData) return 'in-progress';
     return 'incomplete';
   };
 
@@ -92,6 +116,14 @@ export default function NewLeadInfoPage() {
     
     if (step2Status === 'incomplete' && step3Status === 'incomplete') return 'incomplete';
     return 'in-progress';
+  };
+
+  const getCoApplicantStatus = (): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    const coApplicants = currentLead.formData?.coApplicants || [];
+    if (!coApplicants.length) return 'completed';
+    const allComplete = coApplicants.every((coApp: any) => coApp.isComplete);
+    return allComplete ? 'completed' : 'in-progress';
   };
 
   const getCollateralStatus = (): SectionStatus => {
@@ -133,13 +165,54 @@ export default function NewLeadInfoPage() {
     return currentLead.formData.step8.files.filter((f: any) => f.status === 'Success');
   }, [currentLead]);
 
-  const completedCount = [getApplicantDetailsStatus(), getCollateralStatus(), getLoanRequirementStatus()].filter(s => s === 'completed').length;
-  const totalModules = 3;
+  const completedCount = [
+    getApplicantDetailsStatus(),
+    getCoApplicantStatus(),
+    getCollateralStatus(),
+    getLoanRequirementStatus()
+  ].filter(s => s === 'completed').length;
+  const totalModules = 4;
 
   // Helper function to generate required document list
+  const mapAlternateIdTypeToDocumentValue = (alternateIdType: string): string => {
+    const mapping: Record<string, string> = {
+      'Passport': 'Passport',
+      'Voter ID': 'VoterID',
+      'Driving License': 'DrivingLicense',
+    };
+    return mapping[alternateIdType] || alternateIdType;
+  };
+
   const generateRequiredDocumentList = (lead: any): string[] => {
-    // PAN and Aadhaar are always required
-    return ['PAN', 'Adhaar'];
+    const requiredDocs: string[] = [];
+    const step2 = lead?.formData?.step2 || {};
+
+    if (step2.hasPan !== 'no') {
+      requiredDocs.push('PAN');
+    } else if (step2.alternateIdType) {
+      requiredDocs.push(mapAlternateIdTypeToDocumentValue(step2.alternateIdType));
+    }
+
+    requiredDocs.push('Adhaar');
+
+    const coApplicants = lead?.formData?.coApplicants || [];
+    coApplicants.forEach((coApp: any) => {
+      const coApplicantId = coApp?.id;
+      if (!coApplicantId) return;
+
+      const coAppStep2 = coApp?.data?.step2 || {};
+      if (coAppStep2.hasPan !== 'no') {
+        requiredDocs.push(`PAN_${coApplicantId}`);
+      } else if (coAppStep2.alternateIdType) {
+        requiredDocs.push(`${mapAlternateIdTypeToDocumentValue(coAppStep2.alternateIdType)}_${coApplicantId}`);
+      }
+
+      requiredDocs.push(`Adhaar_${coApplicantId}`);
+    });
+
+    requiredDocs.push('CollateralPapers');
+
+    return requiredDocs;
   };
 
   // Check if all required documents are uploaded
@@ -204,13 +277,14 @@ export default function NewLeadInfoPage() {
   };
 
   const getStatusBadge = (status: SectionStatus) => {
+    const baseClasses = "rounded-full border text-[11px] font-medium px-3 py-1";
     switch (status) {
       case 'completed':
-        return <Badge className="bg-green-100 text-green-700 text-xs">Completed</Badge>;
+        return <Badge className={cn(baseClasses, "bg-green-50 border-green-200 text-green-700")}>Completed</Badge>;
       case 'in-progress':
-        return <Badge className="bg-yellow-100 text-yellow-700 text-xs">In Progress</Badge>;
+        return <Badge className={cn(baseClasses, "bg-yellow-50 border-yellow-200 text-yellow-700")}>In Progress</Badge>;
       default:
-        return <Badge className="bg-gray-100 text-gray-700 text-xs">No Data</Badge>;
+        return <Badge className={cn(baseClasses, "bg-gray-50 border-gray-200 text-gray-600")}>No Data</Badge>;
     }
   };
 
@@ -241,6 +315,10 @@ export default function NewLeadInfoPage() {
   const applicantStatus = getApplicantDetailsStatus();
   const collateralStatus = getCollateralStatus();
   const loanStatus = getLoanRequirementStatus();
+  const coApplicantStatus = getCoApplicantStatus();
+  const coApplicants = currentLead?.formData?.coApplicants || [];
+  const coApplicantCount = coApplicants.length;
+  const hasCoApplicants = coApplicantCount > 0;
 
   return (
     <DashboardLayout 
@@ -318,9 +396,12 @@ export default function NewLeadInfoPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900">Basic Details</p>
-                      {step2Status === 'incomplete' && (
-                        <p className="text-xs text-gray-500 mt-0.5">Upload Pan to auto-fetch user details</p>
-                      )}
+                      {step2Status === 'incomplete' ? (
+                        <div className="space-y-0.5">
+                          <p className="text-sm font-semibold text-gray-900">No basic details added yet</p>
+                          <p className="text-xs text-gray-500">Upload PAN to auto-fill Name, DOB & PAN Number</p>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -389,9 +470,12 @@ export default function NewLeadInfoPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900">Address Details</p>
-                      {step3Status === 'incomplete' && (
-                        <p className="text-xs text-gray-500 mt-0.5">Upload Aadhaar to auto-fetch Address</p>
-                      )}
+                      {step3Status === 'incomplete' ? (
+                        <div className="space-y-0.5">
+                          <p className="text-sm font-semibold text-gray-900">No address details added yet</p>
+                          <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill Address & Pincode</p>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -445,15 +529,95 @@ export default function NewLeadInfoPage() {
             </CardContent>
           </Card>
 
+          {/* Co-Applicants Card */}
+          <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
+            <CardContent className="p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">Co-Applicant(s)</h3>
+                <Badge
+                  className={cn(
+                    'rounded-full px-3 py-1 text-xs font-medium',
+                    hasCoApplicants ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-gray-50 text-gray-500 border border-gray-200'
+                  )}
+                >
+                  {hasCoApplicants ? `${coApplicantCount} Added` : 'No Data'}
+                </Badge>
+              </div>
+
+              {!hasCoApplicants ? (
+                <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-100 bg-white px-4 py-4">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <Users className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">No co-applicants added yet</p>
+                      <p className="text-xs text-gray-500">Add a co-applicant to continue joint application processing</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push('/lead/co-applicant-info')}
+                    className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                  >
+                    Manage
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                        <Users className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900">
+                          {coApplicantCount} co-applicant{coApplicantCount > 1 ? 's' : ''} added
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Manage details and documents for each co-applicant.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push('/lead/co-applicant-info')}
+                      className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                    >
+                      Manage
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {coApplicants.map((coApp: any, index: number) => {
+                      const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
+                      const fullName =
+                        [basic.firstName, basic.lastName].filter(Boolean).join(' ') || 'Unnamed Co-applicant';
+                      return (
+                        <div
+                          key={coApp.id}
+                          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-900"
+                        >
+                          {`Co-Applicant ${index + 1} – ${fullName}`}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              <p className="text-xs text-gray-400">Each co-applicant requires PAN & Aadhaar verification</p>
+            </CardContent>
+          </Card>
+
           {/* Collateral Card */}
           <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Collateral Details</h3>
                 <div className="flex items-center gap-2">
-                  {collateralStatus !== 'incomplete' && (
-                    <Badge className="bg-gray-100 text-gray-700 text-xs">Manual Entry</Badge>
-                  )}
+                  {getStatusBadge(collateralStatus)}
                 </div>
               </div>
 
@@ -511,9 +675,7 @@ export default function NewLeadInfoPage() {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Loan Requirement</h3>
                 <div className="flex items-center gap-2">
-                  {loanStatus !== 'incomplete' && (
-                    <Badge className="bg-gray-100 text-gray-700 text-xs">Manual Entry</Badge>
-                  )}
+                  {getStatusBadge(loanStatus)}
                 </div>
               </div>
 
@@ -545,7 +707,7 @@ export default function NewLeadInfoPage() {
                     ) : (
                       <div>
                         <p className="text-sm font-semibold text-gray-900">No loan requirement details available</p>
-                        <p className="text-xs text-gray-500 mt-0.5">Click to start manually</p>
+                        <p className="text-xs text-gray-500 mt-0.5">Upload supporting docs or start manually</p>
                       </div>
                     )}
                   </div>

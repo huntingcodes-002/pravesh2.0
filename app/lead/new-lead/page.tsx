@@ -20,12 +20,13 @@ function Step1PageContent() {
   const router = useRouter();
   const { toast } = useToast(); // Initialize useToast
 
+  const initialFirstName = currentLead?.customerFirstName || currentLead?.formData?.step1?.firstName || '';
+  const initialLastName = currentLead?.customerLastName || currentLead?.formData?.step1?.lastName || '';
   const [formData, setFormData] = useState({
     productType: currentLead?.formData?.step1?.productType || '',
     applicationType: currentLead?.formData?.step1?.applicationType || 'new',
     mobile: currentLead?.customerMobile || '',
-    firstName: currentLead?.customerFirstName || '',
-    lastName: currentLead?.customerLastName || '',
+    fullName: currentLead?.formData?.step1?.fullName || `${initialFirstName} ${initialLastName}`.trim(),
   });
 
   const [isMobileVerified, setIsMobileVerified] = useState(currentLead?.formData?.step1?.isMobileVerified || false);
@@ -36,17 +37,31 @@ function Step1PageContent() {
   const [isCreatingLead, setIsCreatingLead] = useState(false);
   const [applicationId, setApplicationId] = useState<string | null>(currentLead?.appId || null);
 
+  const deriveNameParts = (fullName: string) => {
+    const normalized = fullName.replace(/[^a-zA-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return { firstName: '', lastName: '' };
+    }
+    const parts = normalized.split(' ');
+    const firstName = parts.shift() || '';
+    const lastName = parts.join(' ').trim();
+    return { firstName, lastName };
+  };
+
+  const nameParts = deriveNameParts(formData.fullName);
+
   useEffect(() => {
     if (currentLead) {
+      const { firstName, lastName } = nameParts;
       updateLead(currentLead.id, {
-        formData: { ...currentLead.formData, step1: { ...formData, isMobileVerified } },
+        formData: { ...currentLead.formData, step1: { ...formData, firstName, lastName, isMobileVerified } },
         customerMobile: formData.mobile,
-        customerFirstName: formData.firstName,
-        customerLastName: formData.lastName,
+        customerFirstName: firstName,
+        customerLastName: lastName,
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData, isMobileVerified]);
+  }, [formData, isMobileVerified, nameParts.firstName, nameParts.lastName]);
   
   useEffect(() => {
     let timerId: NodeJS.Timeout;
@@ -64,7 +79,7 @@ function Step1PageContent() {
       return;
     }
     
-    if (!formData.productType || !formData.applicationType || !formData.firstName || !formData.lastName) {
+    if (!formData.productType || !formData.applicationType || !nameParts.firstName || !nameParts.lastName) {
       toast({ title: 'Error', description: 'Please fill all required fields.', variant: 'destructive' });
       return;
     }
@@ -89,8 +104,8 @@ function Step1PageContent() {
         product_type: formData.productType as 'secured' | 'unsecured',
         application_type: backendApplicationType,
         mobile_number: formData.mobile,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
+        first_name: nameParts.firstName,
+        last_name: nameParts.lastName,
       });
 
       if (isApiError(response)) {
@@ -201,14 +216,16 @@ function Step1PageContent() {
         const updatedLead: Lead = {
           ...currentLead,
           appId: verifiedApplicationId, // Set the actual Application ID from backend
-          customerName: `${formData.firstName || currentLead.customerFirstName || ''} ${formData.lastName || currentLead.customerLastName || ''}`.trim() || currentLead.customerName,
+          customerName: `${nameParts.firstName || currentLead.customerFirstName || ''} ${nameParts.lastName || currentLead.customerLastName || ''}`.trim() || currentLead.customerName,
           customerMobile: formData.mobile || currentLead.customerMobile,
-          customerFirstName: formData.firstName || currentLead.customerFirstName,
-          customerLastName: formData.lastName || currentLead.customerLastName,
+          customerFirstName: nameParts.firstName || currentLead.customerFirstName,
+          customerLastName: nameParts.lastName || currentLead.customerLastName,
           formData: {
             ...currentLead.formData,
             step1: {
               ...formData,
+              firstName: nameParts.firstName,
+              lastName: nameParts.lastName,
               isMobileVerified: true,
               applicationId: verifiedApplicationId,
             },
@@ -220,12 +237,14 @@ function Step1PageContent() {
         updateLead(currentLead.id, {
           appId: verifiedApplicationId,
           customerMobile: formData.mobile,
-          customerFirstName: formData.firstName,
-          customerLastName: formData.lastName,
+          customerFirstName: nameParts.firstName,
+          customerLastName: nameParts.lastName,
           formData: {
             ...currentLead.formData,
             step1: {
               ...formData,
+              firstName: nameParts.firstName,
+              lastName: nameParts.lastName,
               isMobileVerified: true,
               applicationId: verifiedApplicationId,
             },
@@ -253,12 +272,12 @@ function Step1PageContent() {
     }
   };
 
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'firstName' | 'lastName') => {
+  const handleFullNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    // Allow only alphabetic characters and spaces
-    const sanitizedValue = value.replace(/[^a-zA-Z\s]/g, '');
-    setFormData({ ...formData, [field]: sanitizedValue });
-  }
+    const sanitizedValue = value.replace(/[^a-zA-Z\s]/g, ' ');
+    const normalizedValue = sanitizedValue.replace(/\s+/g, ' ');
+    setFormData({ ...formData, fullName: normalizedValue });
+  };
 
   const appTypeDescriptions: { [key: string]: string } = {
     'new': 'Fresh loan application for first-time customers or new loan requirements.',
@@ -277,7 +296,13 @@ function Step1PageContent() {
     router.push('/lead/new-lead-info');
   };
 
-  const canSendOtp = formData.productType && formData.applicationType && formData.mobile.length === 10 && formData.firstName && formData.lastName;
+  const canSendOtp = Boolean(
+    formData.productType &&
+    formData.applicationType &&
+    formData.mobile.length === 10 &&
+    nameParts.firstName &&
+    nameParts.lastName
+  );
   const canProceed = isMobileVerified;
   
   // Co-applicant flow elements should not appear here
@@ -328,11 +353,15 @@ function Step1PageContent() {
             </div>
 
             <div>
-                <Label className="text-sm font-medium text-[#003366] mb-2 block">Customer Name <span className="text-[#DC2626]">*</span></Label>
-                <div className="grid grid-cols-2 gap-3">
-                    <Input id="first-name" value={formData.firstName} onChange={(e) => handleNameChange(e, 'firstName')} placeholder="First Name" className="h-12 rounded-lg" maxLength={100} />
-                    <Input id="last-name" value={formData.lastName} onChange={(e) => handleNameChange(e, 'lastName')} placeholder="Last Name" className="h-12 rounded-lg" maxLength={50} />
-                </div>
+                <Label htmlFor="full-name" className="text-sm font-medium text-[#003366] mb-2 block">Customer Name <span className="text-[#DC2626]">*</span></Label>
+                <Input
+                  id="full-name"
+                  value={formData.fullName}
+                  onChange={handleFullNameChange}
+                  placeholder="Enter full name as per PAN"
+                  className="h-12 rounded-lg"
+                  maxLength={150}
+                />
             </div>
             
             <div>

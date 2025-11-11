@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload, CheckCircle, XCircle, Loader, Trash2, RotateCcw, Camera, AlertTriangle, User, Users, Home, ChevronDown, X, Image as ImageIcon, RefreshCw } from 'lucide-react';
 import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-image-crop';
@@ -30,6 +30,9 @@ interface UploadedFile {
     frontPreviewUrl?: string;
     backPreviewUrl?: string;
     fileType?: 'image' | 'pdf';
+    ownerType?: 'main' | 'coapplicant' | 'collateral';
+    ownerId?: string;
+    label?: string;
 }
 
 interface EntityOption {
@@ -88,41 +91,123 @@ const getAlternateDocumentLabel = (alternateIdType: string): string => {
 };
 
 // Helper function to generate dynamic document list
-const generateDocumentList = (lead: any) => {
-    const documents: any[] = [];
-    
-    // Main applicant documents
-    const mainApplicantName = getApplicantName(lead?.customerFirstName, lead?.customerLastName);
-    
-    // PAN is always required
+interface DocumentDefinition {
+  value: string;
+  label: string;
+  fileTypes: Array<'image' | 'pdf'>;
+  requiresCamera: boolean;
+  applicantType: 'main' | 'coapplicant' | 'collateral';
+  required?: boolean;
+  requiresFrontBack?: boolean;
+  coApplicantId?: string;
+}
+
+const generateDocumentList = (lead: any): DocumentDefinition[] => {
+  const documents: DocumentDefinition[] = [];
+
+  const mainApplicantName = getApplicantName(lead?.customerFirstName, lead?.customerLastName);
+  const step2 = lead?.formData?.step2 || {};
+
+  if (step2?.hasPan !== 'no') {
     documents.push({
-        value: "PAN",
-        label: `PAN - ${mainApplicantName}`,
-        fileTypes: ["image"],
-        requiresCamera: true,
-        applicantType: "main",
-        required: true,
-        requiresFrontBack: false
+      value: 'PAN',
+      label: `PAN - ${mainApplicantName}`,
+      fileTypes: ['image'],
+      requiresCamera: true,
+      applicantType: 'main',
+      required: true,
+      requiresFrontBack: false,
     });
-    
-    // Aadhaar is always required
+  } else if (step2?.alternateIdType) {
+    const altValue = mapAlternateIdTypeToDocumentValue(step2.alternateIdType);
+    const altLabel = getAlternateDocumentLabel(step2.alternateIdType);
     documents.push({
-        value: "Adhaar",
-        label: `Aadhaar - ${mainApplicantName}`,
-        fileTypes: ["image"],
-        requiresCamera: true,
-        applicantType: "main",
-        required: true,
-        requiresFrontBack: true
+      value: altValue,
+      label: `${altLabel} - ${mainApplicantName}`,
+      fileTypes: ['image'],
+      requiresCamera: true,
+      applicantType: 'main',
+      required: true,
+      requiresFrontBack: false,
     });
-    
-    return documents;
+  }
+
+  documents.push({
+    value: 'Adhaar',
+    label: `Aadhaar - ${mainApplicantName}`,
+    fileTypes: ['image'],
+    requiresCamera: true,
+    applicantType: 'main',
+    required: true,
+    requiresFrontBack: true,
+  });
+
+  const coApplicants = lead?.formData?.coApplicants || [];
+  coApplicants.forEach((coApp: any, index: number) => {
+    const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
+    const step2Data = coApp?.data?.step2 ?? {};
+    const name = getApplicantName(
+      basic.firstName ?? step2Data.firstName,
+      basic.lastName ?? step2Data.lastName
+    );
+    const hasPan = step2Data.hasPan ?? 'yes';
+
+    if (hasPan !== 'no') {
+      documents.push({
+        value: `PAN_${coApp.id}`,
+        label: `PAN - ${name}`,
+        fileTypes: ['image'],
+        requiresCamera: true,
+        applicantType: 'coapplicant',
+        coApplicantId: coApp.id,
+        required: true,
+        requiresFrontBack: false,
+      });
+    } else if (step2Data.alternateIdType) {
+      const altValue = mapAlternateIdTypeToDocumentValue(step2Data.alternateIdType);
+      const altLabel = getAlternateDocumentLabel(step2Data.alternateIdType);
+      documents.push({
+        value: `${altValue}_${coApp.id}`,
+        label: `${altLabel} - ${name}`,
+        fileTypes: ['image'],
+        requiresCamera: true,
+        applicantType: 'coapplicant',
+        coApplicantId: coApp.id,
+        required: true,
+        requiresFrontBack: false,
+      });
+    }
+
+    documents.push({
+      value: `Adhaar_${coApp.id}`,
+      label: `Aadhaar - ${name}`,
+      fileTypes: ['image'],
+      requiresCamera: true,
+      applicantType: 'coapplicant',
+      coApplicantId: coApp.id,
+      required: true,
+      requiresFrontBack: true,
+    });
+  });
+
+  documents.push({
+    value: 'CollateralPapers',
+    label: 'Collateral Papers',
+    fileTypes: ['pdf'],
+    requiresCamera: false,
+    applicantType: 'collateral',
+    required: true,
+    requiresFrontBack: false,
+  });
+
+  return documents;
 };
 
 // Helper function to categorize uploaded files
 const categorizeUploadedFiles = (files: UploadedFile[], availableDocuments: any[], coApplicants: any[]) => {
     const applicantDocs: UploadedFile[] = [];
     const coApplicantDocsMap: { [key: string]: UploadedFile[] } = {};
+    const collateralDocs: UploadedFile[] = [];
     
     // Initialize co-applicant docs map
     coApplicants.forEach((coApp: any) => {
@@ -140,11 +225,13 @@ const categorizeUploadedFiles = (files: UploadedFile[], availableDocuments: any[
                 if (coApplicantId && coApplicantDocsMap[coApplicantId]) {
                     coApplicantDocsMap[coApplicantId].push(file);
                 }
+            } else if (docInfo.applicantType === 'collateral') {
+                collateralDocs.push(file);
             }
         }
     });
     
-    return { applicantDocs, coApplicantDocsMap };
+    return { applicantDocs, coApplicantDocsMap, collateralDocs };
 };
 
 // Helper function to get document display name
@@ -153,13 +240,20 @@ const getDocumentDisplayName = (fileType: string, availableDocuments: any[]) => 
     return docInfo ? docInfo.label : fileType;
 };
 
+const parseDocumentValue = (docValue: string) => {
+    const parts = docValue.split('_');
+    const baseValue = parts[0];
+    const coApplicantId = parts.length > 1 ? parts.slice(1).join('_') : undefined;
+    return { baseValue, coApplicantId };
+};
+
 export default function Step8Page() {
-  const { currentLead, updateLead } = useLead();
+  const { currentLead, updateLead, updateCoApplicant } = useLead();
   const router = useRouter();
     const { toast } = useToast();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [selectedEntity, setSelectedEntity] = useState('applicant');
+    const [selectedEntity, setSelectedEntity] = useState<EntityOption['value']>('applicant');
     const [documentType, setDocumentType] = useState('');
     const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>(
         currentLead?.formData?.step8?.files || []
@@ -177,7 +271,7 @@ export default function Step8Page() {
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
     // Default to open for applicant section to prevent auto-collapse
-    const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({ applicant: true });
+    const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({ applicant: true, collateral: true });
     
     // Camera flip state
     const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
@@ -200,60 +294,99 @@ export default function Step8Page() {
     // Generate dynamic document list based on current lead data
     const availableDocuments = currentLead ? generateDocumentList(currentLead) : [];
     
-    // Generate entity options
-    const getEntityOptions = (): EntityOption[] => {
+    const entityOptions = useMemo((): EntityOption[] => {
         if (!currentLead) return [];
         
         const entities: EntityOption[] = [];
         
-        // Main applicant
-        const mainApplicantName = currentLead.customerName || 'Applicant';
+        const mainApplicantName = currentLead.customerName || getApplicantName(currentLead.customerFirstName, currentLead.customerLastName);
         entities.push({
             value: 'applicant',
             label: `Applicant - ${mainApplicantName}`,
             type: 'main'
         });
         
-        // Co-applicants
         const coApplicants = currentLead?.formData?.coApplicants || [];
         coApplicants.forEach((coApp: any, index: number) => {
-            const coApplicantName = getApplicantName(coApp?.data?.step1?.firstName, coApp?.data?.step1?.lastName);
+            const coApplicantName = getApplicantName(
+                coApp?.data?.basicDetails?.firstName ?? coApp?.data?.step1?.firstName,
+                coApp?.data?.basicDetails?.lastName ?? coApp?.data?.step1?.lastName
+            );
             entities.push({
-                value: `coapplicant-${coApp.id}`,
+                value: coApp.id,
                 label: `Co-Applicant ${index + 1} - ${coApplicantName}`,
                 type: 'coapplicant',
-                coApplicantId: coApp.id
+                coApplicantId: coApp.id,
             });
         });
         
+        entities.push({
+            value: 'collateral',
+            label: 'Collateral Documents',
+            type: 'collateral',
+        });
+        
         return entities;
-    };
+    }, [currentLead]);
     
-    // Filter documents - only show PAN and Aadhaar for main applicant
-    const getFilteredDocuments = () => {
-        return availableDocuments.filter(doc => doc.applicantType === 'main');
-    };
-    
-    const filteredDocuments = getFilteredDocuments();
-    const selectedDocument = filteredDocuments.find(doc => doc.value === documentType);
-
-    // Clean up any alternate documents (should only have PAN and Aadhaar)
     useEffect(() => {
-        if (currentLead && uploadedFiles.length > 0) {
-            const alternateDocumentTypes = ['Passport', 'VoterID', 'DrivingLicense'];
-            const hasAlternateDocs = uploadedFiles.some((file: any) => 
-                alternateDocumentTypes.includes(file.type)
+        if (!entityOptions.length) return;
+        if (!entityOptions.some(option => option.value === selectedEntity)) {
+            setSelectedEntity(entityOptions[0].value);
+            setDocumentType('');
+        }
+    }, [entityOptions, selectedEntity]);
+    
+    const selectedEntityOption = useMemo(
+        () => entityOptions.find(opt => opt.value === selectedEntity) ?? null,
+        [entityOptions, selectedEntity]
+    );
+    
+    const filteredDocuments = useMemo(() => {
+        if (!selectedEntityOption) return [];
+        if (selectedEntityOption.type === 'main') {
+            return availableDocuments.filter(doc => doc.applicantType === 'main');
+        }
+        if (selectedEntityOption.type === 'coapplicant') {
+            return availableDocuments.filter(
+                doc => doc.applicantType === 'coapplicant' && doc.coApplicantId === selectedEntityOption.coApplicantId
             );
-            
-            if (hasAlternateDocs) {
-                const cleanedFiles = uploadedFiles.filter((file: any) => 
-                    !alternateDocumentTypes.includes(file.type)
-                );
-                setUploadedFiles(cleanedFiles);
+        }
+        if (selectedEntityOption.type === 'collateral') {
+            return availableDocuments.filter(doc => doc.applicantType === 'collateral');
+        }
+        return [];
+    }, [availableDocuments, selectedEntityOption]);
+    
+    useEffect(() => {
+        if (!filteredDocuments.length) {
+            if (documentType) {
+                setDocumentType('');
             }
+            return;
+        }
+        if (!filteredDocuments.some(doc => doc.value === documentType)) {
+            const autoValue = filteredDocuments.length === 1 ? filteredDocuments[0].value : '';
+            setDocumentType(autoValue);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentLead]);
+    }, [filteredDocuments]);
+    
+    const selectedDocument = useMemo(
+        () => filteredDocuments.find(doc => doc.value === documentType),
+        [filteredDocuments, documentType]
+    );
+
+    // Clean up old alternate/collateral documents that no longer match configuration
+    useEffect(() => {
+        if (!currentLead) return;
+        const validTypes = new Set(availableDocuments.map(doc => doc.value));
+        const normalizedFiles = uploadedFiles.filter(file => validTypes.has(file.type));
+        if (normalizedFiles.length !== uploadedFiles.length) {
+            setUploadedFiles(normalizedFiles);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentLead, availableDocuments]);
 
     useEffect(() => {
         if (currentLead) {
@@ -274,18 +407,19 @@ export default function Step8Page() {
 
     // Helper function to map frontend document type to backend format
     const mapDocumentTypeToBackend = (docType: string): 'pan_card' | 'aadhaar_card' | 'driving_license' | 'passport' | 'voter_id' | 'collateral_documents' | 'bank_statement' | 'salary_slip' | 'itr' | 'other' => {
+        const { baseValue } = parseDocumentValue(docType);
         const mapping: Record<string, 'pan_card' | 'aadhaar_card' | 'driving_license' | 'passport' | 'voter_id' | 'collateral_documents' | 'bank_statement' | 'salary_slip' | 'itr' | 'other'> = {
             'PAN': 'pan_card',
             'Adhaar': 'aadhaar_card',
             'DrivingLicense': 'driving_license',
             'Passport': 'passport',
             'VoterID': 'voter_id',
-            'CollateralProperty': 'collateral_documents',
+            'CollateralPapers': 'collateral_documents',
             'BankStatement': 'bank_statement',
             'SalarySlip': 'salary_slip',
             'ITR': 'itr',
         };
-        return mapping[docType] || 'other';
+        return mapping[baseValue] || 'other';
     };
 
     // Helper function to handle document upload with API integration
@@ -304,7 +438,16 @@ export default function Step8Page() {
             return { success: false };
         }
 
+        const docInfo = availableDocuments.find(doc => doc.value === documentType);
+        const { baseValue: baseDocType, coApplicantId: documentCoApplicantId } = parseDocumentValue(documentType);
         const backendDocType = mapDocumentTypeToBackend(documentType);
+        const metadata: Record<string, any> = {};
+        if (docInfo?.applicantType === 'coapplicant' && docInfo.coApplicantId) {
+            metadata.co_applicant_id = docInfo.coApplicantId;
+        }
+        if (docInfo?.applicantType === 'collateral') {
+            metadata.document_owner = 'collateral';
+        }
         
         try {
             // Endpoint 5: Upload document - https://uatlb.api.saarathifinance.com/api/lead-collection/applications/document-upload/
@@ -313,7 +456,8 @@ export default function Step8Page() {
                 document_type: backendDocType,
                 front_file: file,
                 back_file: backFile,
-                document_name: file.name,
+                document_name: docInfo?.label || file.name,
+                metadata: Object.keys(metadata).length ? metadata : undefined,
             });
 
             // Only approve if backend returns success (200 OK)
@@ -329,7 +473,7 @@ export default function Step8Page() {
             // Document uploaded successfully - now fetch parsed data for PAN/Aadhaar
 
             // If PAN or Aadhaar, fetch parsed data from Endpoint 6 after backend processes it
-            if (documentType === 'PAN' || documentType === 'Adhaar') {
+            if (baseDocType === 'PAN' || baseDocType === 'Adhaar') {
                 // Wait a bit for backend to process the document
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
@@ -339,7 +483,7 @@ export default function Step8Page() {
                     const parsedData = detailedResponse.data;
                     
                     // Handle PAN document - populate Customer Details page with PAN number and DOB
-                    if (documentType === 'PAN') {
+                    if (baseDocType === 'PAN') {
                         // Helper function to convert DD/MM/YYYY format (e.g., "24/08/2002") to YYYY-MM-DD format
                         const convertDDMMYYYYToISO = (dateStr: string): string => {
                             if (!dateStr) return '';
@@ -411,64 +555,115 @@ export default function Step8Page() {
                         if (panNumber || dateOfBirth) {
                             // Auto-populate Customer Details (Basic Details) page via LeadContext
                             if (currentLead) {
-                                // Prepare update data - use extracted values if available, otherwise keep existing
-                                const updatedPanNumber = panNumber || currentLead.panNumber || '';
-                                const updatedDob = dateOfBirth || currentLead.dob || '';
-                                
-                                // Calculate age if DOB is available
-                                let calculatedAge = currentLead.age || 0;
-                                if (updatedDob) {
-                                    try {
-                                        const today = new Date();
-                                        const birthDate = new Date(updatedDob);
-                                        if (!isNaN(birthDate.getTime())) {
-                                            calculatedAge = today.getFullYear() - birthDate.getFullYear();
-                                            const m = today.getMonth() - birthDate.getMonth();
-                                            if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-                                                calculatedAge--;
+                                if (docInfo?.applicantType === 'coapplicant' && documentCoApplicantId && updateCoApplicant) {
+                                    const coApplicants = currentLead.formData?.coApplicants || [];
+                                    const coApplicant = coApplicants.find((coApp: any) => coApp.id === documentCoApplicantId);
+                                    if (coApplicant) {
+                                        const existingStep2 = coApplicant.data?.step2 || {};
+                                        const updatedDob = dateOfBirth || existingStep2.dob || '';
+                                        let calculatedAge = existingStep2.age || 0;
+                                        if (updatedDob) {
+                                            try {
+                                                const today = new Date();
+                                                const birthDate = new Date(updatedDob);
+                                                if (!isNaN(birthDate.getTime())) {
+                                                    calculatedAge = today.getFullYear() - birthDate.getFullYear();
+                                                    const m = today.getMonth() - birthDate.getMonth();
+                                                    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                                                        calculatedAge--;
+                                                    }
+                                                }
+                                            } catch (e) {
+                                                console.error('Error calculating age:', e);
                                             }
                                         }
-                                    } catch (e) {
-                                        console.error('Error calculating age:', e);
-                                    }
-                                }
-                                
-                                const updatedStep2 = {
-                                    ...currentLead.formData?.step2,
-                                    pan: updatedPanNumber,
-                                    dob: updatedDob,
-                                    age: calculatedAge,
-                                    // Keep existing gender value
-                                    gender: currentLead.formData?.step2?.gender ?? currentLead.gender ?? '',
-                                };
-                                
-                                updateLead(currentLead.id, {
-                                    panNumber: updatedPanNumber,
-                                    dob: updatedDob,
-                                    age: calculatedAge,
-                                    // Keep existing gender value
-                                    gender: currentLead.gender ?? '',
-                                    formData: {
-                                        ...currentLead.formData,
-                                        step2: updatedStep2,
-                                    },
-                                });
 
-                                console.log('PAN Data populated successfully:', { 
-                                    panNumber, 
-                                    dateOfBirth,
-                                    updatedPanNumber,
-                                    updatedDob,
-                                    currentLeadBeforeUpdate: {
-                                        panNumber: currentLead.panNumber,
-                                        dob: currentLead.dob
+                                        const updatedStep2 = {
+                                            ...existingStep2,
+                                            hasPan: 'yes',
+                                            pan: panNumber || existingStep2.pan || '',
+                                            dob: updatedDob,
+                                            age: calculatedAge,
+                                        };
+
+                                        updateCoApplicant(currentLead.id, documentCoApplicantId, {
+                                            data: {
+                                                ...coApplicant.data,
+                                                step2: updatedStep2,
+                                            },
+                                        });
+
+                                        const coApplicantName = getApplicantName(
+                                            coApplicant?.data?.basicDetails?.firstName ?? coApplicant?.data?.step1?.firstName,
+                                            coApplicant?.data?.basicDetails?.lastName ?? coApplicant?.data?.step1?.lastName
+                                        );
+
+                                        toast({
+                                            title: 'Success',
+                                            description: `PAN document processed successfully for ${coApplicantName}.`,
+                                            className: 'bg-green-50 border-green-200',
+                                        });
                                     }
-                                });
-                                toast({
-                                    title: 'Success',
-                                    description: 'PAN document processed successfully. PAN Number and Date of Birth populated in Customer Details page.',
-                                    className: 'bg-green-50 border-green-200',
-                                });
+                                } else {
+                                    // Prepare update data - use extracted values if available, otherwise keep existing
+                                    const updatedPanNumber = panNumber || currentLead.panNumber || '';
+                                    const updatedDob = dateOfBirth || currentLead.dob || '';
+                                    
+                                    // Calculate age if DOB is available
+                                    let calculatedAge = currentLead.age || 0;
+                                    if (updatedDob) {
+                                        try {
+                                            const today = new Date();
+                                            const birthDate = new Date(updatedDob);
+                                            if (!isNaN(birthDate.getTime())) {
+                                                calculatedAge = today.getFullYear() - birthDate.getFullYear();
+                                                const m = today.getMonth() - birthDate.getMonth();
+                                                if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                                                    calculatedAge--;
+                                                }
+                                            }
+                                        } catch (e) {
+                                            console.error('Error calculating age:', e);
+                                        }
+                                    }
+                                    
+                                    const updatedStep2 = {
+                                        ...currentLead.formData?.step2,
+                                        pan: updatedPanNumber,
+                                        dob: updatedDob,
+                                        age: calculatedAge,
+                                        // Keep existing gender value
+                                        gender: currentLead.formData?.step2?.gender ?? currentLead.gender ?? '',
+                                    };
+                                    
+                                    updateLead(currentLead.id, {
+                                        panNumber: updatedPanNumber,
+                                        dob: updatedDob,
+                                        age: calculatedAge,
+                                        // Keep existing gender value
+                                        gender: currentLead.gender ?? '',
+                                        formData: {
+                                            ...currentLead.formData,
+                                            step2: updatedStep2,
+                                        },
+                                    });
+
+                                    console.log('PAN Data populated successfully:', { 
+                                        panNumber, 
+                                        dateOfBirth,
+                                        updatedPanNumber,
+                                        updatedDob,
+                                        currentLeadBeforeUpdate: {
+                                            panNumber: currentLead.panNumber,
+                                            dob: currentLead.dob
+                                        }
+                                    });
+                                    toast({
+                                        title: 'Success',
+                                        description: 'PAN document processed successfully. PAN Number and Date of Birth populated in Customer Details page.',
+                                        className: 'bg-green-50 border-green-200',
+                                    });
+                                }
                             }
                         } else {
                             console.log('No PAN data found in response:', { 
@@ -487,48 +682,99 @@ export default function Step8Page() {
                     }
                     
                     // Handle Aadhaar document - populate Address Details page with address data
-                    if (documentType === 'Adhaar' && parsedData.address_info) {
+                    if (baseDocType === 'Adhaar' && parsedData.address_info) {
                         // Try to get address from parsed_aadhaar_data or addresses array
                         const aadhaarAddress = parsedData.address_info.parsed_aadhaar_data || 
                                              parsedData.address_info.addresses?.[0];
                         
                         // Only populate if we have address data from backend
                         if (aadhaarAddress) {
+                            const aadhaarLandmark = (aadhaarAddress as Record<string, any>)?.landmark || '';
                             // Auto-populate Address Details page via LeadContext
                             if (currentLead) {
-                                const existingAddresses = currentLead.formData?.step3?.addresses || [];
-                                const updatedAddresses = existingAddresses.length > 0 
-                                    ? existingAddresses.map((addr: any, index: number) => 
-                                        index === 0 ? {
-                                            ...addr,
-                                            addressLine1: aadhaarAddress.address_line_1 || addr.addressLine1 || '',
-                                            addressLine2: aadhaarAddress.address_line_2 || addr.addressLine2 || '',
-                                            addressLine3: aadhaarAddress.address_line_3 || addr.addressLine3 || '',
-                                            postalCode: aadhaarAddress.pincode || addr.postalCode || '',
-                                        } : addr
-                                      )
-                                    : [{
-                                        id: Date.now().toString(),
-                                        addressType: 'residential',
-                                        addressLine1: aadhaarAddress.address_line_1 || '',
-                                        addressLine2: aadhaarAddress.address_line_2 || '',
-                                        addressLine3: aadhaarAddress.address_line_3 || '',
-                                        landmark: '',
-                                        postalCode: aadhaarAddress.pincode || '',
-                                    }];
-                                
-                                updateLead(currentLead.id, {
-                                    formData: {
-                                        ...currentLead.formData,
-                                        step3: { addresses: updatedAddresses },
-                                    },
-                                });
+                                if (docInfo?.applicantType === 'coapplicant' && documentCoApplicantId && updateCoApplicant) {
+                                    const coApplicants = currentLead.formData?.coApplicants || [];
+                                    const coApplicant = coApplicants.find((coApp: any) => coApp.id === documentCoApplicantId);
+                                    if (coApplicant) {
+                                        const existingAddresses = coApplicant.data?.step3?.addresses || [];
+                                        const updatedAddresses = existingAddresses.length > 0
+                                            ? existingAddresses.map((addr: any, index: number) =>
+                                                index === 0
+                                                    ? {
+                                                        ...addr,
+                                                        addressLine1: aadhaarAddress.address_line_1 || addr.addressLine1 || '',
+                                                        addressLine2: aadhaarAddress.address_line_2 || addr.addressLine2 || '',
+                                                        addressLine3: aadhaarAddress.address_line_3 || addr.addressLine3 || '',
+                                                        landmark: aadhaarLandmark || addr.landmark || '',
+                                                        postalCode: aadhaarAddress.pincode || addr.postalCode || '',
+                                                    }
+                                                    : addr
+                                            )
+                                            : [{
+                                                id: Date.now().toString(),
+                                                addressType: 'residential',
+                                                addressLine1: aadhaarAddress.address_line_1 || '',
+                                                addressLine2: aadhaarAddress.address_line_2 || '',
+                                                addressLine3: aadhaarAddress.address_line_3 || '',
+                                                landmark: aadhaarLandmark || '',
+                                                postalCode: aadhaarAddress.pincode || '',
+                                                isPrimary: true,
+                                            }];
 
-                                toast({
-                                    title: 'Success',
-                                    description: 'Aadhaar document processed successfully. Address populated in Address Details page.',
-                                    className: 'bg-green-50 border-green-200',
-                                });
+                                        updateCoApplicant(currentLead.id, documentCoApplicantId, {
+                                            data: {
+                                                ...coApplicant.data,
+                                                step3: { addresses: updatedAddresses },
+                                            },
+                                        });
+
+                                        const coApplicantName = getApplicantName(
+                                            coApplicant?.data?.basicDetails?.firstName ?? coApplicant?.data?.step1?.firstName,
+                                            coApplicant?.data?.basicDetails?.lastName ?? coApplicant?.data?.step1?.lastName
+                                        );
+
+                                        toast({
+                                            title: 'Success',
+                                            description: `Aadhaar document processed successfully for ${coApplicantName}.`,
+                                            className: 'bg-green-50 border-green-200',
+                                        });
+                                    }
+                                } else {
+                                    const existingAddresses = currentLead.formData?.step3?.addresses || [];
+                                    const updatedAddresses = existingAddresses.length > 0 
+                                        ? existingAddresses.map((addr: any, index: number) => 
+                                            index === 0 ? {
+                                                ...addr,
+                                                addressLine1: aadhaarAddress.address_line_1 || addr.addressLine1 || '',
+                                                addressLine2: aadhaarAddress.address_line_2 || addr.addressLine2 || '',
+                                                addressLine3: aadhaarAddress.address_line_3 || addr.addressLine3 || '',
+                                                landmark: aadhaarLandmark || addr.landmark || '',
+                                                postalCode: aadhaarAddress.pincode || addr.postalCode || '',
+                                            } : addr
+                                          )
+                                        : [{
+                                            id: Date.now().toString(),
+                                            addressType: 'residential',
+                                            addressLine1: aadhaarAddress.address_line_1 || '',
+                                            addressLine2: aadhaarAddress.address_line_2 || '',
+                                            addressLine3: aadhaarAddress.address_line_3 || '',
+                                            landmark: aadhaarLandmark,
+                                            postalCode: aadhaarAddress.pincode || '',
+                                        }];
+                                    
+                                    updateLead(currentLead.id, {
+                                        formData: {
+                                            ...currentLead.formData,
+                                            step3: { addresses: updatedAddresses },
+                                        },
+                                    });
+
+                                    toast({
+                                        title: 'Success',
+                                        description: 'Aadhaar document processed successfully. Address populated in Address Details page.',
+                                        className: 'bg-green-50 border-green-200',
+                                    });
+                                }
                             }
                         } else {
                             toast({
@@ -540,7 +786,7 @@ export default function Step8Page() {
                     }
                 } else {
                     // If detailed info fetch fails, still show success for upload but note parsing may be pending
-                    if (documentType === 'PAN' || documentType === 'Adhaar') {
+                    if (baseDocType === 'PAN' || baseDocType === 'Adhaar') {
                         toast({
                             title: 'Upload Successful',
                             description: 'Document uploaded successfully. Parsing in progress...',
@@ -609,6 +855,10 @@ export default function Step8Page() {
 
         const fileId = Date.now().toString();
         const isPdf = fileExtension === 'pdf';
+        const ownerType = selectedDocument.applicantType;
+        const ownerId = selectedDocument.coApplicantId;
+        const documentLabel = selectedDocument.label || file.name;
+        const { baseValue: baseDocType } = parseDocumentValue(documentType);
 
         // Create preview URL for images
         const reader = new FileReader();
@@ -621,28 +871,30 @@ export default function Step8Page() {
                 type: documentType,
                 status: 'Processing',
                 previewUrl: isPdf ? undefined : previewUrl,
-                fileType: isPdf ? 'pdf' : 'image'
+                fileType: isPdf ? 'pdf' : 'image',
+                ownerType,
+                ownerId,
+                label: documentLabel
             };
 
-            // If PAN or Aadhaar, delete old failed entries of the same type
-            if (documentType === 'PAN' || documentType === 'Adhaar') {
+            setOpenSections((sections) => ({
+                ...sections,
+                ...(ownerType === 'main' ? { applicant: true } : {}),
+                ...(ownerType === 'coapplicant' && ownerId ? { [`coapplicant-${ownerId}`]: true } : {}),
+                ...(ownerType === 'collateral' ? { collateral: true } : {})
+            }));
+
+            if (baseDocType === 'PAN' || baseDocType === 'Adhaar') {
                 setUploadedFiles((prev) => {
-                    // Remove failed entries of the same document type
-                    const filteredFiles = prev.filter((f) => 
+                    const filteredFiles = prev.filter((f) =>
                         !(f.type === documentType && f.status === 'Failed')
                     );
-                    // Keep applicant section open when adding new files
-                    setOpenSections((sections) => ({ ...sections, applicant: true }));
                     return [...filteredFiles, newFile];
                 });
             } else {
-                setUploadedFiles((prev) => {
-                    // Keep applicant section open when adding new files
-                    setOpenSections((sections) => ({ ...sections, applicant: true }));
-                    return [...prev, newFile];
-                });
+                setUploadedFiles((prev) => [...prev, newFile]);
             }
-            toast({ title: 'Processing', description: `Uploading ${file.name}...` });
+            toast({ title: 'Processing', description: `Uploading ${documentLabel}...` });
 
             // Upload document via API
             const uploadResult = await handleDocumentUpload(file, documentType, fileId);
@@ -677,8 +929,7 @@ export default function Step8Page() {
                 return updatedFiles;
             });
             
-            // Success toasts for PAN/Aadhaar are handled in handleDocumentUpload
-            // For other documents, success toast is also handled in handleDocumentUpload
+            // Success toasts for PAN/Aadhaar/co-applicant collateral are handled in handleDocumentUpload
         };
         
         if (isPdf) {
@@ -920,7 +1171,11 @@ export default function Step8Page() {
                 return;
             }
 
-            const fileName = documentType === 'PAN' ? 'pan.jpg' : documentType === 'Adhaar' ? 'aadhaar.jpg' : `capture_${fileId}.jpg`;
+            const { baseValue: baseDocType } = parseDocumentValue(documentType);
+            const fileName = baseDocType === 'PAN' ? 'pan.jpg' : baseDocType === 'Adhaar' ? 'aadhaar.jpg' : `capture_${fileId}.jpg`;
+            const ownerType = selectedDocument.applicantType;
+            const ownerId = selectedDocument.coApplicantId;
+            const documentLabel = selectedDocument.label || fileName;
             
             // Convert dataUrl to File
             const capturedFile = dataURLtoFile(dataUrl, fileName);
@@ -932,26 +1187,35 @@ export default function Step8Page() {
                 type: documentType,
                 status: 'Processing',
                 previewUrl: dataUrl,
-                fileType: 'image'
+                fileType: 'image',
+                ownerType,
+                ownerId,
+                label: documentLabel
             };
             
             // If PAN or Aadhaar, delete old failed entries of the same type
-            if (documentType === 'PAN' || documentType === 'Adhaar') {
+            if (ownerType === 'main') {
+                setOpenSections((sections) => ({ ...sections, applicant: true }));
+            } else if (ownerType === 'coapplicant' && ownerId) {
+                setOpenSections((sections) => ({ ...sections, [`coapplicant-${ownerId}`]: true }));
+            } else if (ownerType === 'collateral') {
+                setOpenSections((sections) => ({ ...sections, collateral: true }));
+            }
+
+            if (baseDocType === 'PAN' || baseDocType === 'Adhaar') {
                 setUploadedFiles((prev) => {
                     const filteredFiles = prev.filter((f) => 
                         !(f.type === documentType && f.status === 'Failed')
                     );
-                    setOpenSections((sections) => ({ ...sections, applicant: true }));
                     return [...filteredFiles, newFile];
                 });
             } else {
                 setUploadedFiles((prev) => {
-                    setOpenSections((sections) => ({ ...sections, applicant: true }));
                     return [...prev, newFile];
                 });
             }
             
-            toast({ title: 'Processing', description: `Uploading captured image...` });
+            toast({ title: 'Processing', description: `Uploading ${documentLabel}...` });
 
             // Upload document via API (same flow as file upload)
             const uploadResult = await handleDocumentUpload(capturedFile, documentType, fileId);
@@ -988,7 +1252,7 @@ export default function Step8Page() {
             
             // Success toasts for PAN/Aadhaar are handled in handleDocumentUpload
             // For other documents, show success toast
-            if (isSuccess && !(documentType === 'PAN' || documentType === 'Adhaar')) {
+            if (isSuccess && !(baseDocType === 'PAN' || baseDocType === 'Adhaar')) {
                 toast({
                     title: 'Success',
                     description: 'Image captured and uploaded successfully',
@@ -1080,6 +1344,10 @@ export default function Step8Page() {
             return;
         }
 
+        const ownerType = selectedDocument?.applicantType ?? 'main';
+        const ownerId = selectedDocument?.coApplicantId;
+        const documentLabel = selectedDocument?.label || documentType;
+
         const newFile: UploadedFile = {
             id: fileId,
             name: `${documentType}_combined`,
@@ -1089,11 +1357,21 @@ export default function Step8Page() {
             backName: backFile.name,
             frontPreviewUrl: frontFile.dataUrl,
             backPreviewUrl: backFile.dataUrl,
-            fileType: 'image'
+            fileType: 'image',
+            ownerType,
+            ownerId,
+            label: documentLabel
         };
 
+        setOpenSections((sections) => ({
+            ...sections,
+            ...(ownerType === 'main' ? { applicant: true } : {}),
+            ...(ownerType === 'coapplicant' && ownerId ? { [`coapplicant-${ownerId}`]: true } : {}),
+            ...(ownerType === 'collateral' ? { collateral: true } : {})
+        }));
+
         setUploadedFiles((prev) => [...prev, newFile]);
-        toast({ title: 'Processing', description: 'Uploading documents...' });
+        toast({ title: 'Processing', description: `Uploading ${documentLabel}...` });
 
         try {
             // Upload document via API with both front and back files
@@ -1313,7 +1591,7 @@ export default function Step8Page() {
                                 <Upload className="w-6 h-6 text-blue-600 mr-2" />
                                 <span className="text-sm font-medium">Select from Files</span>
                             </Button>
-                            {selectedDocument?.fileTypes.length > 0 && (
+                            {selectedDocument?.fileTypes && selectedDocument.fileTypes.length > 0 && (
                                 <div className="text-xs text-gray-600 mt-2">
                                     <p className="font-medium">Accepted file types:</p>
                                     <p>{selectedDocument.fileTypes.map((type: string) => 
@@ -1330,6 +1608,30 @@ export default function Step8Page() {
                         <h2 className="text-xl font-semibold text-gray-900 mb-6">KYC & Other Documents</h2>
 
                         <div className="space-y-4">
+                            <div>
+                                <Label htmlFor="entitySelect">Whose document are you uploading?</Label>
+                                <Select
+                                    value={selectedEntity}
+                                    onValueChange={(value) => {
+                                        setSelectedEntity(value);
+                                        setDocumentType('');
+                                        setFrontFile(null);
+                                        setBackFile(null);
+                                        setUploadError('');
+                                    }}
+                                >
+                                    <SelectTrigger id="entitySelect" className="h-12">
+                                        <SelectValue placeholder="Select applicant / co-applicant..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {entityOptions.map((option) => (
+                                            <SelectItem key={option.value} value={option.value}>
+                                                {option.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             <div>
                                 <Label htmlFor="documentType">Select Document Type</Label>
                                 <Select value={documentType} onValueChange={(value) => {
@@ -1517,7 +1819,7 @@ export default function Step8Page() {
                                     <h3 className="font-semibold text-gray-900 my-4">Uploaded Documents</h3>
                                     {(() => {
                                         const coApplicants = currentLead?.formData?.coApplicants || [];
-                                        const { applicantDocs, coApplicantDocsMap } = categorizeUploadedFiles(uploadedFiles, availableDocuments, coApplicants);
+                                        const { applicantDocs, coApplicantDocsMap, collateralDocs } = categorizeUploadedFiles(uploadedFiles, availableDocuments, coApplicants);
                                         
                                         const renderDocumentCard = (file: UploadedFile) => (
                                             <Card key={file.id} className={cn(
@@ -1645,6 +1947,33 @@ export default function Step8Page() {
                                                         </Collapsible>
                                                     );
                                                 })}
+
+                                                {/* Collateral Documents */}
+                                                {collateralDocs.length > 0 && (
+                                                    <Collapsible
+                                                        open={openSections['collateral']}
+                                                        onOpenChange={(open) => setOpenSections(prev => ({ ...prev, collateral: open }))}
+                                                    >
+                                                        <Card className="border-purple-200">
+                                                        <CollapsibleTrigger className="w-full">
+                                                            <CardContent className="p-4">
+                                                                <div className="flex items-center justify-between">
+                                                                    <h4 className="text-sm font-semibold text-gray-800 flex items-center">
+                                                                        <Home className="w-4 h-4 mr-2 text-purple-600" />
+                                                                        Collateral Documents ({collateralDocs.length})
+                                                                    </h4>
+                                                                    <ChevronDown className={cn("w-5 h-5 text-gray-500 transition-transform", openSections['collateral'] && "rotate-180")} />
+                                                                </div>
+                                                            </CardContent>
+                                                        </CollapsibleTrigger>
+                                                        <CollapsibleContent>
+                                                            <CardContent className="px-4 pb-4 pt-0 space-y-2">
+                                                                {collateralDocs.map(renderDocumentCard)}
+                                                            </CardContent>
+                                                        </CollapsibleContent>
+                                                        </Card>
+                                                    </Collapsible>
+                                                )}
 
                                             </div>
                                         );

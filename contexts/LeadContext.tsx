@@ -33,7 +33,7 @@ export interface PaymentSession {
 export interface CoApplicant {
     id: string;
     relationship: string;
-    currentStep: 1 | 2 | 3 | 4;
+    currentStep: 0 | 1 | 2 | 3 | 4;
     isComplete: boolean;
     data: any;
 }
@@ -113,20 +113,6 @@ const LeadContext = createContext<LeadContextType | undefined>(undefined);
 
 const DEFAULT_SUMMARY_STATS: LeadSummaryStats = { total: 0, draft: 0, completed: 0 };
 
-const STEP_NAME_TO_INDEX: Record<string, number> = {
-  new_lead: 1,
-  consent_mobile: 1,
-  personal_info: 2,
-  address_details: 3,
-  employment_info: 4,
-  collateral_details: 5,
-  loan_details: 6,
-  document_upload: 7,
-  documents: 7,
-  review: 8,
-  summary: 9,
-};
-
 function composeCustomerName(first?: string | null, last?: string | null, fallback?: string) {
   const parts = [first, last].filter(Boolean) as string[];
   const full = parts.join(' ').trim();
@@ -173,12 +159,6 @@ function mapWorkflowStatusToLeadStatus(status?: string | null): LeadStatus {
     default:
       return 'Draft';
   }
-}
-
-function mapApiStepToNumber(step?: string | null): number {
-  if (!step) return 1;
-  const normalized = step.toLowerCase();
-  return STEP_NAME_TO_INDEX[normalized] ?? 1;
 }
 
 function mapSummaryItemToLead(item: ApplicationSummaryItem): Lead {
@@ -266,12 +246,13 @@ function mergeLeadData(base: Lead, updates: Partial<Lead>): Lead {
 function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Lead {
   const workflowStatus = detail.workflow_state?.status ?? detail.workflow_status;
   const status = mapWorkflowStatusToLeadStatus(workflowStatus);
-  const stepName = detail.workflow_state?.current_step ?? detail.current_step;
-  const currentStep = mapApiStepToNumber(stepName);
+  const currentStep = baseLead.currentStep ?? 1;
 
   const newLeadData = detail.new_lead_data;
   const personalInfo = detail.personal_info;
+  const personalInfoAny = personalInfo as any;
   const addressInfo = detail.address_info;
+  const addressInfoAny = addressInfo as any;
   const stepData = detail.workflow_state?.step_data ?? {};
 
   const firstName = newLeadData?.first_name ?? baseLead.customerFirstName ?? '';
@@ -287,18 +268,21 @@ function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Le
   const coApplicantsData: any = (stepData as any).co_applicant_details;
 
   const addresses =
-    addressInfo?.addresses?.map((addr, index) => ({
-      id: `${detail.application_id}-address-${index}`,
-      addressType: addr.address_type ?? '',
-      addressLine1: addr.address_line_1 ?? '',
-      addressLine2: addr.address_line_2 ?? '',
-      addressLine3: addr.address_line_3 ?? '',
-      cityId: addr.city_id,
-      postalCode: addr.pincode ?? '',
-      isPrimary: addr.is_primary ?? false,
-      latitude: addr.latitude,
-      longitude: addr.longitude,
-    })) ?? baseLead.formData.step3?.addresses;
+    addressInfo?.addresses?.map((addr, index) => {
+      const addrAny = addr as any;
+      return {
+        id: `${detail.application_id}-address-${index}`,
+        addressType: addr.address_type ?? '',
+        addressLine1: addr.address_line_1 ?? '',
+        addressLine2: addr.address_line_2 ?? '',
+        addressLine3: addr.address_line_3 ?? '',
+        cityId: addrAny?.city_id,
+        postalCode: addr.pincode ?? '',
+        isPrimary: addrAny?.is_primary ?? false,
+        latitude: addrAny?.latitude,
+        longitude: addrAny?.longitude,
+      };
+    }) ?? baseLead.formData.step3?.addresses;
 
   const coApplicants =
     Array.isArray(coApplicantsData?.coApplicants) && coApplicantsData?.coApplicants.length > 0
@@ -311,10 +295,10 @@ function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Le
   const updatedAt = pickLatestTimestamp(
     [
       newLeadData?.created_at,
-      personalInfo?.submitted_at,
-      addressInfo?.submitted_at,
-      loanDetails?.submitted_at,
-      collateralDetails?.submitted_at,
+      personalInfoAny?.submitted_at,
+      addressInfoAny?.submitted_at,
+      (loanDetails as any)?.submitted_at,
+      (collateralDetails as any)?.submitted_at,
     ],
     baseLead.updatedAt
   );
@@ -360,8 +344,8 @@ function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Le
             date_of_birth: personalInfo.date_of_birth ?? baseLead.formData.step2?.date_of_birth,
             dob: personalInfo.date_of_birth ?? baseLead.formData.step2?.dob,
             gender: personalInfo.gender ?? baseLead.formData.step2?.gender,
-            alternateIdType: personalInfo.alternate_id_type ?? baseLead.formData.step2?.alternateIdType,
-            documentNumber: personalInfo.alternate_id_number ?? baseLead.formData.step2?.documentNumber,
+            alternateIdType: personalInfoAny?.alternate_id_type ?? baseLead.formData.step2?.alternateIdType,
+            documentNumber: personalInfoAny?.alternate_id_number ?? baseLead.formData.step2?.documentNumber,
           }
         : baseLead.formData.step2,
       step3: addresses
@@ -486,7 +470,25 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
         }
 
         const base = existing ?? createLeadSkeleton(identifier);
-        const detailedLead = mapDetailedInfoToLead(base, response);
+        if (!response.data) {
+          setLeads(prevLeads => {
+            const index = prevLeads.findIndex(lead => (lead.appId || lead.id) === base.appId);
+            if (index >= 0) {
+              const updated = [...prevLeads];
+              updated[index] = base;
+              return updated;
+            }
+            return [...prevLeads, base];
+          });
+
+          if (currentLead && (currentLead.appId === base.appId || currentLead.id === base.id)) {
+            setCurrentLead(base);
+          }
+
+          return base;
+        }
+
+        const detailedLead = mapDetailedInfoToLead(base, response.data);
 
         setLeads(prevLeads => {
           const index = prevLeads.findIndex(lead => (lead.appId || lead.id) === detailedLead.appId);
@@ -647,7 +649,7 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
       const newCoApplicant: CoApplicant = {
           id: Date.now().toString(),
           relationship,
-          currentStep: 1,
+          currentStep: 0,
           isComplete: false,
       data: {},
     };

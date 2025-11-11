@@ -172,7 +172,11 @@ export default function LeadsDashboardPage() {
       }
 
       if (action === 'edit') {
-        router.push('/lead');
+        if (fullLead.status === 'Draft') {
+          router.push('/lead/new-lead-info');
+        } else {
+          router.push('/lead/new-lead-info');
+        }
       }
     } catch (err: any) {
       setDetailError(err?.message || 'Unable to load application details.');
