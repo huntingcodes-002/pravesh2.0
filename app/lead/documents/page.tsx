@@ -857,7 +857,7 @@ export default function Step8Page() {
                                 const updatedStep2 = genderValue
                                     ? {
                                         ...existingStep2,
-                                        gender: genderValue,
+                                        gender: genderValue!,
                                         autoFilledViaAadhaar: true,
                                         autoPopulatedFromSummary: (summaryGenderNormalized ? true : existingStep2.autoPopulatedFromSummary) || false,
                                     }

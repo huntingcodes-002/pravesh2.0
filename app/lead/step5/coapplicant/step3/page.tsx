@@ -45,9 +45,6 @@ function CoApplicantStep3PageContent() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentLead, coApplicantId]);
-  
-  if (!coApplicant) return null; // Should be handled by useEffect redirect
-
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
 
@@ -173,6 +170,10 @@ function CoApplicantStep3PageContent() {
   );
   
   const progressBarText = 'Co-Applicant Details';
+
+  if (!coApplicant) {
+    return null;
+  }
 
   return (
     <DashboardLayout

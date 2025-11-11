@@ -534,7 +534,7 @@ export default function ApplicantDetailsPage() {
                   )}
                   {panValidationStatus === 'invalid' && !panFormatError && (
                     <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                      <X className="w-4 h-4" /> PAN doesn't exist
+                      <X className="w-4 h-4" /> PAN doesn&apos;t exist
                     </p>
                   )}
                   {panValidationStatus === 'mismatch' && !panFormatError && (

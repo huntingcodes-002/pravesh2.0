@@ -36,9 +36,6 @@ function CoApplicantStep4PageContent() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentLead, coApplicantId]);
-  
-  if (!coApplicant) return null; // Should be handled by useEffect redirect
-
   const [formData, setFormData] = useState({
     occupationType: coApplicantData.occupationType || '',
     // Others
@@ -87,7 +84,7 @@ function CoApplicantStep4PageContent() {
   };
 
   const handleNext = () => {
-    if (!currentLead || !coApplicantId) return;
+    if (!currentLead || !coApplicantId || !coApplicant) return;
     
     // Final save and mark as complete
     updateCoApplicant(currentLead.id, coApplicantId, {
@@ -101,7 +98,7 @@ function CoApplicantStep4PageContent() {
     
     toast({
         title: 'Co-Applicant Added',
-        description: `${coApplicant.data.step1.firstName} ${coApplicant.data.step1.lastName} added successfully.`,
+        description: `${coApplicant.data.step1.firstName ?? ''} ${coApplicant.data.step1.lastName ?? ''} added successfully.`,
         className: 'bg-green-100 border-green-200'
     });
 
@@ -142,6 +139,10 @@ function CoApplicantStep4PageContent() {
   
   const progressBarText = 'Co-Applicant Details';
 
+
+  if (!coApplicant) {
+    return null;
+  }
 
   return (
     <DashboardLayout

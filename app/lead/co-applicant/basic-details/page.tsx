@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, CoApplicant } from '@/contexts/LeadContext';
@@ -20,7 +20,7 @@ type ValidationStatus = 'pending' | 'valid' | 'invalid';
 
 const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 
-export default function CoApplicantBasicDetailsPage() {
+function CoApplicantBasicDetailsContent() {
   const { currentLead, updateCoApplicant } = useLead();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -648,6 +648,14 @@ export default function CoApplicantBasicDetailsPage() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+export default function CoApplicantBasicDetailsPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Loading...</div>}>
+      <CoApplicantBasicDetailsContent />
+    </Suspense>
   );
 }
 

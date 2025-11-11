@@ -159,8 +159,6 @@ function CoApplicantStep2PageContent() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentLead, coApplicantId]);
 
-    if (!coApplicant) return null; // Should be handled by useEffect redirect
-
     const [formData, setFormData] = useState({
         customerType: coApplicantData.customerType || 'individual',
         hasPan: coApplicantData.hasPan || 'yes',
@@ -486,7 +484,7 @@ function CoApplicantStep2PageContent() {
                                     )}
                                     {panValidationStatus === 'invalid' && !panFormatError && (
                                         <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                                            <X className="w-4 h-4" /> PAN doesn't exist
+                                            <X className="w-4 h-4" /> PAN doesn&apos;t exist
                                         </p>
                                     )}
                                     {panValidationStatus === 'mismatch' && !panFormatError && (

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, CoApplicant } from '@/contexts/LeadContext';
@@ -34,7 +34,7 @@ const createEmptyAddress = (): Address => ({
   isPrimary: false,
 });
 
-export default function CoApplicantAddressDetailsPage() {
+function CoApplicantAddressDetailsPageContent() {
   const { currentLead, updateCoApplicant } = useLead();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -329,6 +329,14 @@ export default function CoApplicantAddressDetailsPage() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+export default function CoApplicantAddressDetailsPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Loading...</div>}>
+      <CoApplicantAddressDetailsPageContent />
+    </Suspense>
   );
 }
 

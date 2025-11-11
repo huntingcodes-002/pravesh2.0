@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, CoApplicant } from '@/contexts/LeadContext';
@@ -85,7 +85,7 @@ const deriveNameParts = (fullName: string) => {
   return { firstName, lastName };
 };
 
-export default function CoApplicantNewPage() {
+function CoApplicantNewPageContent() {
   const { currentLead, updateCoApplicant } = useLead();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -710,6 +710,14 @@ export default function CoApplicantNewPage() {
         </DialogContent>
       </Dialog>
     </DashboardLayout>
+  );
+}
+
+export default function CoApplicantNewPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Loading...</div>}>
+      <CoApplicantNewPageContent />
+    </Suspense>
   );
 }
 
