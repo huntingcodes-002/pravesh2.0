@@ -239,6 +239,10 @@ export default function NewLeadInfoPage() {
     router.push('/lead/documents');
   };
 
+  const handleGeneratePaymentLink = () => {
+    router.push('/payments');
+  };
+
   const handleSubmit = () => {
     if (!currentLead) return;
     
@@ -375,6 +379,24 @@ export default function NewLeadInfoPage() {
               Add a Document
             </Button>
           </div>
+
+          {/* Payment Details Card */}
+          <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Payment Details</h3>
+                <Badge className="rounded-full bg-yellow-100 text-yellow-700 border border-yellow-200 text-xs font-medium px-3 py-1">
+                  Pending
+                </Badge>
+              </div>
+              <Button
+                onClick={handleGeneratePaymentLink}
+                className="w-full h-12 rounded-xl bg-[#0B63F6] hover:bg-[#0954d4] text-white font-semibold transition-colors"
+              >
+                Generate Payment Link
+              </Button>
+            </CardContent>
+          </Card>
 
           {/* Applicant Details Card */}
           <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">

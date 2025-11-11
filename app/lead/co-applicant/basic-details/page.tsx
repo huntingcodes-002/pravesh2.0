@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { MaskedDateInput } from '@/components/MaskedDateInput';
+import { submitCoApplicantPersonalInfo, isApiError, type CoApplicantPersonalInfoResponse } from '@/lib/api';
 
 type ValidationStatus = 'pending' | 'valid' | 'invalid';
 
@@ -52,6 +53,16 @@ export default function CoApplicantBasicDetailsPage() {
   );
   const [panValidationStatus, setPanValidationStatus] = useState<ValidationStatus>('pending');
   const [panFormatError, setPanFormatError] = useState('');
+  const [isValidatingPan, setIsValidatingPan] = useState(false);
+  const [isValidated, setIsValidated] = useState(
+    coApplicant?.data?.basicDetails?.panValidated === true
+  );
+
+  useEffect(() => {
+    setIsValidated(coApplicant?.data?.basicDetails?.panValidated === true);
+  }, [coApplicant?.data?.basicDetails?.panValidated]);
+
+  const isReadOnly = isValidated && formData.hasPan === 'yes';
 
   useEffect(() => {
     if (!currentLead || !coApplicant || !coApplicantId) {
@@ -60,6 +71,7 @@ export default function CoApplicantBasicDetailsPage() {
   }, [currentLead, coApplicant, coApplicantId, router]);
 
   const handleDobChange = (value: string) => {
+    if (isReadOnly) return;
     setDobFormatted(value);
     if (value.length === 10) {
       const [day, month, year] = value.split('/');
@@ -101,12 +113,29 @@ export default function CoApplicantBasicDetailsPage() {
     }
   }, [formData.hasPan, formData.pan, formData.maritalStatus]);
 
+  useEffect(() => {
+    if (isReadOnly) return;
+    if (formData.hasPan === 'yes') {
+      setIsValidated(false);
+    }
+  }, [formData.hasPan, formData.pan, formData.dob, formData.gender, formData.maritalStatus, isReadOnly]);
+
+  const coApplicantIndex = coApplicant?.workflowIndex;
+
+  const canValidatePan =
+    formData.hasPan === 'yes' &&
+    !!currentLead?.appId &&
+    typeof coApplicantIndex === 'number' &&
+    panValidationStatus === 'valid' &&
+    formData.dob &&
+    formData.gender &&
+    formData.maritalStatus &&
+    !isValidatingPan &&
+    !isReadOnly;
+
   const canSave =
     (formData.hasPan === 'yes' &&
-      panValidationStatus === 'valid' &&
-      formData.dob &&
-      formData.gender &&
-      formData.maritalStatus) ||
+      isValidated) ||
     (formData.hasPan === 'no' &&
       formData.panUnavailabilityReason &&
       formData.alternateIdType &&
@@ -114,6 +143,107 @@ export default function CoApplicantBasicDetailsPage() {
       formData.dob &&
       formData.gender &&
       formData.maritalStatus);
+
+  const handleValidatePan = async () => {
+    if (!coApplicantId) {
+      toast({
+        title: 'Co-applicant Missing',
+        description: 'Unable to find this co-applicant. Please start again from the list.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!coApplicant) {
+      toast({
+        title: 'Co-applicant Missing',
+        description: 'Unable to locate this co-applicant record. Please return to the previous step.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!currentLead?.appId || typeof coApplicantIndex !== 'number') {
+      toast({
+        title: 'Setup Incomplete',
+        description: 'Unable to validate PAN because workflow information is missing.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!formData.dob || formData.pan.length !== 10) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill PAN and Date of Birth before validating.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsValidatingPan(true);
+    try {
+      const response = await submitCoApplicantPersonalInfo({
+        application_id: currentLead.appId,
+        co_applicant_index: coApplicantIndex,
+        customer_type: 'individual',
+        pan_number: formData.pan,
+        date_of_birth: formData.dob,
+        gender: formData.gender,
+        email: formData.email || undefined,
+      });
+
+      if (isApiError(response)) {
+        const message = response.error || 'PAN validation failed.';
+        toast({
+          title: 'Validation Failed',
+          description: message,
+          variant: 'destructive',
+        });
+        setIsValidated(false);
+        return;
+      }
+
+      const responseData = response as CoApplicantPersonalInfoResponse;
+      if (responseData.success === false) {
+        toast({
+          title: 'Validation Failed',
+          description: responseData.message || 'PAN validation failed.',
+          variant: 'destructive',
+        });
+        setIsValidated(false);
+        return;
+      }
+
+      setIsValidated(true);
+      const existingBasic = coApplicant?.data?.basicDetails ?? {};
+      updateCoApplicant(currentLead.id, coApplicantId, {
+        relationship: coApplicant?.relationship,
+        data: {
+          basicDetails: {
+            ...existingBasic,
+            ...formData,
+            isMobileVerified: existingBasic?.isMobileVerified,
+            panValidated: true,
+          },
+        },
+      });
+      toast({
+        title: 'PAN Validated',
+        description: responseData.message || 'Co-applicant PAN validated successfully.',
+        className: 'bg-green-50 border-green-200',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Validation Failed',
+        description: error?.message || 'PAN validation failed. Please try again.',
+        variant: 'destructive',
+      });
+      setIsValidated(false);
+    } finally {
+      setIsValidatingPan(false);
+    }
+  };
 
   const handleSave = () => {
     if (!currentLead || !coApplicantId) return;
@@ -134,6 +264,7 @@ export default function CoApplicantBasicDetailsPage() {
           ...(coApplicant?.data?.basicDetails ?? {}),
           ...formData,
           isMobileVerified: coApplicant?.data?.basicDetails?.isMobileVerified,
+          panValidated: formData.hasPan === 'yes' ? isValidated : false,
         },
       },
     });
@@ -180,7 +311,8 @@ export default function CoApplicantBasicDetailsPage() {
             <RadioGroup
               className="flex gap-4"
               value={formData.hasPan}
-              onValueChange={value =>
+              onValueChange={value => {
+                if (isReadOnly) return;
                 setFormData(prev => ({
                   ...prev,
                   hasPan: value,
@@ -189,18 +321,24 @@ export default function CoApplicantBasicDetailsPage() {
                   panUnavailabilityReason: '',
                   alternateIdType: '',
                   documentNumber: '',
-                }))
-              }
+                }));
+              }}
             >
               <div className="flex items-center space-x-2">
-                <RadioGroupItem id="pan-yes" value="yes" />
-                <Label htmlFor="pan-yes" className="font-normal">
+                <RadioGroupItem id="pan-yes" value="yes" disabled={isReadOnly} />
+                <Label
+                  htmlFor="pan-yes"
+                  className={cn('font-normal', isReadOnly && 'opacity-60 cursor-not-allowed')}
+                >
                   Yes
                 </Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem id="pan-no" value="no" />
-                <Label htmlFor="pan-no" className="font-normal">
+                <RadioGroupItem id="pan-no" value="no" disabled={isReadOnly} />
+                <Label
+                  htmlFor="pan-no"
+                  className={cn('font-normal', isReadOnly && 'opacity-60 cursor-not-allowed')}
+                >
                   No
                 </Label>
               </div>
@@ -218,8 +356,16 @@ export default function CoApplicantBasicDetailsPage() {
                   value={formData.pan}
                   maxLength={10}
                   placeholder="ABCDE1234F"
-                  className={cn('h-12 uppercase tracking-wide', panValidationStatus === 'invalid' && 'border-red-500')}
-                  onChange={e => setFormData(prev => ({ ...prev, pan: e.target.value.toUpperCase() }))}
+                  className={cn(
+                    'h-12 uppercase tracking-wide',
+                    panValidationStatus === 'invalid' && 'border-red-500',
+                    isReadOnly && 'bg-gray-100 cursor-not-allowed text-gray-600'
+                  )}
+                  disabled={isReadOnly}
+                  onChange={e => {
+                    if (isReadOnly) return;
+                    setFormData(prev => ({ ...prev, pan: e.target.value.toUpperCase() }));
+                  }}
                 />
                 {panFormatError && <p className="text-xs text-red-600 mt-1">{panFormatError}</p>}
               </div>
@@ -234,9 +380,18 @@ export default function CoApplicantBasicDetailsPage() {
                 </Label>
                 <Select
                   value={formData.panUnavailabilityReason}
-                  onValueChange={value => setFormData(prev => ({ ...prev, panUnavailabilityReason: value }))}
+                  disabled={isReadOnly}
+                  onValueChange={value => {
+                    if (isReadOnly) return;
+                    setFormData(prev => ({ ...prev, panUnavailabilityReason: value }));
+                  }}
                 >
-                  <SelectTrigger className="h-12 rounded-xl">
+                  <SelectTrigger
+                    className={cn(
+                      'h-12 rounded-xl',
+                      isReadOnly && 'bg-gray-100 cursor-not-allowed text-gray-600'
+                    )}
+                  >
                     <SelectValue placeholder="Select reason" />
                   </SelectTrigger>
                   <SelectContent>
@@ -253,9 +408,13 @@ export default function CoApplicantBasicDetailsPage() {
                   <Label className="text-sm font-medium text-[#003366] mb-2 block">Notes</Label>
                   <Textarea
                     value={formData.panUnavailabilityNotes}
-                    onChange={e => setFormData(prev => ({ ...prev, panUnavailabilityNotes: e.target.value }))}
+                    onChange={e => {
+                      if (isReadOnly) return;
+                      setFormData(prev => ({ ...prev, panUnavailabilityNotes: e.target.value }));
+                    }}
                     placeholder="Please provide additional details..."
-                    className="rounded-xl"
+                    className={cn('rounded-xl', isReadOnly && 'bg-gray-100 cursor-not-allowed text-gray-600')}
+                    disabled={isReadOnly}
                   />
                 </div>
               )}
@@ -266,9 +425,18 @@ export default function CoApplicantBasicDetailsPage() {
                 </Label>
                 <Select
                   value={formData.alternateIdType}
-                  onValueChange={value => setFormData(prev => ({ ...prev, alternateIdType: value }))}
+                  disabled={isReadOnly}
+                  onValueChange={value => {
+                    if (isReadOnly) return;
+                    setFormData(prev => ({ ...prev, alternateIdType: value }));
+                  }}
                 >
-                  <SelectTrigger className="h-12 rounded-xl">
+                  <SelectTrigger
+                    className={cn(
+                      'h-12 rounded-xl',
+                      isReadOnly && 'bg-gray-100 cursor-not-allowed text-gray-600'
+                    )}
+                  >
                     <SelectValue placeholder="Select ID Type" />
                   </SelectTrigger>
                   <SelectContent>
@@ -285,9 +453,13 @@ export default function CoApplicantBasicDetailsPage() {
                 </Label>
                 <Input
                   value={formData.documentNumber}
-                  onChange={e => setFormData(prev => ({ ...prev, documentNumber: e.target.value }))}
+                  disabled={isReadOnly}
+                  onChange={e => {
+                    if (isReadOnly) return;
+                    setFormData(prev => ({ ...prev, documentNumber: e.target.value }));
+                  }}
                   placeholder="Enter document number"
-                  className="h-12 rounded-xl"
+                  className={cn('h-12 rounded-xl', isReadOnly && 'bg-gray-100 cursor-not-allowed text-gray-600')}
                 />
               </div>
             </div>
@@ -303,7 +475,11 @@ export default function CoApplicantBasicDetailsPage() {
                 value={dobFormatted}
                 onChange={handleDobChange}
                 placeholder="DD/MM/YYYY"
-                className="h-12 rounded-xl"
+                disabled={isReadOnly}
+                className={cn(
+                  'h-12 rounded-xl',
+                  isReadOnly && 'bg-gray-100 cursor-not-allowed text-gray-600'
+                )}
               />
               {formData.age > 0 && (
                 <div className="mt-3">
@@ -316,47 +492,61 @@ export default function CoApplicantBasicDetailsPage() {
               <Label className="block text-sm font-medium text-[#003366] mb-3">Gender <span className="text-[#DC2626]">*</span></Label>
               <RadioGroup
                 value={formData.gender}
-                onValueChange={value => setFormData(prev => ({ ...prev, gender: value }))}
+                onValueChange={value => {
+                  if (isReadOnly) return;
+                  setFormData(prev => ({ ...prev, gender: value }));
+                }}
                 className="grid grid-cols-2 gap-2"
               >
                 <Label
                   htmlFor="gender-male"
                   className={cn(
                     'flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer',
-                    formData.gender === 'male' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300'
+                    formData.gender === 'male' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300',
+                    isReadOnly && 'opacity-60 cursor-not-allowed'
                   )}
                 >
-                  <RadioGroupItem value="male" id="gender-male" className="sr-only" />
+                  <RadioGroupItem value="male" id="gender-male" className="sr-only" disabled={isReadOnly} />
                   Male
                 </Label>
                 <Label
                   htmlFor="gender-female"
                   className={cn(
                     'flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer',
-                    formData.gender === 'female' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300'
+                    formData.gender === 'female' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300',
+                    isReadOnly && 'opacity-60 cursor-not-allowed'
                   )}
                 >
-                  <RadioGroupItem value="female" id="gender-female" className="sr-only" />
+                  <RadioGroupItem value="female" id="gender-female" className="sr-only" disabled={isReadOnly} />
                   Female
                 </Label>
                 <Label
                   htmlFor="gender-other"
                   className={cn(
                     'flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer',
-                    formData.gender === 'other' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300'
+                    formData.gender === 'other' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300',
+                    isReadOnly && 'opacity-60 cursor-not-allowed'
                   )}
                 >
-                  <RadioGroupItem value="other" id="gender-other" className="sr-only" />
+                  <RadioGroupItem value="other" id="gender-other" className="sr-only" disabled={isReadOnly} />
                   Other
                 </Label>
                 <Label
                   htmlFor="gender-not-specified"
                   className={cn(
                     'flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer',
-                    formData.gender === 'not-specified' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300'
+                    formData.gender === 'not-specified'
+                      ? 'border-[#0072CE] bg-[#E6F0FA]/50'
+                      : 'border-gray-300',
+                    isReadOnly && 'opacity-60 cursor-not-allowed'
                   )}
                 >
-                  <RadioGroupItem value="not-specified" id="gender-not-specified" className="sr-only" />
+                  <RadioGroupItem
+                    value="not-specified"
+                    id="gender-not-specified"
+                    className="sr-only"
+                    disabled={isReadOnly}
+                  />
                   Not Specified
                 </Label>
               </RadioGroup>
@@ -368,37 +558,45 @@ export default function CoApplicantBasicDetailsPage() {
               </Label>
               <RadioGroup
                 value={formData.maritalStatus}
-                onValueChange={value => setFormData(prev => ({ ...prev, maritalStatus: value }))}
+                onValueChange={value => {
+                  if (isReadOnly) return;
+                  setFormData(prev => ({ ...prev, maritalStatus: value }));
+                }}
                 className="grid grid-cols-3 gap-2"
               >
                 <Label
                   htmlFor="marital-single"
                   className={cn(
                     'flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer',
-                    formData.maritalStatus === 'single' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300'
+                    formData.maritalStatus === 'single' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300',
+                    isReadOnly && 'opacity-60 cursor-not-allowed'
                   )}
                 >
-                  <RadioGroupItem value="single" id="marital-single" className="sr-only" />
+                  <RadioGroupItem value="single" id="marital-single" className="sr-only" disabled={isReadOnly} />
                   Single
                 </Label>
                 <Label
                   htmlFor="marital-married"
                   className={cn(
                     'flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer',
-                    formData.maritalStatus === 'married' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300'
+                    formData.maritalStatus === 'married' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300',
+                    isReadOnly && 'opacity-60 cursor-not-allowed'
                   )}
                 >
-                  <RadioGroupItem value="married" id="marital-married" className="sr-only" />
+                  <RadioGroupItem value="married" id="marital-married" className="sr-only" disabled={isReadOnly} />
                   Married
                 </Label>
                 <Label
                   htmlFor="marital-divorced"
                   className={cn(
                     'flex items-center justify-center gap-2 p-3 border rounded-xl transition-all cursor-pointer',
-                    formData.maritalStatus === 'divorced' ? 'border-[#0072CE] bg-[#E6F0FA]/50' : 'border-gray-300'
+                    formData.maritalStatus === 'divorced'
+                      ? 'border-[#0072CE] bg-[#E6F0FA]/50'
+                      : 'border-gray-300',
+                    isReadOnly && 'opacity-60 cursor-not-allowed'
                   )}
                 >
-                  <RadioGroupItem value="divorced" id="marital-divorced" className="sr-only" />
+                  <RadioGroupItem value="divorced" id="marital-divorced" className="sr-only" disabled={isReadOnly} />
                   Divorced
                 </Label>
               </RadioGroup>
@@ -412,9 +610,16 @@ export default function CoApplicantBasicDetailsPage() {
                 id="email"
                 type="email"
                 value={formData.email}
-                onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                onChange={e => {
+                  if (isReadOnly) return;
+                  setFormData(prev => ({ ...prev, email: e.target.value }));
+                }}
                 placeholder="coapplicant@example.com"
-                className="h-12 rounded-xl"
+                className={cn(
+                  'h-12 rounded-xl',
+                  isReadOnly && 'bg-gray-100 cursor-not-allowed text-gray-600'
+                )}
+                disabled={isReadOnly}
               />
             </div>
           </div>
@@ -422,13 +627,23 @@ export default function CoApplicantBasicDetailsPage() {
 
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
           <div className="max-w-2xl mx-auto">
-            <Button
-              onClick={handleSave}
-              disabled={!canSave}
-              className="w-full h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e]"
-            >
-              Save Information
-            </Button>
+            {formData.hasPan === 'yes' && !isValidated ? (
+              <Button
+                onClick={handleValidatePan}
+                disabled={!canValidatePan}
+                className="w-full h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                {isValidatingPan ? 'Validating…' : 'Validate Pan'}
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSave}
+                disabled={!canSave}
+                className="w-full h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e]"
+              >
+                Save Information
+              </Button>
+            )}
           </div>
         </div>
       </div>

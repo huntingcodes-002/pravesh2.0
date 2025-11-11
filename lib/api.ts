@@ -412,6 +412,59 @@ export async function submitCoApplicantConsentMobile(
 }
 
 /**
+ * Endpoint: Submit Co-Applicant Personal Info
+ * POST /api/lead-collection/applications/{application_id}/co-applicant-personal-info/{index}/
+ */
+export interface CoApplicantPersonalInfoRequest {
+  application_id: string;
+  co_applicant_index: number;
+  customer_type: 'individual' | 'non_individual';
+  pan_number?: string;
+  date_of_birth: string;
+  gender: string;
+  email?: string;
+}
+
+export interface CoApplicantPersonalInfoResponse {
+  success: boolean;
+  message?: string;
+  application_id: string;
+  co_applicant_index: number;
+  next_step?: string;
+  data?: {
+    application_id?: string;
+    customer_id?: string;
+    customer_type?: string;
+    pan_number?: string;
+    date_of_birth?: string;
+    gender?: string;
+    email?: string;
+  };
+}
+
+export async function submitCoApplicantPersonalInfo(
+  data: CoApplicantPersonalInfoRequest
+): Promise<ApiResponse<CoApplicantPersonalInfoResponse>> {
+  const { application_id, co_applicant_index } = data;
+  const payload = {
+    application_id,
+    co_applicant_index,
+    customer_type: data.customer_type,
+    pan_number: data.pan_number,
+    date_of_birth: data.date_of_birth,
+    gender: data.gender,
+    ...(data.email ? { email: data.email } : {}),
+  };
+  return apiFetch<CoApplicantPersonalInfoResponse>(
+    `applications/${application_id}/co-applicant-personal-info/${co_applicant_index}/`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+/**
  * Endpoint 4: Submit Address Details
  * POST /api/lead-collection/applications/address-details/
  */
