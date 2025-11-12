@@ -10,10 +10,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from "@/lib/utils";
+import { useToast } from '@/hooks/use-toast';
 
 interface Address {
   id: string;
@@ -30,6 +31,7 @@ function CoApplicantStep3PageContent() {
   const { currentLead, updateCoApplicant } = useLead();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { toast } = useToast();
 
   // Get coApplicantId from URL params
   const coApplicantId = searchParams.get('coApplicantId');
@@ -47,6 +49,21 @@ function CoApplicantStep3PageContent() {
   }, [currentLead, coApplicantId]);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
+  const [isSaving, setIsSaving] = useState(false);
+
+  const API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications';
+
+  const getAccessToken = () => {
+    if (typeof window === 'undefined') return null;
+    const authRaw = sessionStorage.getItem('auth');
+    if (!authRaw) return null;
+    try {
+      const parsed = JSON.parse(authRaw);
+      return parsed?.access_token ?? null;
+    } catch {
+      return null;
+    }
+  };
 
   useEffect(() => {
     if (coApplicantData.addresses) {
@@ -137,25 +154,108 @@ function CoApplicantStep3PageContent() {
   };
 
 
-  const handleNext = () => {
-    if (!currentLead || !coApplicantId) return;
+  const handleNext = async () => {
+    if (!currentLead || !coApplicantId || !coApplicant) return;
 
-    // Auto-fill employment details with "Other" since co-applicant step 4 is hidden
-    updateCoApplicant(currentLead.id, coApplicantId, {
-      currentStep: 4, // Mark as completed
-      isComplete: true, // Co-applicant flow is complete after step 3
-      data: {
-        ...coApplicant?.data,
-        step3: { addresses },
-        step4: {
-          ...coApplicant?.data?.step4,
-          occupationType: 'Others',
-          natureOfOccupation: 'Others'
+    const applicationId = currentLead.appId;
+    if (!applicationId) {
+      toast({
+        title: 'Application not found',
+        description: 'Unable to determine the application ID. Please try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const coApplicants = currentLead.formData?.coApplicants ?? [];
+    const coApplicantIndex = coApplicants.findIndex((entry) => entry.id === coApplicantId);
+    if (coApplicantIndex < 0) {
+      toast({
+        title: 'Co-applicant missing',
+        description: 'Could not determine the co-applicant index. Please try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const token = getAccessToken();
+    if (!token) {
+      toast({
+        title: 'Authentication required',
+        description: 'Your session has expired. Please sign in again to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const payload = {
+      addresses: addresses.map((addr) => ({
+        address_type: addr.addressType || 'residential',
+        address_line_1: addr.addressLine1 || '',
+        address_line_2: addr.addressLine2 || '',
+        address_line_3: addr.addressLine3 || '',
+        landmark: addr.landmark || '',
+        pincode: addr.postalCode || '',
+        latitude: '90',
+        longitude: '90',
+        is_primary: addr.isPrimary,
+      })),
+    };
+
+    setIsSaving(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/${encodeURIComponent(applicationId)}/co-applicant-address-details/${coApplicantIndex}/`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+          credentials: 'include',
         }
+      );
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Failed to save co-applicant address details.');
       }
-    });
-    // Navigate back to main flow step 5 to add more co-applicants or continue
-    router.push('/lead/step5');
+
+      const result = await response.json();
+
+      updateCoApplicant(currentLead.id, coApplicantId, {
+        currentStep: 4,
+        isComplete: true,
+        data: {
+          ...coApplicant?.data,
+          step3: { addresses },
+          step4: {
+            ...coApplicant?.data?.step4,
+            occupationType: 'Others',
+            natureOfOccupation: 'Others',
+          },
+        },
+      });
+
+      toast({
+        title: 'Address details saved',
+        description: result?.message || 'Co-applicant address details submitted successfully.',
+        className: 'bg-green-50 border-green-200',
+      });
+
+      router.push('/lead/step5');
+    } catch (error: any) {
+      toast({
+        title: 'Failed to save address details',
+        description: error?.message || 'Something went wrong while saving address information. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handlePrevious = () => {
@@ -408,8 +508,19 @@ function CoApplicantStep3PageContent() {
                   <ArrowLeft className="w-4 h-4 mr-2" />
                   Previous
                 </Button>
-                <Button onClick={handleNext} disabled={!canProceed} className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e]">
-                  Save & Add Co-Applicant
+                <Button
+                  onClick={handleNext}
+                  disabled={!canProceed || isSaving}
+                  className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] disabled:opacity-80"
+                >
+                  {isSaving ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving...
+                    </span>
+                  ) : (
+                    'Save & Add Co-Applicant'
+                  )}
                 </Button>
             </div>
         </div>

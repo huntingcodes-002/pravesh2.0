@@ -127,6 +127,7 @@ function CoApplicantNewPageContent() {
   const [otp, setOtp] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [resendTimer, setResendTimer] = useState(30);
+  const [isResendingOtp, setIsResendingOtp] = useState(false);
 
   useEffect(() => {
     if (isEditingExisting && coApplicant) {
@@ -170,6 +171,18 @@ function CoApplicantNewPageContent() {
     }
     return () => clearTimeout(timerId);
   }, [isOtpModalOpen, resendTimer]);
+
+  const getAccessToken = () => {
+    if (typeof window === 'undefined') return null;
+    const authRaw = sessionStorage.getItem('auth');
+    if (!authRaw) return null;
+    try {
+      const parsed = JSON.parse(authRaw);
+      return parsed?.access_token ?? null;
+    } catch {
+      return null;
+    }
+  };
 
   const handleRelationChange = async (value: string) => {
     setFormData(prev => ({ ...prev, relation: value }));
@@ -325,9 +338,75 @@ function CoApplicantNewPageContent() {
     }
   };
 
-  const handleResendOtp = () => {
-    setResendTimer(30);
-    toast({ title: 'OTP Resent', description: 'New OTP sent.' });
+  const handleResendOtp = async () => {
+    if (!currentLead?.appId || !activeCoApplicantId) {
+      toast({
+        title: 'Cannot resend OTP',
+        description: 'Application or co-applicant information is missing.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const coApplicants = currentLead.formData?.coApplicants ?? [];
+    const coApplicantIndex = coApplicants.findIndex(coApp => coApp.id === activeCoApplicantId);
+    if (coApplicantIndex < 0) {
+      toast({
+        title: 'Cannot resend OTP',
+        description: 'Unable to determine the co-applicant index. Please try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const token = getAccessToken();
+    if (!token) {
+      toast({
+        title: 'Authentication required',
+        description: 'Your session has expired. Please sign in again to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsResendingOtp(true);
+
+    try {
+      const response = await fetch(
+        `https://uatlb.api.saarathifinance.com/api/lead-collection/applications/${encodeURIComponent(
+          currentLead.appId
+        )}/co-applicant-resend-mobile-otp/${coApplicantIndex}/`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+            Authorization: `Bearer ${token}`,
+          },
+          credentials: 'include',
+        }
+      );
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Failed to resend OTP.');
+      }
+
+      const result = await response.json();
+      setResendTimer(30);
+      toast({
+        title: 'OTP resent',
+        description: result?.message || 'New OTP sent successfully.',
+        className: 'bg-blue-50 border-blue-200',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Resend failed',
+        description: error?.message || 'Failed to resend OTP. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsResendingOtp(false);
+    }
   };
 
   const handleVerifyOtp = () => {
@@ -679,13 +758,13 @@ function CoApplicantNewPageContent() {
                 type="button"
                 variant="link"
                 onClick={handleResendOtp}
-                disabled={resendTimer > 0}
+                disabled={resendTimer > 0 || isResendingOtp}
                 className={cn(
                   'p-0 h-auto text-[#0072CE] hover:text-[#005a9e]',
-                  resendTimer > 0 && 'cursor-not-allowed text-gray-400'
+                  (resendTimer > 0 || isResendingOtp) && 'cursor-not-allowed text-gray-400'
                 )}
               >
-                Resend OTP
+                {isResendingOtp ? 'Resending…' : 'Resend OTP'}
               </Button>
             </div>
             <div className="space-y-3">
