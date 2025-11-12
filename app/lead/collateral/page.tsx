@@ -57,8 +57,18 @@ export default function CollateralPage() {
   const setField = (key: string, value: string | number) => setFormData(prev => ({ ...prev, [key]: value }));
 
   const API_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications/collateral-details/';
-  const AUTH_TOKEN =
-    'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzYyOTM2OTAzLCJpYXQiOjE3NjI4NTA1MDMsImp0aSI6IjM5OTZiZDhhMDAxNzRiZjJhMTZkZWQ5ODk1MDg4YWViIiwidXNlcl9pZCI6NDF9.9qeKcZF_Mc9tdCbhSDvma3M-jTs7pkHhYWh3GqKeUD8';
+
+  const getAccessToken = () => {
+    if (typeof window === 'undefined') return null;
+    const authData = sessionStorage.getItem('auth');
+    if (!authData) return null;
+    try {
+      const parsed = JSON.parse(authData);
+      return parsed?.access_token ?? null;
+    } catch {
+      return null;
+    }
+  };
 
   const handleSave = async () => {
     if (!currentLead || isSaving) return;
@@ -82,6 +92,16 @@ export default function CollateralPage() {
       return;
     }
 
+    const token = getAccessToken();
+    if (!token) {
+      toast({
+        title: 'Authentication required',
+        description: 'Your session has expired. Please sign in again to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsSaving(true);
 
     const payload = {
@@ -99,7 +119,7 @@ export default function CollateralPage() {
         headers: {
           Accept: '*/*',
           'Content-Type': 'application/json',
-          Authorization: AUTH_TOKEN,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
         credentials: 'include',

@@ -17,8 +17,18 @@ import { useLead } from '@/contexts/LeadContext';
 type PaymentStatus = 'Pending' | 'Paid' | 'Failed';
 
 const API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications';
-const AUTH_TOKEN =
-  'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzYyOTM2OTAzLCJpYXQiOjE3NjI4NTA1MDMsImp0aSI6IjM5OTZiZDhhMDAxNzRiZjJhMTZkZWQ5ODk1MDg4YWViIiwidXNlcl9pZCI6NDF9.9qeKcZF_Mc9tdCbhSDvma3M-jTs7pkHhYWh3GqKeUD8';
+
+const getAccessToken = () => {
+  if (typeof window === 'undefined') return null;
+  const authData = sessionStorage.getItem('auth');
+  if (!authData) return null;
+  try {
+    const parsed = JSON.parse(authData);
+    return parsed?.access_token ?? null;
+  } catch {
+    return null;
+  }
+};
 
 export default function PaymentsPage() {
   const router = useRouter();
@@ -45,6 +55,19 @@ export default function PaymentsPage() {
   const { toast } = useToast();
   const sendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasHydratedState = useRef(false);
+
+  const getAuthorizationHeader = () => {
+    const token = getAccessToken();
+    if (!token) {
+      toast({
+        title: 'Authentication required',
+        description: 'Your session has expired. Please sign in again to continue.',
+        variant: 'destructive',
+      });
+      return null;
+    }
+    return `Bearer ${token}`;
+  };
 
   const createdOn = useMemo(() => new Date(), []);
   const [receivedOn, setReceivedOn] = useState<Date | null>(null);
@@ -129,6 +152,11 @@ export default function PaymentsPage() {
       return;
     }
 
+    const authorization = getAuthorizationHeader();
+    if (!authorization) {
+      return;
+    }
+
     setIsSending(true);
     setPaymentStatus('Pending');
     setReceivedOn(null);
@@ -139,7 +167,7 @@ export default function PaymentsPage() {
         headers: {
           Accept: '*/*',
           'Content-Type': 'application/json',
-          Authorization: AUTH_TOKEN,
+          Authorization: authorization,
         },
         body: JSON.stringify({
           application_id: applicationId,
@@ -193,6 +221,11 @@ export default function PaymentsPage() {
       return;
     }
 
+    const authorization = getAuthorizationHeader();
+    if (!authorization) {
+      return;
+    }
+
     setIsRefreshing(true);
 
     try {
@@ -202,7 +235,7 @@ export default function PaymentsPage() {
           method: 'GET',
           headers: {
             Accept: '*/*',
-            Authorization: AUTH_TOKEN,
+            Authorization: authorization,
           },
           credentials: 'include',
         }
@@ -262,6 +295,11 @@ export default function PaymentsPage() {
       return;
     }
 
+    const authorization = getAuthorizationHeader();
+    if (!authorization) {
+      return;
+    }
+
     setIsResending(true);
 
     try {
@@ -270,7 +308,7 @@ export default function PaymentsPage() {
         headers: {
           Accept: '*/*',
           'Content-Type': 'application/json',
-          Authorization: AUTH_TOKEN,
+            Authorization: authorization,
         },
         body: JSON.stringify({
           application_id: applicationId,
@@ -326,6 +364,11 @@ export default function PaymentsPage() {
       return;
     }
 
+    const authorization = getAuthorizationHeader();
+    if (!authorization) {
+      return;
+    }
+
     setIsDeleting(true);
 
     try {
@@ -334,7 +377,7 @@ export default function PaymentsPage() {
         headers: {
           Accept: '*/*',
           'Content-Type': 'application/json',
-          Authorization: AUTH_TOKEN,
+            Authorization: authorization,
         },
         body: JSON.stringify({
           application_id: applicationId,
