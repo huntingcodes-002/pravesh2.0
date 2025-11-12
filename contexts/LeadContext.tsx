@@ -9,6 +9,7 @@ import {
   type ApplicationSummaryItem,
   type DetailedInfoResponse,
 } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 export type LeadStatus = 'Draft' | 'Submitted' | 'Approved' | 'Disbursed' | 'Rejected';
 
@@ -110,6 +111,20 @@ interface LeadContextType {
 const LeadContext = createContext<LeadContextType | undefined>(undefined);
 
 const DEFAULT_SUMMARY_STATS: LeadSummaryStats = { total: 0, draft: 0, completed: 0 };
+
+const AUTH_STORAGE_KEY = 'auth';
+
+function getStoredAccessToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const authRaw = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  if (!authRaw) return null;
+  try {
+    const parsed = JSON.parse(authRaw);
+    return parsed?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function composeCustomerName(first?: string | null, last?: string | null, fallback?: string) {
   const parts = [first, last].filter(Boolean) as string[];
@@ -388,6 +403,7 @@ function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Le
 }
 
 export function LeadProvider({ children }: { children: React.ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [currentLead, setCurrentLead] = useState<Lead | null>(null);
   const [loading, setLoading] = useState(false);
@@ -449,8 +465,30 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void refreshLeads();
-  }, [refreshLeads]);
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const token = getStoredAccessToken();
+
+    if (!authLoading && user && token) {
+      setLoading(true);
+      timeoutId = setTimeout(() => {
+        if (cancelled) return;
+        void refreshLeads();
+      }, 2000);
+    } else if (!authLoading && (!user || !token)) {
+      setLeads([]);
+      setSummaryStats(DEFAULT_SUMMARY_STATS);
+      setLoading(false);
+    }
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [authLoading, user, refreshLeads]);
 
   const fetchLeadDetails = useCallback(
     async (applicationId: string, options?: { force?: boolean }) => {
