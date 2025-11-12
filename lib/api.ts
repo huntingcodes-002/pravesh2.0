@@ -276,6 +276,31 @@ export async function createNewLead(data: NewLeadRequest): Promise<ApiResponse<N
 }
 
 /**
+ * Endpoint: Resend Mobile OTP
+ * POST /api/lead-collection/applications/resend-mobile-otp/
+ */
+export interface ResendMobileOtpRequest {
+  application_id: string;
+}
+
+export interface ResendMobileOtpData {
+  application_id: string;
+  otp_sent: boolean;
+  resend_count: number;
+  ttl_seconds: number;
+  mobile_number: string;
+}
+
+export async function resendMobileOTP(
+  data: ResendMobileOtpRequest
+): Promise<ApiResponse<ResendMobileOtpData>> {
+  return apiFetch<ResendMobileOtpData>('applications/resend-mobile-otp/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
  * Endpoint 7: Verify Mobile OTP
  * POST /api/lead-collection/applications/verify-mobile/
  */

@@ -13,7 +13,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { useToast } from '@/hooks/use-toast'; // Import useToast
 import { cn } from '@/lib/utils';
 import { Send, CheckCircle, Loader, Edit } from 'lucide-react';
-import { createNewLead, verifyMobileOTP, isApiError, type ApiSuccess, type NewLeadResponse, type VerifyMobileResponse } from '@/lib/api';
+import { createNewLead, verifyMobileOTP, resendMobileOTP, isApiError, type ApiSuccess, type NewLeadResponse, type ResendMobileOtpData, type VerifyMobileResponse } from '@/lib/api';
 
 function Step1PageContent() {
   const { currentLead, updateLead, addLeadToArray } = useLead();
@@ -36,6 +36,7 @@ function Step1PageContent() {
   const [resendTimer, setResendTimer] = useState(30);
   const [isCreatingLead, setIsCreatingLead] = useState(false);
   const [applicationId, setApplicationId] = useState<string | null>(currentLead?.appId || null);
+  const [isResendingOtp, setIsResendingOtp] = useState(false);
 
   const deriveNameParts = (fullName: string) => {
     const normalized = fullName.replace(/[^a-zA-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -160,9 +161,46 @@ function Step1PageContent() {
     }
   };
   
-  const handleResendOtp = () => {
-    setResendTimer(30);
-    toast({ title: 'OTP Resent', description: 'New OTP sent.' });
+  const handleResendOtp = async () => {
+    if (!applicationId) {
+      toast({
+        title: 'Error',
+        description: 'Application ID not found. Please request OTP again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsResendingOtp(true);
+
+    try {
+      const response = await resendMobileOTP({ application_id: applicationId });
+
+      if (isApiError(response)) {
+        const errorMessage = response.error || 'Failed to resend OTP. Please try again.';
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const successResponse = response as ApiSuccess<ResendMobileOtpData>;
+      setResendTimer(30);
+      toast({
+        title: 'OTP Sent',
+        description: successResponse.message || 'OTP resent successfully.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to resend OTP. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsResendingOtp(false);
+    }
   };
 
   const handleVerifyOtp = async () => {
@@ -437,14 +475,24 @@ function Step1PageContent() {
                     <>Resend OTP in <span className="font-medium text-primary">{`00:${resendTimer.toString().padStart(2, '0')}`}</span></>
                   ) : "Didn't receive OTP?"}
                 </p>
-                 <Button 
-                    type="button" 
-                    variant="link" 
-                    onClick={handleResendOtp} 
-                    disabled={resendTimer > 0}
-                    className={cn('p-0 h-auto text-[#0072CE] hover:text-[#005a9e]', resendTimer > 0 && 'cursor-not-allowed text-gray-400')}
+                <Button 
+                  type="button" 
+                  variant="link" 
+                  onClick={handleResendOtp} 
+                  disabled={resendTimer > 0 || isResendingOtp}
+                  className={cn(
+                    'p-0 h-auto text-[#0072CE] hover:text-[#005a9e]',
+                    (resendTimer > 0 || isResendingOtp) && 'cursor-not-allowed text-gray-400'
+                  )}
                 >
-                    Resend OTP
+                  {isResendingOtp ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader className="w-4 h-4 animate-spin" />
+                      Resending...
+                    </span>
+                  ) : (
+                    'Resend OTP'
+                  )}
                 </Button>
             </div>
             <div className="space-y-3">
