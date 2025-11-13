@@ -20,7 +20,8 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 # Copy static assets and the standalone server bundle
-COPY --from=builder /app/public ./public          # needed for /apps/pravesh/pravesh-logo.jpg
+COPY --from=builder /app/public ./public          
+# needed for /apps/pravesh/pravesh-logo.jpg
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
