@@ -45,11 +45,6 @@ export default function Step3Page() {
     currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar || 
     false
   );
-  const [isAutoPopulatedFromSummary, setIsAutoPopulatedFromSummary] = useState(
-    currentLead?.formData?.step3?.autoPopulatedFromSummary ||
-    currentLead?.formData?.step3?.addresses?.[0]?.autoPopulatedFromSummary ||
-    false
-  );
 
   useEffect(() => {
     if (currentLead?.formData?.step3?.addresses) {
@@ -92,11 +87,6 @@ export default function Step3Page() {
     setIsAutoFilledViaAadhaar(
       currentLead?.formData?.step3?.autoFilledViaAadhaar || 
       currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar || 
-      false
-    );
-    setIsAutoPopulatedFromSummary(
-      currentLead?.formData?.step3?.autoPopulatedFromSummary ||
-      currentLead?.formData?.step3?.addresses?.[0]?.autoPopulatedFromSummary ||
       false
     );
   }, [currentLead]);
@@ -433,9 +423,6 @@ export default function Step3Page() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {(isAutoPopulatedFromSummary || currentLead?.formData?.step3?.autoPopulatedFromSummary) && (
-                <Badge className="bg-blue-100 text-blue-700 text-xs">Auto-Populated</Badge>
-              )}
               {(isAutoFilledViaAadhaar || currentLead?.formData?.step3?.autoFilledViaAadhaar || currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar) && (
                 <Badge className="bg-green-100 text-green-700 text-xs">Verified via Aadhaar</Badge>
               )}

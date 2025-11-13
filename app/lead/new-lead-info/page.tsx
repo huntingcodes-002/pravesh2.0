@@ -501,7 +501,7 @@ export default function NewLeadInfoPage() {
                 onClick={handleGeneratePaymentLink}
                 className="w-full h-12 rounded-xl bg-[#0B63F6] hover:bg-[#0954d4] text-white font-semibold transition-colors"
               >
-                Generate Payment Link
+                {paymentStatus === 'Paid' ? 'View Payment Details' : 'Generate Payment Link'}
               </Button>
             </CardContent>
           </Card>
@@ -535,13 +535,9 @@ export default function NewLeadInfoPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {step2Status !== 'incomplete' && (() => {
-                      const step2 = currentLead?.formData?.step2;
-                      if (step2?.autoFilledViaPAN) {
-                        return <Badge className="bg-green-100 text-green-700 text-xs">Verified via PAN</Badge>;
-                      }
-                      return <Badge className="bg-gray-100 text-gray-700 text-xs">Manual Entry</Badge>;
-                    })()}
+                    {step2Status !== 'incomplete' && currentLead?.formData?.step2?.autoFilledViaPAN && (
+                      <Badge className="bg-green-100 text-green-700 text-xs">Verified via PAN</Badge>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -582,11 +578,7 @@ export default function NewLeadInfoPage() {
                       }
                       return null;
                     })()}
-                    {currentLead.formData?.step2?.autoFilledViaPAN ? (
-                      <p className="text-xs text-gray-400 mt-2">Auto-filled and verified via PAN & NSDL workflow</p>
-                    ) : (
-                      <p className="text-xs text-gray-400 mt-2">Values entered manually by RM.</p>
-                    )}
+                    <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
                   </div>
                 )}
               </div>
@@ -611,10 +603,10 @@ export default function NewLeadInfoPage() {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {step3Status !== 'incomplete' && (() => {
                       const step3 = currentLead?.formData?.step3;
-                      if (step3?.autoFilledViaAadhaar || currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar) {
+                      if (step3?.autoFilledViaAadhaar || step3?.addresses?.some((addr: any) => addr?.autoFilledViaAadhaar)) {
                         return <Badge className="bg-green-100 text-green-700 text-xs">Verified via Aadhaar</Badge>;
                       }
-                      return <Badge className="bg-gray-100 text-gray-700 text-xs">Manual Entry</Badge>;
+                      return null;
                     })()}
                     <Button
                       variant="outline"
@@ -640,11 +632,7 @@ export default function NewLeadInfoPage() {
                         <span className="font-medium">Pincode:</span> {currentLead.formData.step3.addresses[0].postalCode}
                       </p>
                     )}
-                    {currentLead.formData?.step3?.autoFilledViaAadhaar || currentLead.formData.step3.addresses[0]?.autoFilledViaAadhaar ? (
-                      <p className="text-xs text-gray-400 mt-2">Auto-filled and verified via Aadhaar OCR workflow</p>
-                    ) : (
-                      <p className="text-xs text-gray-400 mt-2">Values added manually by RM.</p>
-                    )}
+                    <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
                   </div>
                 )}
               </div>
