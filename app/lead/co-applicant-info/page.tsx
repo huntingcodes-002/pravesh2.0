@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Users, UserCheck, MapPin, Trash2 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -10,6 +10,17 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { deleteCoApplicantFromApi, isApiError } from '@/lib/api';
 
 type SectionStatus = 'incomplete' | 'in-progress' | 'completed';
 
@@ -47,6 +58,12 @@ export default function CoApplicantInfoPage() {
   const { toast } = useToast();
 
   const coApplicants = currentLead?.formData?.coApplicants ?? [];
+  const [pendingDelete, setPendingDelete] = useState<{
+    id: string;
+    name: string;
+    index: number;
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const statusBadge = (status: SectionStatus) => {
     const baseClasses = 'rounded-full border text-[11px] font-medium px-3 py-1';
@@ -304,7 +321,11 @@ export default function CoApplicantInfoPage() {
         <button
           type="button"
           className="text-red-500 hover:text-red-600"
-          onClick={() => handleDelete(coApp.id)}
+          onClick={() => setPendingDelete({
+            id: coApp.id,
+            name: fullName,
+            index,
+          })}
         >
           <Trash2 className="w-5 h-5" />
         </button>
@@ -319,14 +340,6 @@ export default function CoApplicantInfoPage() {
             >
               Continue
             </Button>
-            <button
-              type="button"
-              className="text-red-500 hover:text-red-600"
-              onClick={() => handleDelete(coApp.id)}
-              aria-label="Delete co-applicant"
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
           </div>
         </CardContent>
       </Card>
@@ -382,7 +395,16 @@ export default function CoApplicantInfoPage() {
                       <button
                         type="button"
                         className="text-red-500 hover:text-red-600"
-                        onClick={() => handleDelete(coApp.id)}
+                        onClick={() => {
+                          const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
+                          const fullName =
+                            [basic.firstName, basic.lastName].filter(Boolean).join(' ') || 'Unnamed Co-applicant';
+                          setPendingDelete({
+                            id: coApp.id,
+                            name: fullName,
+                            index,
+                          });
+                        }}
                         aria-label="Delete co-applicant"
                       >
                         <Trash2 className="w-5 h-5" />
@@ -415,6 +437,81 @@ export default function CoApplicantInfoPage() {
           </div>
         </div>
       </div>
+
+      <AlertDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) {
+            setPendingDelete(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Are you sure you want to delete {pendingDelete?.name} as a Co-applicant?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This action will remove the co-applicant from the application.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>No</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeleting}
+              onClick={async () => {
+                if (!pendingDelete || !currentLead) {
+                  setPendingDelete(null);
+                  return;
+                }
+
+                const applicationId = currentLead.appId;
+                const { index, id, name } = pendingDelete;
+
+                if (!applicationId || index < 0) {
+                  toast({
+                    title: 'Unable to delete',
+                    description: 'Application details are missing. Please try again.',
+                    variant: 'destructive',
+                  });
+                  setPendingDelete(null);
+                  return;
+                }
+
+                setIsDeleting(true);
+                try {
+                  const response = await deleteCoApplicantFromApi({
+                    application_id: applicationId,
+                    co_applicant_index: index,
+                  });
+
+                  if (isApiError(response)) {
+                    throw new Error(response.error || 'Failed to delete co-applicant.');
+                  }
+
+                  deleteCoApplicant(currentLead.id, id);
+                  toast({
+                    title: 'Co-applicant Deleted',
+                    description: `${name} has been removed successfully.`,
+                    className: 'bg-green-50 border-green-200',
+                  });
+                } catch (error: any) {
+                  toast({
+                    title: 'Deletion failed',
+                    description: error?.message || 'Something went wrong while deleting the co-applicant.',
+                    variant: 'destructive',
+                  });
+                } finally {
+                  setIsDeleting(false);
+                  setPendingDelete(null);
+                }
+              }}
+            >
+              {isDeleting ? 'Deleting...' : 'Yes'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }

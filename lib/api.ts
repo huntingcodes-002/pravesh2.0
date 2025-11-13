@@ -322,6 +322,74 @@ export async function fetchPaymentStatus(
 }
 
 /**
+ * Endpoint: Submit Co-Applicant Address Details
+ * POST /api/lead-collection/applications/{application_id}/co-applicant-address-details/{co_applicant_index}/
+ */
+export interface CoApplicantAddressPayload {
+  address_type: string;
+  address_line_1: string;
+  address_line_2?: string;
+  address_line_3?: string;
+  landmark: string;
+  pincode: string;
+  latitude: string;
+  longitude: string;
+  is_primary: boolean;
+}
+
+export interface CoApplicantAddressRequest {
+  application_id: string;
+  co_applicant_index: number;
+  addresses: CoApplicantAddressPayload[];
+}
+
+export type CoApplicantAddressResponse = ApiResponse<{
+  addresses_created?: number;
+  customer_id?: string;
+  addresses?: Array<{
+    id?: string | number;
+    address_line_1?: string;
+    address_type?: string;
+    is_primary?: boolean;
+  }>;
+}>;
+
+export async function submitCoApplicantAddressDetails(
+  data: CoApplicantAddressRequest
+): Promise<CoApplicantAddressResponse> {
+  const { application_id, co_applicant_index, addresses } = data;
+  return apiFetch(`applications/${encodeURIComponent(application_id)}/co-applicant-address-details/${co_applicant_index}/`, {
+    method: 'POST',
+    body: JSON.stringify({ addresses }),
+  }) as Promise<CoApplicantAddressResponse>;
+}
+
+/**
+ * Endpoint: Delete Co-Applicant
+ * POST /api/lead-collection/applications/co-applicant-delete/
+ */
+export interface DeleteCoApplicantRequest {
+  application_id: string;
+  co_applicant_index: number;
+}
+
+export type DeleteCoApplicantResponse = ApiResponse<{
+  application_id?: string;
+  co_applicant_index?: number;
+  deleted_participant_id?: number | string;
+  remaining_co_applicants?: number;
+}>;
+
+export async function deleteCoApplicantFromApi(
+  data: DeleteCoApplicantRequest
+): Promise<DeleteCoApplicantResponse> {
+  return apiFetch('applications/co-applicant-delete/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }) as Promise<DeleteCoApplicantResponse>;
+}
+
+/**
  * Endpoint 7: Verify Mobile OTP
  * POST /api/lead-collection/applications/verify-mobile/
  */

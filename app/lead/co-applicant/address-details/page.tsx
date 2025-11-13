@@ -13,12 +13,14 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { isApiError, submitCoApplicantAddressDetails } from '@/lib/api';
 
 interface Address {
   id: string;
   addressType: string;
   addressLine1: string;
   addressLine2: string;
+  addressLine3: string;
   landmark: string;
   postalCode: string;
   isPrimary: boolean;
@@ -29,6 +31,7 @@ const createEmptyAddress = (): Address => ({
   addressType: 'residential',
   addressLine1: '',
   addressLine2: '',
+  addressLine3: '',
   landmark: '',
   postalCode: '',
   isPrimary: false,
@@ -58,6 +61,7 @@ function CoApplicantAddressDetailsPageContent() {
   );
 
   const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!currentLead || !coApplicant || !coApplicantId) {
@@ -111,8 +115,8 @@ function CoApplicantAddressDetailsPageContent() {
       addr.postalCode.length === 6
   );
 
-  const handleSave = () => {
-    if (!currentLead || !coApplicantId) return;
+  const handleSave = async () => {
+    if (!currentLead || !coApplicantId || !coApplicant) return;
     if (!requiredFieldsFilled) {
       toast({
         title: 'Missing Information',
@@ -122,23 +126,78 @@ function CoApplicantAddressDetailsPageContent() {
       return;
     }
 
-    updateCoApplicant(currentLead.id, coApplicantId, {
-      relationship: coApplicant?.relationship,
-      data: {
-        ...coApplicant?.data,
-        addressDetails: {
-          ...(coApplicant?.data?.addressDetails ?? {}),
-          addresses,
-        },
-      },
-    });
+    const applicationId = currentLead.appId;
+    if (!applicationId) {
+      toast({
+        title: 'Application not found',
+        description: 'Unable to determine the application ID. Please try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-    toast({
-      title: 'Saved',
-      description: 'Co-applicant address details saved successfully.',
-      className: 'bg-green-50 border-green-200',
-    });
-    router.push('/lead/co-applicant-info');
+    const coApplicants = currentLead.formData?.coApplicants ?? [];
+    const coApplicantIndex = coApplicants.findIndex(ca => ca.id === coApplicantId);
+
+    if (coApplicantIndex < 0) {
+      toast({
+        title: 'Co-applicant missing',
+        description: 'Could not determine the co-applicant index. Please try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const payloadAddresses = addresses.map(addr => ({
+      address_type: addr.addressType || 'residential',
+      address_line_1: addr.addressLine1 || '',
+      address_line_2: addr.addressLine2 || '',
+      address_line_3: addr.addressLine3 || '',
+      landmark: addr.landmark || '',
+      pincode: addr.postalCode || '',
+      latitude: '90',
+      longitude: '90',
+      is_primary: addr.isPrimary,
+    }));
+
+    setIsSaving(true);
+    try {
+      const response = await submitCoApplicantAddressDetails({
+        application_id: applicationId,
+        co_applicant_index: coApplicantIndex,
+        addresses: payloadAddresses,
+      });
+
+      if (isApiError(response)) {
+        throw new Error(response.error || 'Failed to save co-applicant address details.');
+      }
+
+      updateCoApplicant(currentLead.id, coApplicantId, {
+        relationship: coApplicant.relationship,
+        data: {
+          ...coApplicant.data,
+          addressDetails: {
+            ...(coApplicant.data?.addressDetails ?? {}),
+            addresses,
+          },
+        },
+      });
+
+      toast({
+        title: 'Address details saved',
+        description: response.message || 'Co-applicant address details submitted successfully.',
+        className: 'bg-green-50 border-green-200',
+      });
+      router.push('/lead/co-applicant-info');
+    } catch (error: any) {
+      toast({
+        title: 'Failed to save address details',
+        description: error?.message || 'Something went wrong while saving address information. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (!currentLead || !coApplicant) {
@@ -254,6 +313,17 @@ function CoApplicantAddressDetailsPageContent() {
                         </div>
 
                         <div>
+                          <Label className="text-sm font-medium text-[#003366] mb-2 block">Address Line 3</Label>
+                          <Input
+                            value={address.addressLine3}
+                            onChange={e => handleAddressChange(address.id, 'addressLine3', e.target.value)}
+                            placeholder="Block / Locality"
+                            className="h-12 rounded-lg"
+                            maxLength={255}
+                          />
+                        </div>
+
+                        <div>
                           <Label className="text-sm font-medium text-[#003366] mb-2 block">
                             Landmark <span className="text-[#DC2626]">*</span>
                           </Label>
@@ -320,10 +390,10 @@ function CoApplicantAddressDetailsPageContent() {
           <div className="max-w-2xl mx-auto">
             <Button
               onClick={handleSave}
-              disabled={!requiredFieldsFilled}
-              className="w-full h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e]"
+              disabled={!requiredFieldsFilled || isSaving}
+              className="w-full h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] disabled:bg-gray-300 disabled:text-gray-600"
             >
-              Save Information
+              {isSaving ? 'Saving...' : 'Save Information'}
             </Button>
           </div>
         </div>
