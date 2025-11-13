@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, CoApplicant } from '@/contexts/LeadContext';
@@ -14,7 +14,18 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { isApiError, submitCoApplicantAddressDetails, lookupPincode } from '@/lib/api';
-import { Loader } from 'lucide-react';
+import { Loader, AlertTriangle } from 'lucide-react';
+import { useGeolocation } from '@uidotdev/usehooks';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface Address {
   id: string;
@@ -28,6 +39,8 @@ interface Address {
   city: string;
   stateCode: string;
   stateName: string;
+  latitude: string;
+  longitude: string;
 }
 
 const createEmptyAddress = (): Address => ({
@@ -42,6 +55,8 @@ const createEmptyAddress = (): Address => ({
   city: '',
   stateCode: '',
   stateName: '',
+  latitude: '',
+  longitude: '',
 });
 
 function CoApplicantAddressDetailsPageContent() {
@@ -70,6 +85,95 @@ function CoApplicantAddressDetailsPageContent() {
   const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
   const [pincodeLookupId, setPincodeLookupId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
+  const geolocation = useGeolocation({
+    enableHighAccuracy: true,
+    timeout: 20000,
+    maximumAge: 0,
+  });
+  const suppressModalAutoOpenRef = useRef(false);
+
+  const locationCoords = useMemo(() => {
+    const latitude =
+      typeof geolocation.latitude === 'number' ? geolocation.latitude.toFixed(6) : '';
+    const longitude =
+      typeof geolocation.longitude === 'number' ? geolocation.longitude.toFixed(6) : '';
+
+    return { latitude, longitude };
+  }, [geolocation.latitude, geolocation.longitude]);
+
+  const locationErrorMessage = useMemo(() => {
+    if (!geolocation.error) return null;
+
+    if (typeof geolocation.error === 'string') {
+      return geolocation.error;
+    }
+
+    if (
+      typeof geolocation.error === 'object' &&
+      geolocation.error !== null &&
+      'message' in geolocation.error &&
+      typeof (geolocation.error as { message?: string }).message === 'string'
+    ) {
+      return (geolocation.error as { message: string }).message;
+    }
+
+    if (
+      typeof geolocation.error === 'object' &&
+      geolocation.error !== null &&
+      'code' in geolocation.error &&
+      typeof (geolocation.error as { code?: number }).code === 'number'
+    ) {
+      const code = (geolocation.error as { code: number }).code;
+      switch (code) {
+        case 1:
+          return 'Location permission is required. Please allow access from your browser settings.';
+        case 2:
+          return 'Location information is unavailable. Please ensure GPS or precise location is enabled.';
+        case 3:
+          return 'Fetching location timed out. Please try again.';
+        default:
+          break;
+      }
+    }
+
+    return 'Unable to fetch your current location. Please allow access and try again.';
+  }, [geolocation.error]);
+
+  const applyCoordsToAddresses = useCallback((latitude: string, longitude: string) => {
+    if (!latitude || !longitude) return;
+
+    setAddresses(prev => {
+      let changed = false;
+
+      const updated = prev.map(addr => {
+        if (addr.latitude === latitude && addr.longitude === longitude) {
+          return addr;
+        }
+
+        changed = true;
+        return {
+          ...addr,
+          latitude,
+          longitude,
+        };
+      });
+
+      return changed ? updated : prev;
+    });
+  }, []);
+
+  const locationStatus = geolocation.loading
+    ? 'pending'
+    : geolocation.error
+      ? 'error'
+      : locationCoords.latitude && locationCoords.longitude
+        ? 'success'
+        : 'pending';
+
+  const isLocationReady = locationStatus === 'success';
+  const isInteractionDisabled = !isLocationReady;
+  const lastLocationErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!currentLead || !coApplicant || !coApplicantId) {
@@ -77,7 +181,49 @@ function CoApplicantAddressDetailsPageContent() {
     }
   }, [currentLead, coApplicant, coApplicantId, router]);
 
+  useEffect(() => {
+    if (locationStatus !== 'error') {
+      lastLocationErrorRef.current = null;
+      return;
+    }
+
+    const description =
+      locationErrorMessage ?? 'Unable to fetch your current location. Please allow access to continue.';
+
+    if (lastLocationErrorRef.current === description) {
+      return;
+    }
+
+    toast({
+      title: 'Location Required',
+      description,
+      variant: 'destructive',
+    });
+
+    lastLocationErrorRef.current = description;
+  }, [locationStatus, locationErrorMessage, toast]);
+
+  useEffect(() => {
+    if (locationStatus === 'error') {
+      if (!suppressModalAutoOpenRef.current) {
+        setIsPermissionModalOpen(true);
+      }
+    } else {
+      setIsPermissionModalOpen(false);
+      suppressModalAutoOpenRef.current = false;
+    }
+  }, [locationStatus]);
+
+  useEffect(() => {
+    if (!isLocationReady) {
+      return;
+    }
+
+    applyCoordsToAddresses(locationCoords.latitude, locationCoords.longitude);
+  }, [isLocationReady, locationCoords.latitude, locationCoords.longitude, applyCoordsToAddresses]);
+
   const setPrimaryAddress = (id: string) => {
+    if (isInteractionDisabled) return;
     setAddresses(prev =>
       prev.map(addr => ({
         ...addr,
@@ -87,10 +233,12 @@ function CoApplicantAddressDetailsPageContent() {
   };
 
   const handleAddressChange = <K extends keyof Address>(id: string, field: K, value: Address[K]) => {
+    if (isInteractionDisabled) return;
     setAddresses(prev => prev.map(addr => (addr.id === id ? { ...addr, [field]: value } : addr)));
   };
 
 const handlePostalCodeChange = (id: string, rawValue: string) => {
+  if (isInteractionDisabled) return;
   const numeric = rawValue.replace(/[^0-9]/g, '').slice(0, 6);
   setAddresses(prev =>
     prev.map(addr =>
@@ -158,21 +306,68 @@ const performPincodeLookup = async (id: string, zip: string) => {
 };
 
   const handleAddAddress = () => {
+    if (isInteractionDisabled) return;
     setCollapsedAddresses(new Set(addresses.map((addr: Address) => addr.id)));
     setAddresses(prev => [
       ...prev,
       {
         ...createEmptyAddress(),
         isPrimary: prev.length === 0,
+        latitude: locationCoords.latitude || '',
+        longitude: locationCoords.longitude || '',
       },
     ]);
   };
 
+  const handleRetryPermission = useCallback(() => {
+    if (typeof window === 'undefined' || !navigator?.geolocation) {
+      toast({
+        title: 'Location Unsupported',
+        description: 'Geolocation is not supported on this device. Please try a different browser or device.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    suppressModalAutoOpenRef.current = true;
+    setIsPermissionModalOpen(false);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = typeof position.coords.latitude === 'number' ? position.coords.latitude.toFixed(6) : '';
+        const longitude = typeof position.coords.longitude === 'number' ? position.coords.longitude.toFixed(6) : '';
+
+        applyCoordsToAddresses(latitude, longitude);
+        suppressModalAutoOpenRef.current = false;
+      },
+      (error) => {
+        suppressModalAutoOpenRef.current = false;
+
+        const description =
+          error?.message || 'Unable to fetch your current location. Please allow access in your browser settings.';
+
+        toast({
+          title: 'Location Required',
+          description,
+          variant: 'destructive',
+        });
+
+        setIsPermissionModalOpen(true);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+      }
+    );
+  }, [applyCoordsToAddresses, toast]);
+
   const handleRemoveAddress = (id: string) => {
+    if (isInteractionDisabled) return;
     setAddresses(prev => {
       const remaining = prev.filter(addr => addr.id !== id);
       if (remaining.length === 0) {
-        return [{ ...createEmptyAddress(), isPrimary: true }];
+        return [{ ...createEmptyAddress(), isPrimary: true, latitude: locationCoords.latitude || '', longitude: locationCoords.longitude || '' }];
       }
       if (!remaining.some((addr: Address) => addr.isPrimary)) {
         remaining[0] = { ...remaining[0], isPrimary: true };
@@ -181,7 +376,7 @@ const performPincodeLookup = async (id: string, zip: string) => {
     });
   };
 
-  const requiredFieldsFilled = addresses.every(
+  const requiredFieldsFilled = isLocationReady && addresses.every(
     addr =>
       addr.addressType &&
       addr.addressLine1 &&
@@ -192,6 +387,14 @@ const performPincodeLookup = async (id: string, zip: string) => {
 
   const handleSave = async () => {
     if (!currentLead || !coApplicantId || !coApplicant) return;
+    if (!isLocationReady) {
+      toast({
+        title: 'Location Required',
+        description: 'Please allow location access so we can capture your current coordinates.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!requiredFieldsFilled) {
       toast({
         title: 'Missing Information',
@@ -230,8 +433,8 @@ const performPincodeLookup = async (id: string, zip: string) => {
       address_line_3: addr.addressLine3 || '',
       landmark: addr.landmark || '',
       pincode: addr.postalCode || '',
-      latitude: '90',
-      longitude: '90',
+      latitude: addr.latitude || locationCoords.latitude || '90',
+      longitude: addr.longitude || locationCoords.longitude || '90',
       is_primary: addr.isPrimary,
       city: addr.city || undefined,
       state_code: addr.stateCode || undefined,
@@ -255,7 +458,7 @@ const performPincodeLookup = async (id: string, zip: string) => {
           ...coApplicant.data,
           addressDetails: {
             ...(coApplicant.data?.addressDetails ?? {}),
-            addresses,
+            addresses: addresses.map(({ latitude, longitude, ...rest }) => rest),
           },
         },
       });
@@ -281,6 +484,18 @@ const performPincodeLookup = async (id: string, zip: string) => {
     return null;
   }
 
+  const handlePermissionModalChange = useCallback(
+    (open: boolean) => {
+      if (!open && locationStatus === 'error' && !suppressModalAutoOpenRef.current) {
+        setIsPermissionModalOpen(true);
+        return;
+      }
+
+      setIsPermissionModalOpen(open);
+    },
+    [locationStatus]
+  );
+
   return (
     <DashboardLayout
       title="Co-Applicant Address Details"
@@ -288,7 +503,72 @@ const performPincodeLookup = async (id: string, zip: string) => {
       showExitButton
       onExit={() => router.push('/lead/co-applicant-info')}
     >
+      <AlertDialog open={isPermissionModalOpen} onOpenChange={handlePermissionModalChange}>
+        <AlertDialogContent className="max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-[#003366]">
+              <AlertTriangle className="h-5 w-5 text-[#F59E0B]" />
+              Location Access Required
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-[#4B5563]">
+              Please allow location access in your browser settings so we can capture accurate address coordinates for this co-applicant.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-end sm:space-x-3">
+            <AlertDialogAction
+              onClick={handleRetryPermission}
+              className="w-full sm:w-auto bg-[#0072CE] hover:bg-[#005a9e]"
+            >
+              Try Again
+            </AlertDialogAction>
+            <AlertDialogCancel className="w-full sm:w-auto">
+              Close
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="max-w-2xl mx-auto pb-24">
+        <div
+          className={cn(
+            'mb-4 p-4 rounded-xl border transition-colors',
+            locationStatus === 'pending' && 'bg-blue-50 border-blue-200',
+            locationStatus === 'success' && 'bg-emerald-50 border-emerald-200',
+            locationStatus === 'error' && 'bg-red-50 border-red-200'
+          )}
+        >
+          <p className="text-sm font-semibold text-[#003366]">Location Access Required</p>
+          {locationStatus === 'pending' && (
+            <p className="mt-1 text-sm text-[#003366]">
+              Requesting your current GPS coordinates. Please allow location access in the popup to continue.
+            </p>
+          )}
+          {locationStatus === 'success' && (
+            <>
+              <p className="mt-1 text-sm text-[#003366]">
+                Location captured successfully. You can now fill in the co-applicant address details.
+              </p>
+              <p className="mt-2 text-xs text-gray-600">
+                Latitude: <span className="font-mono">{locationCoords.latitude}</span> · Longitude:{' '}
+                <span className="font-mono">{locationCoords.longitude}</span>
+              </p>
+            </>
+          )}
+          {locationStatus === 'error' && (
+            <>
+              <p className="mt-1 text-sm text-[#8B0000]">
+                We need location permission to proceed. Please allow access when prompted.
+              </p>
+              {locationErrorMessage && (
+                <p className="mt-2 text-xs text-[#8B0000]">
+                  {locationErrorMessage} If you previously denied the request, enable location access in your browser settings and we
+                  will keep asking.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
           <div className="flex items-center justify-between">
             <div>
@@ -350,8 +630,9 @@ const performPincodeLookup = async (id: string, zip: string) => {
                           <Select
                             value={address.addressType}
                             onValueChange={value => handleAddressChange(address.id, 'addressType', value)}
+                            disabled={isInteractionDisabled}
                           >
-                            <SelectTrigger className="h-12 rounded-lg">
+                            <SelectTrigger className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
                               <SelectValue placeholder="Select address type" />
                             </SelectTrigger>
                             <SelectContent>
@@ -373,7 +654,8 @@ const performPincodeLookup = async (id: string, zip: string) => {
                             value={address.addressLine1}
                             onChange={e => handleAddressChange(address.id, 'addressLine1', e.target.value)}
                             placeholder="House/Flat No., Building Name"
-                            className="h-12 rounded-lg"
+                            disabled={isInteractionDisabled}
+                            className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
                             maxLength={255}
                           />
                         </div>
@@ -384,7 +666,8 @@ const performPincodeLookup = async (id: string, zip: string) => {
                             value={address.addressLine2}
                             onChange={e => handleAddressChange(address.id, 'addressLine2', e.target.value)}
                             placeholder="Street Name, Area"
-                            className="h-12 rounded-lg"
+                            disabled={isInteractionDisabled}
+                            className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
                             maxLength={255}
                           />
                         </div>
@@ -395,7 +678,8 @@ const performPincodeLookup = async (id: string, zip: string) => {
                             value={address.addressLine3}
                             onChange={e => handleAddressChange(address.id, 'addressLine3', e.target.value)}
                             placeholder="Block / Locality"
-                            className="h-12 rounded-lg"
+                            disabled={isInteractionDisabled}
+                            className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
                             maxLength={255}
                           />
                         </div>
@@ -408,7 +692,8 @@ const performPincodeLookup = async (id: string, zip: string) => {
                             value={address.landmark}
                             onChange={e => handleAddressChange(address.id, 'landmark', e.target.value)}
                             placeholder="Nearby landmark"
-                            className="h-12 rounded-lg"
+                            disabled={isInteractionDisabled}
+                            className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
                             maxLength={255}
                           />
                         </div>
@@ -422,9 +707,11 @@ const performPincodeLookup = async (id: string, zip: string) => {
                               value={address.postalCode}
                               onChange={(e) => handlePostalCodeChange(address.id, e.target.value)}
                               placeholder="Enter 6-digit postal code"
+                              disabled={isInteractionDisabled}
                               className={cn(
                                 'h-12 rounded-lg',
-                                (pincodeLookupId === address.id || address.city || address.stateCode) && 'pr-28'
+                                (pincodeLookupId === address.id || address.city || address.stateCode) && 'pr-28',
+                                isInteractionDisabled && 'bg-gray-50 cursor-not-allowed'
                               )}
                               maxLength={6}
                             />
@@ -443,12 +730,12 @@ const performPincodeLookup = async (id: string, zip: string) => {
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
+                        <div className={cn("flex items-center justify-between p-4 bg-gray-50 rounded-lg border", isInteractionDisabled && "opacity-60")}>
                           <Label className="text-base font-medium">Mark as Primary Address</Label>
-                          <Switch checked={address.isPrimary} onCheckedChange={() => setPrimaryAddress(address.id)} />
+                          <Switch checked={address.isPrimary} onCheckedChange={() => setPrimaryAddress(address.id)} disabled={isInteractionDisabled} />
                         </div>
 
-                        {addresses.length > 1 && (
+                        {addresses.length > 1 && !isInteractionDisabled && (
                           <div className="pt-2">
                             <Button
                               variant="outline"
@@ -469,8 +756,12 @@ const performPincodeLookup = async (id: string, zip: string) => {
             <div className="pt-2">
               <Button
                 variant="outline"
-                className="w-full h-12 text-[#0072CE] border-dashed border-[#0072CE]/50 hover:bg-[#E6F0FA] rounded-lg font-medium"
+              className={cn(
+                "w-full h-12 text-[#0072CE] border-dashed border-[#0072CE]/50 hover:bg-[#E6F0FA] rounded-lg font-medium",
+                isInteractionDisabled && "text-gray-400 border-gray-300 hover:bg-white cursor-not-allowed"
+              )}
                 onClick={handleAddAddress}
+              disabled={isInteractionDisabled}
               >
                 + Add Another Address
               </Button>
@@ -482,8 +773,11 @@ const performPincodeLookup = async (id: string, zip: string) => {
           <div className="max-w-2xl mx-auto">
             <Button
               onClick={handleSave}
-              disabled={!requiredFieldsFilled || isSaving}
-              className="w-full h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] disabled:bg-gray-300 disabled:text-gray-600"
+              disabled={isInteractionDisabled || !requiredFieldsFilled || isSaving}
+              className={cn(
+                "w-full h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white",
+                (isInteractionDisabled || !requiredFieldsFilled || isSaving) && "opacity-80 cursor-not-allowed"
+              )}
             >
               {isSaving ? 'Saving...' : 'Save Information'}
             </Button>
