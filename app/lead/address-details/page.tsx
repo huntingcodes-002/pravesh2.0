@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { submitAddressDetails, isApiError, getDetailedInfo } from '@/lib/api';
+import { submitAddressDetails, isApiError, getDetailedInfo, lookupPincode } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,9 @@ interface Address {
   postalCode: string;
   landmark: string;
   isPrimary: boolean;
+  city: string;
+  stateCode: string;
+  stateName: string;
 }
 
 export default function Step3Page() {
@@ -45,6 +48,7 @@ export default function Step3Page() {
     currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar || 
     false
   );
+  const [pincodeLookupId, setPincodeLookupId] = useState<string | null>(null);
 
   useEffect(() => {
     if (currentLead?.formData?.step3?.addresses) {
@@ -62,6 +66,9 @@ export default function Step3Page() {
             : typeof addr.is_primary === 'boolean'
               ? addr.is_primary
               : index === 0,
+          city: addr.city || addr.city_name || '',
+          stateCode: addr.stateCode || addr.state_code || '',
+          stateName: addr.stateName || addr.state || '',
         } as Address;
       });
 
@@ -80,6 +87,9 @@ export default function Step3Page() {
           postalCode: '',
           landmark: '',
           isPrimary: true,
+          city: '',
+          stateCode: '',
+          stateName: '',
         },
       ]);
     }
@@ -150,6 +160,9 @@ export default function Step3Page() {
                   postalCode: pincode,
                   landmark: landmark,
                   isPrimary: true,
+                  city: '',
+                  stateCode: '',
+                  stateName: '',
                 }];
               } else {
                 // Overwrite first address with OCR data
@@ -241,6 +254,9 @@ export default function Step3Page() {
         postalCode: '',
         landmark: '',
         isPrimary: prev.length === 0,
+        city: '',
+        stateCode: '',
+        stateName: '',
       },
     ]);
   };
@@ -276,6 +292,75 @@ export default function Step3Page() {
       prev.map((addr: Address) => ({ ...addr, isPrimary: addr.id === id }))
     );
   };
+
+const handlePostalCodeChange = (id: string, rawValue: string) => {
+  if (isCompleted) return;
+  const numeric = rawValue.replace(/[^0-9]/g, '').slice(0, 6);
+
+  setAddresses(prev =>
+    prev.map((addr) =>
+      addr.id === id
+        ? {
+            ...addr,
+            postalCode: numeric,
+            city: numeric.length === 6 ? addr.city : '',
+            stateCode: numeric.length === 6 ? addr.stateCode : '',
+            stateName: numeric.length === 6 ? addr.stateName : '',
+          }
+        : addr
+    )
+  );
+
+  if (numeric.length === 6) {
+    void performPincodeLookup(id, numeric);
+  } else if (pincodeLookupId === id) {
+    setPincodeLookupId(null);
+  }
+};
+
+const performPincodeLookup = async (id: string, zip: string) => {
+  setPincodeLookupId(id);
+  try {
+    const response = await lookupPincode(zip);
+    if (isApiError(response) || !response.success) {
+      throw new Error('Zipcode not found');
+    }
+
+    const data = response;
+    setAddresses(prev =>
+      prev.map((addr) =>
+        addr.id === id
+          ? {
+              ...addr,
+              city: data.city ?? '',
+              stateCode: data.state_code ?? '',
+              stateName: data.state ?? '',
+            }
+          : addr
+      )
+    );
+  } catch {
+    setAddresses(prev =>
+      prev.map((addr) =>
+        addr.id === id
+          ? {
+              ...addr,
+              city: '',
+              stateCode: '',
+              stateName: '',
+            }
+          : addr
+      )
+    );
+    toast({
+      title: 'Zipcode not found',
+      description: 'Please check the pincode and try again.',
+      variant: 'destructive',
+    });
+  } finally {
+    setPincodeLookupId(null);
+  }
+};
 
 
   const handleSave = async () => {
@@ -438,6 +523,9 @@ export default function Step3Page() {
           <div className="space-y-5">
             {addresses.map((address, index) => {
               const isCollapsed = collapsedAddresses.has(address.id);
+              const isLookupActive = pincodeLookupId === address.id;
+              const hasLookupValue = Boolean(address.city || address.stateCode);
+              const showLookupMeta = isLookupActive || hasLookupValue;
 
               return (
                 <Card
@@ -448,7 +536,6 @@ export default function Step3Page() {
                     open={!isCollapsed}
                     onOpenChange={() => toggleAddressCollapse(address.id)}
                   >
-
                     <CollapsibleTrigger asChild>
                       <div
                         className={cn(
@@ -456,7 +543,6 @@ export default function Step3Page() {
                           isCollapsed ? "rounded-xl" : "rounded-t-xl"
                         )}
                       >
-                        {/* Left side - Address info */}
                         <div className="flex flex-col min-w-0">
                           <h3 className="font-semibold text-[1.05rem] text-[#003366] flex items-center gap-1">
                             <span>Address {index + 1}</span>
@@ -473,15 +559,12 @@ export default function Step3Page() {
                             </span>
                           )}
 
-
                           {isCollapsed && address.addressLine1 && (
                             <span className="text-sm text-gray-500 truncate mt-1">
                               {address.addressLine1}, {address.postalCode}
                             </span>
                           )}
                         </div>
-
-                        {/* Right side - Icons (CHANGED HERE) */}
                         <div className="flex items-center gap-2 shrink-0 pl-2">
                           {addresses.length > 1 && !isCompleted && (
                             <Button
@@ -498,11 +581,7 @@ export default function Step3Page() {
                             </Button>
                           )}
                           <div className="text-gray-500">
-                            {isCollapsed ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronUp className="h-4 w-4" />
-                            )}
+                            {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
                           </div>
                         </div>
                       </div>
@@ -511,16 +590,13 @@ export default function Step3Page() {
                     <CollapsibleContent>
                       <CardContent className="px-4 py-5 space-y-4 bg-white">
                         <div className="space-y-4">
-                          {/* Address Type */}
                           <div>
                             <Label className="text-sm font-medium text-[#003366] mb-2 block">
                               Address Type <span className="text-red-500">*</span>
                             </Label>
                             <Select
                               value={address.addressType}
-                              onValueChange={(value) =>
-                                handleAddressChange(address.id, 'addressType', value)
-                              }
+                              onValueChange={(value) => handleAddressChange(address.id, 'addressType', value)}
                               disabled={isCompleted}
                             >
                               <SelectTrigger className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}>
@@ -537,7 +613,6 @@ export default function Step3Page() {
                             </Select>
                           </div>
 
-                          {/* Address Lines */}
                           <div>
                             <Label className="text-sm font-medium text-[#003366] mb-2 block">
                               Address Line 1 <span className="text-red-500">*</span>
@@ -545,9 +620,7 @@ export default function Step3Page() {
                             <Input
                               type="text"
                               value={address.addressLine1}
-                              onChange={(e) =>
-                                handleAddressChange(address.id, 'addressLine1', e.target.value)
-                              }
+                              onChange={(e) => handleAddressChange(address.id, 'addressLine1', e.target.value)}
                               placeholder="House/Flat No., Building Name"
                               disabled={isCompleted}
                               className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}
@@ -562,9 +635,7 @@ export default function Step3Page() {
                             <Input
                               type="text"
                               value={address.addressLine2}
-                              onChange={(e) =>
-                                handleAddressChange(address.id, 'addressLine2', e.target.value)
-                              }
+                              onChange={(e) => handleAddressChange(address.id, 'addressLine2', e.target.value)}
                               placeholder="Street Name, Area"
                               disabled={isCompleted}
                               className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}
@@ -572,7 +643,6 @@ export default function Step3Page() {
                             />
                           </div>
 
-                          {/* Landmark */}
                           <div>
                             <Label className="text-sm font-medium text-[#003366] mb-2 block">
                               Landmark <span className="text-red-500">*</span>
@@ -580,9 +650,7 @@ export default function Step3Page() {
                             <Input
                               type="text"
                               value={address.landmark}
-                              onChange={(e) =>
-                                handleAddressChange(address.id, 'landmark', e.target.value)
-                              }
+                              onChange={(e) => handleAddressChange(address.id, 'landmark', e.target.value)}
                               placeholder="Nearby landmark"
                               disabled={isCompleted}
                               className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}
@@ -590,22 +658,35 @@ export default function Step3Page() {
                             />
                           </div>
 
-                          {/* Postal Code */}
                           <div>
                             <Label className="text-sm font-medium text-[#003366] mb-2 block">
                               Postal Code <span className="text-red-500">*</span>
                             </Label>
-                            <Input
-                              type="text"
-                              value={address.postalCode}
-                              onChange={(e) =>
-                                handleAddressChange(address.id, 'postalCode', e.target.value.replace(/[^0-9]/g, ''))
-                              }
-                              placeholder="Enter 6-digit postal code"
-                              disabled={isCompleted}
-                              className={cn("h-12 rounded-lg", isCompleted && "bg-gray-50 cursor-not-allowed")}
-                              maxLength={6}
-                            />
+                            <div className="relative">
+                              <Input
+                                type="text"
+                                value={address.postalCode}
+                                onChange={(e) => handlePostalCodeChange(address.id, e.target.value)}
+                                placeholder="Enter 6-digit postal code"
+                                disabled={isCompleted}
+                                className={cn(
+                                  'h-12 rounded-lg',
+                                  showLookupMeta && 'pr-28',
+                                  isCompleted && 'bg-gray-50 cursor-not-allowed'
+                                )}
+                                maxLength={6}
+                              />
+                              {showLookupMeta && (
+                                <div className="absolute inset-y-0 right-3 flex items-center gap-2 pointer-events-none">
+                                  {isLookupActive && <Loader className="w-4 h-4 animate-spin text-[#0072CE]" />}
+                                  {hasLookupValue && !isLookupActive && (
+                                    <span className="text-sm font-medium text-gray-600 whitespace-nowrap">
+                                      {address.city} {address.stateCode}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
 
                           <div className={cn("flex items-center justify-between p-4 bg-gray-50 rounded-lg border", isCompleted && "opacity-60")}>
@@ -618,7 +699,6 @@ export default function Step3Page() {
                               disabled={isCompleted}
                             />
                           </div>
-
                         </div>
                       </CardContent>
                     </CollapsibleContent>

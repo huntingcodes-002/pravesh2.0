@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { LogIn, LayoutGrid, Loader2 } from 'lucide-react';
+import Image from 'next/image';
+import { LogIn, Loader2 } from 'lucide-react';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +31,10 @@ import { cn } from '@/lib/utils';
 
 const formSchema = z.object({
   email: z.string().email({ message: 'Please enter a valid email address.' }),
+  password: z
+    .string()
+    .min(6, { message: 'Password must be at least 6 characters.' })
+    .max(32, { message: 'Password must be at most 32 characters.' }),
 });
 
 type LoginFormValues = z.infer<typeof formSchema>;
@@ -44,6 +49,7 @@ export default function LoginPage() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       email: '',
+      password: '',
     },
     mode: 'onChange',
   });
@@ -70,7 +76,8 @@ export default function LoginPage() {
     }
   }
 
-  const isFormValid = form.formState.isValid && form.watch('email');
+  const isFormValid =
+    form.formState.isValid && Boolean(form.watch('email')) && Boolean(form.watch('password'));
   
   // Custom button classes for matching mock disabled/enabled style
   const buttonClass = cn(
@@ -81,7 +88,7 @@ export default function LoginPage() {
       : 'bg-[#6B7280] text-white cursor-not-allowed' // neutral-gray disabled
   );
   
-  const iconBoxClass = 'w-20 h-20 bg-[#0072CE] rounded-2xl mx-auto mb-4 flex items-center justify-center';
+  const iconBoxClass = 'w-24 h-24 mx-auto mb-4 flex items-center justify-center';
   const labelClass = 'block text-sm font-medium text-[#003366]';
   const inputClass = 'w-full px-4 py-4 border-2 border-gray-300 rounded-xl bg-white text-[#003366] placeholder-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#0072CE] focus:border-[#0072CE] transition-colors h-14';
 
@@ -91,7 +98,13 @@ export default function LoginPage() {
         <CardHeader className="space-y-1 text-center py-8">
             {/* Custom Icon Box based on HTML Mock */}
             <div className={iconBoxClass}>
-                <LayoutGrid className="w-9 h-9 text-white" /> {/* Using LayoutGrid for a grid icon */}
+                <Image
+                  src="/apps/pravesh/pravesh-logo.jpg"
+                  alt="Pravesh Logo"
+                  width={96}
+                  height={96}
+                  priority
+                />
             </div>
             <CardTitle className="text-2xl font-bold text-[#003366]">Hey User!</CardTitle>
             <CardDescription className="text-lg text-[#6B7280]">
@@ -105,12 +118,31 @@ export default function LoginPage() {
                 control={form.control}
                 name="email"
                 render={({ field }) => (
-                  <FormItem className='space-y-2'>
+                  <FormItem className="space-y-2">
                     <FormLabel className={labelClass}>Email</FormLabel>
                     <FormControl>
                       <Input
                         placeholder="Enter your email address"
                         type="email"
+                        className={inputClass}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem className="space-y-2">
+                    <FormLabel className={labelClass}>Password</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="Enter your password"
+                        type="password"
                         className={inputClass}
                         {...field}
                       />

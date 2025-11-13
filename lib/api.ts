@@ -390,6 +390,54 @@ export async function deleteCoApplicantFromApi(
 }
 
 /**
+ * Endpoint: Pincode Lookup
+ * POST /api/base/pincode/lookup/
+ */
+export interface PincodeLookupRequest {
+  zip_code: string;
+}
+
+export interface PincodeLookupSuccess {
+  success: true;
+  zip_code: string;
+  state: string;
+  state_code: string;
+  city: string;
+  city_code?: string;
+}
+
+export type PincodeLookupResponse = ApiResponse<PincodeLookupSuccess>;
+
+export async function lookupPincode(
+  zip_code: string
+): Promise<PincodeLookupResponse> {
+  try {
+    const token = getAccessToken();
+
+    const response = await fetch('https://uatlb.api.saarathifinance.com/api/base/pincode/lookup/', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify({ zip_code }),
+      credentials: 'include',
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return data as ApiError;
+    }
+
+    return data as PincodeLookupSuccess;
+  } catch (error: any) {
+    return handleApiError(error);
+  }
+}
+
+/**
  * Endpoint 7: Verify Mobile OTP
  * POST /api/lead-collection/applications/verify-mobile/
  */

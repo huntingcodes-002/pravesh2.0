@@ -13,7 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { isApiError, submitCoApplicantAddressDetails } from '@/lib/api';
+import { isApiError, submitCoApplicantAddressDetails, lookupPincode } from '@/lib/api';
+import { Loader } from 'lucide-react';
 
 interface Address {
   id: string;
@@ -24,6 +25,9 @@ interface Address {
   landmark: string;
   postalCode: string;
   isPrimary: boolean;
+  city: string;
+  stateCode: string;
+  stateName: string;
 }
 
 const createEmptyAddress = (): Address => ({
@@ -35,6 +39,9 @@ const createEmptyAddress = (): Address => ({
   landmark: '',
   postalCode: '',
   isPrimary: false,
+  city: '',
+  stateCode: '',
+  stateName: '',
 });
 
 function CoApplicantAddressDetailsPageContent() {
@@ -61,6 +68,7 @@ function CoApplicantAddressDetailsPageContent() {
   );
 
   const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
+  const [pincodeLookupId, setPincodeLookupId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -81,6 +89,73 @@ function CoApplicantAddressDetailsPageContent() {
   const handleAddressChange = <K extends keyof Address>(id: string, field: K, value: Address[K]) => {
     setAddresses(prev => prev.map(addr => (addr.id === id ? { ...addr, [field]: value } : addr)));
   };
+
+const handlePostalCodeChange = (id: string, rawValue: string) => {
+  const numeric = rawValue.replace(/[^0-9]/g, '').slice(0, 6);
+  setAddresses(prev =>
+    prev.map(addr =>
+      addr.id === id
+        ? {
+            ...addr,
+            postalCode: numeric,
+            city: numeric.length === 6 ? addr.city : '',
+            stateCode: numeric.length === 6 ? addr.stateCode : '',
+            stateName: numeric.length === 6 ? addr.stateName : '',
+          }
+        : addr
+    )
+  );
+
+  if (numeric.length === 6) {
+    void performPincodeLookup(id, numeric);
+  } else if (pincodeLookupId === id) {
+    setPincodeLookupId(null);
+  }
+};
+
+const performPincodeLookup = async (id: string, zip: string) => {
+  setPincodeLookupId(id);
+  try {
+    const response = await lookupPincode(zip);
+    if (isApiError(response) || !response.success) {
+      throw new Error('Zipcode not found');
+    }
+
+    const data = response;
+    setAddresses(prev =>
+      prev.map(addr =>
+        addr.id === id
+          ? {
+              ...addr,
+              city: data.city ?? '',
+              stateCode: data.state_code ?? '',
+              stateName: data.state ?? '',
+            }
+          : addr
+      )
+    );
+  } catch {
+    setAddresses(prev =>
+      prev.map(addr =>
+        addr.id === id
+          ? {
+              ...addr,
+              city: '',
+              stateCode: '',
+              stateName: '',
+            }
+          : addr
+      )
+    );
+    toast({
+      title: 'Zipcode not found',
+      description: 'Please check the pincode and try again.',
+      variant: 'destructive',
+    });
+  } finally {
+    setPincodeLookupId(null);
+  }
+};
 
   const handleAddAddress = () => {
     setCollapsedAddresses(new Set(addresses.map((addr: Address) => addr.id)));
@@ -158,6 +233,8 @@ function CoApplicantAddressDetailsPageContent() {
       latitude: '90',
       longitude: '90',
       is_primary: addr.isPrimary,
+      city: addr.city || undefined,
+      state_code: addr.stateCode || undefined,
     }));
 
     setIsSaving(true);
@@ -340,15 +417,30 @@ function CoApplicantAddressDetailsPageContent() {
                           <Label className="text-sm font-medium text-[#003366] mb-2 block">
                             Postal Code <span className="text-[#DC2626]">*</span>
                           </Label>
-                          <Input
-                            value={address.postalCode}
-                            onChange={e =>
-                              handleAddressChange(address.id, 'postalCode', e.target.value.replace(/[^0-9]/g, ''))
-                            }
-                            placeholder="Enter 6-digit postal code"
-                            className="h-12 rounded-lg"
-                            maxLength={6}
-                          />
+                          <div className="relative">
+                            <Input
+                              value={address.postalCode}
+                              onChange={(e) => handlePostalCodeChange(address.id, e.target.value)}
+                              placeholder="Enter 6-digit postal code"
+                              className={cn(
+                                'h-12 rounded-lg',
+                                (pincodeLookupId === address.id || address.city || address.stateCode) && 'pr-28'
+                              )}
+                              maxLength={6}
+                            />
+                            {(pincodeLookupId === address.id || address.city || address.stateCode) && (
+                              <div className="absolute inset-y-0 right-3 flex items-center gap-2 pointer-events-none">
+                                {pincodeLookupId === address.id && (
+                                  <Loader className="w-4 h-4 animate-spin text-[#0072CE]" />
+                                )}
+                                {address.city && (
+                                  <span className="text-sm font-medium text-gray-600 whitespace-nowrap">
+                                    {address.city} {address.stateCode}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
