@@ -4,13 +4,14 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Eye, Image as ImageIcon, Users } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
-import { useLead } from '@/contexts/LeadContext';
+import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { fetchPaymentStatus, isApiError } from '@/lib/api';
 
 type SectionStatus = 'incomplete' | 'in-progress' | 'completed';
 
@@ -27,6 +28,8 @@ export default function NewLeadInfoPage() {
   const { toast } = useToast();
   const [previewFile, setPreviewFile] = useState<any>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('Pending');
+  const [isPaymentStatusLoading, setIsPaymentStatusLoading] = useState(false);
 
   // Redirect if no current lead
   useEffect(() => {
@@ -34,6 +37,91 @@ export default function NewLeadInfoPage() {
       router.replace('/leads');
     }
   }, [currentLead, router]);
+
+  useEffect(() => {
+    if (!currentLead) return;
+
+    let derivedStatus: PaymentStatus | null = null;
+
+    if (currentLead.payments && currentLead.payments.length > 0) {
+      const latestPayment = [...currentLead.payments].reverse().find(payment => payment?.status);
+      if (latestPayment?.status) {
+        derivedStatus = latestPayment.status;
+      }
+    }
+
+    if (!derivedStatus && typeof window !== 'undefined' && currentLead.appId) {
+      const storageKey = `payment-state-${currentLead.appId}`;
+      try {
+        const stored = sessionStorage.getItem(storageKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.paymentStatus === 'Paid' || parsed?.paymentStatus === 'Pending' || parsed?.paymentStatus === 'Failed') {
+            derivedStatus = parsed.paymentStatus;
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to hydrate payment status from storage', error);
+      }
+    }
+
+    if (derivedStatus) {
+      setPaymentStatus(derivedStatus);
+    }
+  }, [currentLead]);
+
+  useEffect(() => {
+    if (!currentLead?.appId) return;
+
+    let isMounted = true;
+
+    const loadPaymentStatus = async () => {
+      setIsPaymentStatusLoading(true);
+      try {
+        const response = await fetchPaymentStatus(currentLead.appId);
+        if (!isMounted) return;
+
+        if (isApiError(response)) {
+          return;
+        }
+
+        const statusData = response.data ?? (response as any);
+        const normalizedState = String(statusData?.state ?? '').toLowerCase();
+
+        let nextStatus: PaymentStatus = 'Pending';
+        if (normalizedState === 'completed') {
+          nextStatus = 'Paid';
+        } else if (normalizedState === 'failed' || normalizedState === 'cancelled') {
+          nextStatus = 'Failed';
+        }
+
+        setPaymentStatus(nextStatus);
+
+        if (typeof window !== 'undefined') {
+          const storageKey = `payment-state-${currentLead.appId}`;
+          try {
+            const raw = sessionStorage.getItem(storageKey);
+            const parsed = raw ? JSON.parse(raw) : {};
+            sessionStorage.setItem(storageKey, JSON.stringify({ ...parsed, paymentStatus: nextStatus }));
+          } catch (error) {
+            console.warn('Failed to persist payment status to storage', error);
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch payment status', error);
+      } finally {
+        if (isMounted) {
+          setIsPaymentStatusLoading(false);
+        }
+      }
+    };
+
+    void loadPaymentStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentLead?.appId]);
 
   // Calculate Step 2 status (Basic Details) - based on completion flag
   const getStep2Status = (): SectionStatus => {
@@ -293,6 +381,22 @@ export default function NewLeadInfoPage() {
     }
   };
 
+  const renderPaymentStatusBadge = () => {
+    const baseClasses = "rounded-full border text-xs font-medium px-3 py-1";
+    if (isPaymentStatusLoading) {
+      return <Badge className={cn(baseClasses, "bg-gray-100 border-gray-200 text-gray-600")}>Checking...</Badge>;
+    }
+
+    switch (paymentStatus) {
+      case 'Paid':
+        return <Badge className={cn(baseClasses, "bg-green-100 border-green-200 text-green-700")}>Paid</Badge>;
+      case 'Failed':
+        return <Badge className={cn(baseClasses, "bg-red-100 border-red-200 text-red-600")}>Failed</Badge>;
+      default:
+        return <Badge className={cn(baseClasses, "bg-yellow-100 border-yellow-200 text-yellow-700")}>Pending</Badge>;
+    }
+  };
+
   const handlePreview = (file: any) => {
     setPreviewFile(file);
     setShowPreview(true);
@@ -391,9 +495,7 @@ export default function NewLeadInfoPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Payment Details</h3>
-                <Badge className="rounded-full bg-yellow-100 text-yellow-700 border border-yellow-200 text-xs font-medium px-3 py-1">
-                  Pending
-                </Badge>
+                {renderPaymentStatusBadge()}
               </div>
               <Button
                 onClick={handleGeneratePaymentLink}
@@ -559,7 +661,7 @@ export default function NewLeadInfoPage() {
 
           {/* Co-Applicants Card */}
           <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
-            <CardContent className="p-5 space-y-4">
+            <CardContent className="p-5 space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900">Co-Applicant(s)</h3>
                 <Badge
@@ -573,7 +675,7 @@ export default function NewLeadInfoPage() {
               </div>
 
               {!hasCoApplicants ? (
-                <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-100 bg-white px-4 py-4">
+                <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
                       <Users className="w-5 h-5 text-blue-600" />
@@ -587,7 +689,7 @@ export default function NewLeadInfoPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => router.push('/lead/co-applicant-info')}
-                    className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                    className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
                   >
                     Manage
                   </Button>
@@ -612,8 +714,8 @@ export default function NewLeadInfoPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => router.push('/lead/co-applicant-info')}
-                      className="border-blue-600 text-blue-600 hover:bg-blue-50"
-                    >
+                    className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
+                  >
                       Manage
                     </Button>
                   </div>

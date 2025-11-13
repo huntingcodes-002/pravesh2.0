@@ -301,6 +301,27 @@ export async function resendMobileOTP(
 }
 
 /**
+ * Endpoint: Fetch Payment Status
+ * GET /api/lead-collection/applications/payment-status/
+ */
+export interface PaymentStatusData {
+  state?: string;
+  masked_customer_mobile?: string;
+  paid_on?: string;
+  [key: string]: any;
+}
+
+export async function fetchPaymentStatus(
+  applicationId: string
+): Promise<ApiResponse<PaymentStatusData>> {
+  const query = `applications/payment-status/?application_id=${encodeURIComponent(applicationId)}`;
+  return apiFetch<PaymentStatusData>(query, {
+    method: 'GET',
+    credentials: 'include',
+  });
+}
+
+/**
  * Endpoint 7: Verify Mobile OTP
  * POST /api/lead-collection/applications/verify-mobile/
  */

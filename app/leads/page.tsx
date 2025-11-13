@@ -79,6 +79,14 @@ export default function LeadsDashboardPage() {
   const [isFetchingLead, setIsFetchingLead] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  const maskMobileNumber = useCallback((mobile: string | undefined | null) => {
+    if (!mobile) return 'N/A';
+    const digitsOnly = mobile.replace(/\D/g, '');
+    if (digitsOnly.length <= 4) return digitsOnly || 'N/A';
+    const maskedSection = 'X'.repeat(digitsOnly.length - 4);
+    return `${maskedSection}${digitsOnly.slice(-4)}`;
+  }, []);
+
   // Embla Carousel Controls
   const onSelect = useCallback(() => {
     if (!emblaApi) return;
@@ -399,11 +407,15 @@ export default function LeadsDashboardPage() {
                     {/* Row 1: App ID & Status */}
                     <div className="flex justify-between items-start">
                       <div className="space-y-1">
-                        <div className="font-semibold text-gray-900 flex items-center gap-2">
-                          {lead.appId || 'Pending Application ID'} 
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-gray-900">
+                            {lead.customerName || 'New Lead'}
+                          </p>
                           {getStatusBadge(lead.status)}
                         </div>
-                        <p className="text-sm font-medium text-gray-700">{lead.customerName || 'New Lead'}</p>
+                        <p className="text-sm font-medium text-gray-700">
+                          {lead.appId || 'Pending Application ID'}
+                        </p>
                       </div>
                       
                       {/* Preview Button (Moved) */}
@@ -428,7 +440,12 @@ export default function LeadsDashboardPage() {
 
                     {/* Row 2: Mobile & Timestamp */}
                     <div className='border-t border-dashed pt-3'>
-                        <p className="text-sm text-gray-500 mb-2">Mobile: <span className='font-medium text-gray-800'>{lead.customerMobile}</span></p>
+                        <p className="text-sm text-gray-500 mb-2">
+                          Mobile:{' '}
+                          <span className='font-medium text-gray-800'>
+                            {maskMobileNumber(lead.customerMobile)}
+                          </span>
+                        </p>
                         <p className="text-xs text-gray-400">
                             Updated: {format(new Date(lead.updatedAt), 'd MMM yyyy, hh:mm a')}
                         </p>
