@@ -901,3 +901,40 @@ export async function fetchApplicationsSummary(): Promise<ApiResponse<Applicatio
   });
 }
 
+/**
+ * Endpoint: Get Co-Applicant Management
+ * GET /api/lead-collection/applications/co-applicant-management/?application_id={application_id}
+ */
+export interface CoApplicantManagementItem {
+  co_applicant_index: number;
+  customer_name: string;
+  mobile_number: string;
+  relationship_to_primary: string;
+  workflow_status: string;
+  completed_steps: Record<string, any>;
+  is_completed: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+  participant_id: number;
+  has_customer: boolean;
+}
+
+export interface CoApplicantManagementResponse {
+  success: boolean;
+  application_id: string;
+  co_applicants: CoApplicantManagementItem[];
+  can_add_more: boolean;
+  can_proceed_to_next_step: boolean;
+}
+
+export async function getCoApplicantManagement(
+  application_id: string
+): Promise<ApiResponse<CoApplicantManagementResponse>> {
+  return apiFetch<CoApplicantManagementResponse>(
+    `applications/co-applicant-management/?application_id=${encodeURIComponent(application_id)}`,
+    {
+      method: 'GET',
+    }
+  );
+}
+

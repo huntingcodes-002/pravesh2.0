@@ -17,14 +17,9 @@ import { CheckCircle, Edit, Loader, Send } from 'lucide-react';
 
 const RELATIONSHIPS = [
   { value: 'spouse', label: 'Spouse' },
-  { value: 'father', label: 'Father' },
-  { value: 'mother', label: 'Mother' },
-  { value: 'son', label: 'Son' },
-  { value: 'daughter', label: 'Daughter' },
-  { value: 'brother', label: 'Brother' },
-  { value: 'sister', label: 'Sister' },
-  { value: 'friend', label: 'Friend' },
-  { value: 'business_partner', label: 'Business Partner' },
+  { value: 'parent', label: 'Parent' },
+  { value: 'child', label: 'Child' },
+  { value: 'sibling', label: 'Sibling' },
   { value: 'other', label: 'Other' },
 ];
 

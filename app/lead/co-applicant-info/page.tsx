@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Users, UserCheck, MapPin, Trash2 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -20,7 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { deleteCoApplicantFromApi, isApiError } from '@/lib/api';
+import { deleteCoApplicantFromApi, getDetailedInfo, isApiError, type ApiSuccess } from '@/lib/api';
 
 type SectionStatus = 'incomplete' | 'in-progress' | 'completed';
 
@@ -58,12 +58,114 @@ export default function CoApplicantInfoPage() {
   const { toast } = useToast();
 
   const coApplicants = currentLead?.formData?.coApplicants ?? [];
+  
+  // Interface for co-applicant data from detailed-info API
+  interface CoApplicantFromDetailedInfo {
+    co_applicant_index: number;
+    personal_info?: {
+      date_of_birth?: {
+        value?: string;
+        verified?: boolean;
+      };
+      email?: string | null;
+      full_name?: {
+        value?: string;
+        verified?: boolean;
+      };
+      gender?: string | null;
+      marital_status?: string | null;
+      mobile_number?: {
+        value?: string;
+        verified?: boolean;
+      };
+      pan_number?: {
+        value?: string;
+        verified?: boolean;
+      };
+    };
+    addresses?: Array<{
+      address_line_1?: string;
+      address_line_2?: string;
+      address_line_3?: string;
+      landmark?: string;
+      pincode?: string;
+      city?: string;
+      state?: string;
+      state_code?: string;
+      address_type?: string;
+      is_primary?: boolean;
+      latitude?: string;
+      longitude?: string;
+    }>;
+  }
+
+  const [apiCoApplicants, setApiCoApplicants] = useState<CoApplicantFromDetailedInfo[]>([]);
+  const [isLoadingCoApplicants, setIsLoadingCoApplicants] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{
     id: string;
     name: string;
     index: number;
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Fetch co-applicants from detailed-info API when page loads
+  useEffect(() => {
+    if (!currentLead?.appId) {
+      setApiCoApplicants([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchCoApplicants = async () => {
+      setIsLoadingCoApplicants(true);
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+        if (!isMounted) return;
+
+        if (isApiError(response)) {
+          console.warn('Failed to fetch co-applicants from API', response.error);
+          setApiCoApplicants([]);
+          return;
+        }
+
+        // Extract application_details from response
+        const responseData = response.data ?? (response as any);
+        const applicationDetails = responseData?.application_details ?? responseData;
+        const participants = applicationDetails?.participants ?? [];
+
+        // Filter and extract co-applicants with their full data
+        const coApplicantsData = participants
+          .filter((participant: any) => participant?.participant_type === 'co-applicant')
+          .map((participant: any) => ({
+            co_applicant_index: typeof participant?.co_applicant_index === 'number' 
+              ? participant.co_applicant_index 
+              : -1,
+            personal_info: participant?.personal_info,
+            addresses: participant?.addresses ?? [],
+          }))
+          .filter((coApp: CoApplicantFromDetailedInfo) => coApp.co_applicant_index >= 0)
+          .sort((a: CoApplicantFromDetailedInfo, b: CoApplicantFromDetailedInfo) => 
+            a.co_applicant_index - b.co_applicant_index
+          );
+
+        setApiCoApplicants(coApplicantsData);
+      } catch (error) {
+        console.warn('Error fetching co-applicants from API', error);
+        setApiCoApplicants([]);
+      } finally {
+        if (isMounted) {
+          setIsLoadingCoApplicants(false);
+        }
+      }
+    };
+
+    void fetchCoApplicants();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentLead?.appId]);
 
   const statusBadge = (status: SectionStatus) => {
     const baseClasses = 'rounded-full border text-[11px] font-medium px-3 py-1';
@@ -77,56 +179,41 @@ export default function CoApplicantInfoPage() {
     }
   };
 
-  const isConsentVerified = (coApp: any) =>
-    coApp?.data?.basicDetails?.isMobileVerified ?? coApp?.data?.step1?.isMobileVerified ?? false;
-
-  const getBasicDetailsStatus = (coApp: any): SectionStatus => {
-    const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1;
-    const hasAny =
-      basic?.firstName ||
-      basic?.lastName ||
-      basic?.mobile ||
-      basic?.gender ||
-      basic?.pan ||
-      basic?.alternateIdType ||
-      basic?.documentNumber;
-
-    const hasAll =
-      (basic?.hasPan === 'yes'
-        ? basic?.pan && basic?.pan.length === 10 && basic?.gender && basic?.dob
-        : basic?.hasPan === 'no'
-          ? basic?.gender &&
-            basic?.dob &&
-            basic?.maritalStatus &&
-            basic?.alternateIdType &&
-            basic?.documentNumber &&
-            basic?.panUnavailabilityReason
-          : false) || coApp?.isComplete;
-
+  // Helper to get status from API data
+  const getBasicDetailsStatusFromApi = (personalInfo: CoApplicantFromDetailedInfo['personal_info']): SectionStatus => {
+    if (!personalInfo) return 'incomplete';
+    
+    const hasName = Boolean(personalInfo.full_name?.value);
+    const hasMobile = Boolean(personalInfo.mobile_number?.value);
+    const hasPan = Boolean(personalInfo.pan_number?.value);
+    const hasDob = Boolean(personalInfo.date_of_birth?.value);
+    const hasGender = Boolean(personalInfo.gender);
+    
+    const hasAll = hasName && hasMobile && (hasPan || hasDob) && hasGender;
+    const hasAny = hasName || hasMobile || hasPan || hasDob || hasGender;
+    
     if (hasAll) return 'completed';
     if (hasAny) return 'in-progress';
     return 'incomplete';
   };
 
-  const getAddressStatus = (coApp: any): SectionStatus => {
-    const addresses = coApp?.data?.addressDetails?.addresses ?? coApp?.data?.step3?.addresses ?? [];
+  const getAddressStatusFromApi = (addresses: CoApplicantFromDetailedInfo['addresses']): SectionStatus => {
     if (!Array.isArray(addresses) || addresses.length === 0) return 'incomplete';
 
     const hasAny = addresses.some(
-      (addr: any) =>
-        addr?.addressType ||
-        addr?.addressLine1 ||
-        addr?.addressLine2 ||
+      (addr) =>
+        addr?.address_line_1 ||
+        addr?.address_line_2 ||
         addr?.landmark ||
-        addr?.postalCode
+        addr?.pincode
     );
 
-    const hasAll = addresses.every(
-      (addr: any) =>
-        addr?.addressType && addr?.addressLine1 && addr?.landmark && addr?.postalCode && addr?.postalCode.length === 6
+    const hasAll = addresses.some(
+      (addr) =>
+        addr?.address_line_1 && addr?.landmark && addr?.pincode && addr?.pincode.length === 6
     );
 
-    if (hasAll || coApp?.isComplete) return 'completed';
+    if (hasAll) return 'completed';
     if (hasAny) return 'in-progress';
     return 'incomplete';
   };
@@ -149,10 +236,19 @@ export default function CoApplicantInfoPage() {
     router.push('/lead/co-applicant/new');
   };
 
-  const renderBasicDetails = (coApp: any) => {
-    const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
-    const fullName = [basic.firstName, basic.lastName].filter(Boolean).join(' ');
-    const relation = RELATIONSHIP_LABELS[coApp.relationship] ?? coApp.relationship ?? 'Not set';
+  const renderBasicDetails = (apiCoApp: CoApplicantFromDetailedInfo) => {
+    const personalInfo = apiCoApp.personal_info;
+    const fullName = personalInfo?.full_name?.value || 'Unnamed Co-applicant';
+    const mobileNumber = personalInfo?.mobile_number?.value;
+    const panNumber = personalInfo?.pan_number?.value;
+    const dob = personalInfo?.date_of_birth?.value;
+    const gender = personalInfo?.gender;
+    const email = personalInfo?.email;
+    const maritalStatus = personalInfo?.marital_status;
+    const status = getBasicDetailsStatusFromApi(personalInfo);
+
+    // Find local co-applicant for navigation
+    const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
 
     return (
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-1">
@@ -161,60 +257,98 @@ export default function CoApplicantInfoPage() {
             <UserCheck className="w-5 h-5 text-blue-600" />
             <p className="text-sm font-semibold text-gray-900">Basic Details</p>
           </div>
-          {statusBadge(getBasicDetailsStatus(coApp))}
+          {statusBadge(status)}
         </div>
 
-        {fullName ? (
-          <p className="text-sm text-gray-700">
-            <span className="font-medium">Name:</span> {fullName}
-          </p>
+        {personalInfo ? (
+          <div className="space-y-1 text-sm text-gray-700">
+            {fullName && (
+              <p>
+                <span className="font-medium">Name:</span> {fullName}
+                {personalInfo.full_name?.verified && (
+                  <span className="ml-2 text-xs text-green-600">✓ Verified</span>
+                )}
+              </p>
+            )}
+            {mobileNumber && (
+              <p>
+                <span className="font-medium">Mobile:</span> {mobileNumber}
+                {personalInfo.mobile_number?.verified && (
+                  <span className="ml-2 text-xs text-green-600">✓ Verified</span>
+                )}
+              </p>
+            )}
+            {email && (
+              <p>
+                <span className="font-medium">Email:</span> {email}
+              </p>
+            )}
+            {panNumber && (
+              <p>
+                <span className="font-medium">PAN Number:</span> {panNumber}
+                {personalInfo.pan_number?.verified && (
+                  <span className="ml-2 text-xs text-green-600">✓ Verified</span>
+                )}
+              </p>
+            )}
+            {dob && (
+              <p>
+                <span className="font-medium">Date of Birth:</span> {(() => {
+                  try {
+                    const date = new Date(dob);
+                    if (!isNaN(date.getTime())) {
+                      return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    }
+                  } catch {
+                    // fall through
+                  }
+                  return dob;
+                })()}
+                {personalInfo.date_of_birth?.verified && (
+                  <span className="ml-2 text-xs text-green-600">✓ Verified</span>
+                )}
+              </p>
+            )}
+            {gender && (
+              <p>
+                <span className="font-medium">Gender:</span> {gender}
+              </p>
+            )}
+            {maritalStatus && (
+              <p>
+                <span className="font-medium">Marital Status:</span> {maritalStatus}
+              </p>
+            )}
+          </div>
         ) : (
           <p className="text-xs text-gray-500">No basic details added yet</p>
         )}
 
-        <div className="space-y-1 text-sm text-gray-700">
-          <p>
-            <span className="font-medium">Relation:</span> {relation}
-          </p>
-          {basic.gender && (
-            <p>
-              <span className="font-medium">Gender:</span> {basic.gender}
-            </p>
-          )}
-          {basic.pan && (
-            <p>
-              <span className="font-medium">PAN Number:</span> {basic.pan}
-            </p>
-          )}
-          {basic.alternateIdType && basic.documentNumber && (
-            <p>
-              <span className="font-medium">{basic.alternateIdType}:</span> {basic.documentNumber}
-            </p>
-          )}
-        </div>
-
-        <p className="text-xs text-gray-400 mt-2">
-          {basic.autoFilledViaPAN ? 'Auto-filled and verified via PAN workflow.' : 'Values entered manually.'}
-        </p>
-
-        <div className="flex flex-wrap gap-3 pt-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => router.push(`/lead/co-applicant/basic-details?coApplicantId=${coApp.id}`)}
-            className="border-blue-600 text-blue-600 hover:bg-blue-50"
-          >
-            Edit
-          </Button>
-        </div>
+        {localCoApp && (
+          <div className="flex flex-wrap gap-3 pt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                router.push(`/lead/co-applicant/basic-details?coApplicantId=${localCoApp.id}`);
+              }}
+              className="border-blue-600 text-blue-600 hover:bg-blue-50"
+            >
+              Edit
+            </Button>
+          </div>
+        )}
       </div>
     );
   };
 
-  const renderAddressDetails = (coApp: any) => {
-    const addresses = coApp?.data?.addressDetails?.addresses ?? coApp?.data?.step3?.addresses ?? [];
-    const primaryAddress = Array.isArray(addresses) ? addresses.find((addr: any) => addr.isPrimary) ?? addresses[0] : null;
-    const status = getAddressStatus(coApp);
+  const renderAddressDetails = (apiCoApp: CoApplicantFromDetailedInfo) => {
+    const addresses = apiCoApp.addresses ?? [];
+    const primaryAddress = addresses.find((addr) => addr.is_primary) ?? addresses[0] ?? null;
+    const status = getAddressStatusFromApi(addresses);
+
+    // Find local co-applicant for navigation
+    const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
 
     return (
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-1">
@@ -228,12 +362,19 @@ export default function CoApplicantInfoPage() {
 
         {primaryAddress ? (
           <div className="space-y-1 text-sm text-gray-700">
-            <p>
-              <span className="font-medium">Address:</span> {primaryAddress.addressLine1}
-            </p>
-            {primaryAddress.addressLine2 && (
+            {primaryAddress.address_line_1 && (
               <p>
-                <span className="font-medium">Area:</span> {primaryAddress.addressLine2}
+                <span className="font-medium">Address:</span> {primaryAddress.address_line_1}
+              </p>
+            )}
+            {primaryAddress.address_line_2 && (
+              <p>
+                <span className="font-medium">Area:</span> {primaryAddress.address_line_2}
+              </p>
+            )}
+            {primaryAddress.address_line_3 && (
+              <p>
+                <span className="font-medium">Area 2:</span> {primaryAddress.address_line_3}
               </p>
             )}
             {primaryAddress.landmark && (
@@ -246,9 +387,19 @@ export default function CoApplicantInfoPage() {
                 <span className="font-medium">City:</span> {primaryAddress.city}
               </p>
             )}
-            {primaryAddress.postalCode && (
+            {primaryAddress.state && (
               <p>
-                <span className="font-medium">Pincode:</span> {primaryAddress.postalCode}
+                <span className="font-medium">State:</span> {primaryAddress.state}
+              </p>
+            )}
+            {primaryAddress.pincode && (
+              <p>
+                <span className="font-medium">Pincode:</span> {primaryAddress.pincode}
+              </p>
+            )}
+            {primaryAddress.address_type && (
+              <p>
+                <span className="font-medium">Type:</span> {primaryAddress.address_type}
               </p>
             )}
           </div>
@@ -256,18 +407,18 @@ export default function CoApplicantInfoPage() {
           <p className="text-xs text-gray-500">No address details added yet</p>
         )}
 
-        <p className="text-xs text-gray-400 mt-2">
-          {coApp?.data?.addressDetails?.autoFilledViaAadhaar ? 'Auto-filled and verified via Aadhaar workflow.' : 'Values entered manually.'}
-        </p>
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => router.push(`/lead/co-applicant/address-details?coApplicantId=${coApp.id}`)}
-          className="mt-3 border-blue-600 text-blue-600 hover:bg-blue-50"
-        >
-          Edit
-        </Button>
+        {localCoApp && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              router.push(`/lead/co-applicant/address-details?coApplicantId=${localCoApp.id}`);
+            }}
+            className="mt-3 border-blue-600 text-blue-600 hover:bg-blue-50"
+          >
+            Edit
+          </Button>
+        )}
       </div>
     );
   };
@@ -282,13 +433,12 @@ export default function CoApplicantInfoPage() {
   };
 
   const totalCompleted = useMemo(() => {
-    return coApplicants.filter(
-      (coApp: any) =>
-        isConsentVerified(coApp) &&
-        getBasicDetailsStatus(coApp) === 'completed' &&
-        getAddressStatus(coApp) === 'completed'
+    return apiCoApplicants.filter(
+      (apiCoApp) =>
+        getBasicDetailsStatusFromApi(apiCoApp.personal_info) === 'completed' &&
+        getAddressStatusFromApi(apiCoApp.addresses) === 'completed'
     ).length;
-  }, [coApplicants]);
+  }, [apiCoApplicants]);
 
   const handleDelete = (coApplicantId: string) => {
     if (!currentLead) return;
@@ -302,49 +452,6 @@ export default function CoApplicantInfoPage() {
     });
   };
 
-  const renderConsentPendingCard = (coApp: any, index: number) => {
-    const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
-    const fullName =
-      [basic.firstName, basic.lastName].filter(Boolean).join(' ') || 'Unnamed Co-applicant';
-
-    return (
-      <Card key={coApp.id} className="border border-yellow-200 bg-yellow-50 mb-4">
-        <CardContent className="p-5 space-y-3">
-          <div className="flex items-start justify-between">
-          <div>
-            <p className="text-sm font-semibold text-gray-500 mb-1">{`Co-Applicant ${index + 1}`}</p>
-            <h3 className="text-lg font-semibold text-gray-900">{fullName}</h3>
-              <p className="text-xs text-gray-500 mt-1">
-                {RELATIONSHIP_LABELS[coApp.relationship] ?? coApp.relationship ?? 'Relationship not set'}
-              </p>
-            </div>
-        <button
-          type="button"
-          className="text-red-500 hover:text-red-600"
-          onClick={() => setPendingDelete({
-            id: coApp.id,
-            name: fullName,
-            index,
-          })}
-        >
-          <Trash2 className="w-5 h-5" />
-        </button>
-          </div>
-          <p className="text-sm text-gray-700">
-            Complete the consent verification to continue capturing details for this co-applicant.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <Button
-              className="bg-[#0072CE] hover:bg-[#005a9e] text-white"
-              onClick={() => router.push(`/lead/co-applicant/new?coApplicantId=${coApp.id}`)}
-            >
-              Continue
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
 
   return (
     <DashboardLayout
@@ -364,7 +471,14 @@ export default function CoApplicantInfoPage() {
             </Button>
           </div>
 
-          {coApplicants.length === 0 ? (
+          {isLoadingCoApplicants ? (
+            <Card className="border border-gray-200 bg-white">
+              <CardContent className="p-6 text-center space-y-2">
+                <Users className="w-10 h-10 text-blue-600 mx-auto" />
+                <p className="text-sm font-semibold text-gray-900">Loading co-applicants...</p>
+              </CardContent>
+            </Card>
+          ) : apiCoApplicants.length === 0 ? (
             <Card className="border border-gray-200 bg-white">
               <CardContent className="p-6 text-center space-y-2">
                 <Users className="w-10 h-10 text-blue-600 mx-auto" />
@@ -373,51 +487,50 @@ export default function CoApplicantInfoPage() {
               </CardContent>
             </Card>
           ) : (
-            coApplicants.map((coApp: any, index: number) => {
-              if (!isConsentVerified(coApp)) {
-                return renderConsentPendingCard(coApp, index);
-              }
-
-              const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
-              const fullName = [basic.firstName, basic.lastName].filter(Boolean).join(' ') || 'Unnamed Co-applicant';
+            apiCoApplicants.map((apiCoApp) => {
+              // Find matching local co-applicant by workflowIndex
+              const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
+              const fullName = apiCoApp.personal_info?.full_name?.value || (localCoApp ? [localCoApp?.data?.basicDetails?.firstName ?? localCoApp?.data?.step1?.firstName, localCoApp?.data?.basicDetails?.lastName ?? localCoApp?.data?.step1?.lastName].filter(Boolean).join(' ') : 'Unnamed Co-applicant');
+              const relation = localCoApp ? RELATIONSHIP_LABELS[localCoApp.relationship] ?? localCoApp.relationship : 'Not set';
 
               return (
-                <Card key={coApp.id} className="border border-gray-200 bg-white mb-4 border-l-4 border-l-blue-600 relative">
+                <Card key={`co-applicant-${apiCoApp.co_applicant_index}`} className="border border-gray-200 bg-white mb-4 border-l-4 border-l-blue-600 relative">
                   <CardContent className="p-5 space-y-4">
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className="text-sm font-semibold text-gray-500 mb-1">{`Co-Applicant ${index + 1} –`}</p>
+                        <p className="text-sm font-semibold text-gray-500 mb-1">{`Co-Applicant ${apiCoApp.co_applicant_index + 1} –`}</p>
                         <h3 className="text-lg font-semibold text-gray-900 leading-snug">{fullName}</h3>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {RELATIONSHIP_LABELS[coApp.relationship] ?? coApp.relationship ?? 'Relationship not set'}
-                        </p>
+                        {relation && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {relation}
+                          </p>
+                        )}
                       </div>
-                      <button
-                        type="button"
-                        className="text-red-500 hover:text-red-600"
-                        onClick={() => {
-                          const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
-                          const fullName =
-                            [basic.firstName, basic.lastName].filter(Boolean).join(' ') || 'Unnamed Co-applicant';
-                          setPendingDelete({
-                            id: coApp.id,
-                            name: fullName,
-                            index,
-                          });
-                        }}
-                        aria-label="Delete co-applicant"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
+                      {localCoApp && (
+                        <button
+                          type="button"
+                          className="text-red-500 hover:text-red-600"
+                          onClick={() => {
+                            setPendingDelete({
+                              id: localCoApp.id,
+                              name: fullName,
+                              index: apiCoApp.co_applicant_index,
+                            });
+                          }}
+                          aria-label="Delete co-applicant"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      )}
                     </div>
 
                     <div className="grid gap-4">
-                      {renderBasicDetails(coApp)}
-                      {renderAddressDetails(coApp)}
+                      {renderBasicDetails(apiCoApp)}
+                      {renderAddressDetails(apiCoApp)}
                     </div>
 
                     <div className="pt-2 border-t border-gray-100 text-xs text-gray-400">
-                      {documentsSummary(coApp)}
+                      {localCoApp ? documentsSummary(localCoApp) : 'No documents linked yet'}
                     </div>
                   </CardContent>
                 </Card>

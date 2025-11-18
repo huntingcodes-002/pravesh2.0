@@ -67,7 +67,7 @@ export default function OtpVerificationPage() {
     if (success) {
       toast({
         title: 'Verification Successful',
-        description: 'Email verified. Redirecting to Leads.',
+        description: 'Email verified. Redirecting to Dashboard.',
         className: 'bg-green-50 border-green-200',
         action: <CircleCheck className='h-4 w-4'/>
       });
@@ -75,7 +75,7 @@ export default function OtpVerificationPage() {
       // Wait a moment for state to update before redirecting
       // This ensures the AuthContext has time to set the user state
       setTimeout(() => {
-        router.replace('/leads'); 
+        router.replace('/dashboard'); 
       }, 100);
     } else {
       toast({

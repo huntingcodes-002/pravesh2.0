@@ -11,8 +11,8 @@ export default function Home() {
   useEffect(() => {
     if (!loading) {
       if (user) {
-        // Redirect authenticated users to the Leads page
-        router.replace('/leads');
+        // Redirect authenticated users to the Dashboard page
+        router.replace('/dashboard');
       } else {
         // Redirect unauthenticated users to the Login page
         router.push('/login');
