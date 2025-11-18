@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
@@ -10,7 +10,20 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Loader, AlertTriangle } from 'lucide-react';
+import { useGeolocation } from '@uidotdev/usehooks';
+import { lookupPincode, isApiError } from '@/lib/api';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { cn } from '@/lib/utils';
 
 export default function CollateralPage() {
   const { currentLead, updateLead } = useLead();
@@ -36,25 +49,237 @@ export default function CollateralPage() {
   const [formData, setFormData] = useState({
     collateralType: currentLead?.formData?.step6?.collateralType || 'property',
     collateralSubType: currentLead?.formData?.step6?.collateralSubType || '',
-    ownershipType: currentLead?.formData?.step6?.ownershipType || 'selfOwnership',
+    ownershipType: currentLead?.formData?.step6?.ownershipType || 'self_ownership',
     currency: 'INR',
     propertyValue: currentLead?.formData?.step6?.propertyValue || '',
     description: currentLead?.formData?.step6?.description || '',
-    location: currentLead?.formData?.step6?.location || ''
+    addressLine1: currentLead?.formData?.step6?.addressLine1 || currentLead?.formData?.step6?.location?.address_line_1 || '',
+    addressLine2: currentLead?.formData?.step6?.addressLine2 || currentLead?.formData?.step6?.location?.address_line_2 || '',
+    addressLine3: currentLead?.formData?.step6?.addressLine3 || currentLead?.formData?.step6?.location?.address_line_3 || '',
+    landmark: currentLead?.formData?.step6?.landmark || currentLead?.formData?.step6?.location?.landmark || '',
+    pincode: currentLead?.formData?.step6?.pincode || currentLead?.formData?.step6?.location?.pincode || '',
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [pincodeLookupId, setPincodeLookupId] = useState<string | null>(null);
+  const [city, setCity] = useState(currentLead?.formData?.step6?.city || '');
+  const [stateCode, setStateCode] = useState(currentLead?.formData?.step6?.stateCode || '');
+  const [stateName, setStateName] = useState(currentLead?.formData?.step6?.stateName || '');
+  
+  // Geolocation state
+  const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
+  const suppressModalAutoOpenRef = useRef(false);
+  const geolocation = useGeolocation({
+    enableHighAccuracy: true,
+    timeout: 20000,
+    maximumAge: 0,
+  });
+
+  const locationCoords = useMemo(() => {
+    const latitude =
+      typeof geolocation.latitude === 'number' ? geolocation.latitude.toFixed(6) : '';
+    const longitude =
+      typeof geolocation.longitude === 'number' ? geolocation.longitude.toFixed(6) : '';
+
+    return { latitude, longitude };
+  }, [geolocation.latitude, geolocation.longitude]);
+
+  const locationErrorMessage = useMemo(() => {
+    if (!geolocation.error) return null;
+
+    if (typeof geolocation.error === 'string') {
+      return geolocation.error;
+    }
+
+    if (
+      typeof geolocation.error === 'object' &&
+      geolocation.error !== null &&
+      'message' in geolocation.error &&
+      typeof (geolocation.error as { message?: string }).message === 'string'
+    ) {
+      return (geolocation.error as { message: string }).message;
+    }
+
+    if (
+      typeof geolocation.error === 'object' &&
+      geolocation.error !== null &&
+      'code' in geolocation.error &&
+      typeof (geolocation.error as { code?: number }).code === 'number'
+    ) {
+      const code = (geolocation.error as { code: number }).code;
+      switch (code) {
+        case 1:
+          return 'Location permission is required. Please allow access from your browser settings.';
+        case 2:
+          return 'Location information is unavailable. Please ensure GPS or precise location is enabled.';
+        case 3:
+          return 'Fetching location timed out. Please try again.';
+        default:
+          break;
+      }
+    }
+
+    return 'Unable to fetch your current location. Please allow access and try again.';
+  }, [geolocation.error]);
+
+  const locationStatus = geolocation.loading
+    ? 'pending'
+    : geolocation.error
+      ? 'error'
+      : locationCoords.latitude && locationCoords.longitude
+        ? 'success'
+        : 'pending';
+
+  const isLocationReady = locationStatus === 'success';
+  const isInteractionDisabled = !isLocationReady;
+  const lastLocationErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (currentLead?.formData?.step6) {
+      const step6 = currentLead.formData.step6;
+      // Handle legacy ownership type values for backward compatibility
+      let ownershipType = step6.ownershipType || 'self_ownership';
+      if (ownershipType === 'selfOwnership') {
+        ownershipType = 'self_ownership';
+      } else if (ownershipType === 'jointOwnership') {
+        ownershipType = 'joint_ownership';
+      }
+      
       setFormData({
-        ...currentLead.formData.step6,
-        collateralType: 'property',
-        ownershipType: 'selfOwnership',
+        collateralType: step6.collateralType || 'property',
+        collateralSubType: step6.collateralSubType || '',
+        ownershipType: ownershipType,
+        currency: 'INR',
+        propertyValue: step6.propertyValue || '',
+        description: step6.description || '',
+        addressLine1: step6.addressLine1 || step6.location?.address_line_1 || '',
+        addressLine2: step6.addressLine2 || step6.location?.address_line_2 || '',
+        addressLine3: step6.addressLine3 || step6.location?.address_line_3 || '',
+        landmark: step6.landmark || step6.location?.landmark || '',
+        pincode: step6.pincode || step6.location?.pincode || '',
       });
+      setCity(step6.city || '');
+      setStateCode(step6.stateCode || '');
+      setStateName(step6.stateName || '');
     }
   }, [currentLead]);
 
-  const setField = (key: string, value: string | number) => setFormData(prev => ({ ...prev, [key]: value }));
+  useEffect(() => {
+    if (locationStatus !== 'error') {
+      lastLocationErrorRef.current = null;
+      return;
+    }
+
+    const description =
+      locationErrorMessage ?? 'Unable to fetch your current location. Please allow access and try again.';
+
+    if (lastLocationErrorRef.current === description) {
+      return;
+    }
+
+    toast({
+      title: 'Location Required',
+      description,
+      variant: 'destructive',
+    });
+
+    lastLocationErrorRef.current = description;
+  }, [locationStatus, locationErrorMessage, toast]);
+
+  useEffect(() => {
+    if (locationStatus === 'error') {
+      if (!suppressModalAutoOpenRef.current) {
+        setIsPermissionModalOpen(true);
+      }
+    } else {
+      setIsPermissionModalOpen(false);
+      suppressModalAutoOpenRef.current = false;
+    }
+  }, [locationStatus]);
+
+  const handleRetryPermission = useCallback(() => {
+    if (typeof window === 'undefined' || !navigator?.geolocation) {
+      toast({
+        title: 'Location Unsupported',
+        description: 'Geolocation is not supported on this device. Please try a different browser or device.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    suppressModalAutoOpenRef.current = true;
+    setIsPermissionModalOpen(false);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        suppressModalAutoOpenRef.current = false;
+      },
+      (error) => {
+        suppressModalAutoOpenRef.current = false;
+
+        const description =
+          error?.message || 'Unable to fetch your current location. Please allow access in your browser settings.';
+
+        toast({
+          title: 'Location Required',
+          description,
+          variant: 'destructive',
+        });
+
+        setIsPermissionModalOpen(true);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+      }
+    );
+  }, [toast]);
+
+  const handlePincodeChange = (rawValue: string) => {
+    if (isInteractionDisabled) return;
+    const numeric = rawValue.replace(/[^0-9]/g, '').slice(0, 6);
+    setFormData(prev => ({ ...prev, pincode: numeric }));
+    
+    if (numeric.length === 6) {
+      void performPincodeLookup(numeric);
+    } else {
+      setCity('');
+      setStateCode('');
+      setStateName('');
+      setPincodeLookupId(null);
+    }
+  };
+
+  const performPincodeLookup = async (zip: string) => {
+    setPincodeLookupId('collateral-pincode');
+    try {
+      const response = await lookupPincode(zip);
+      if (isApiError(response) || !response.success) {
+        throw new Error('Zipcode not found');
+      }
+
+      const data = response;
+      setCity(data.city ?? '');
+      setStateCode(data.state_code ?? '');
+      setStateName(data.state ?? '');
+    } catch {
+      setCity('');
+      setStateCode('');
+      setStateName('');
+      toast({
+        title: 'Zipcode not found',
+        description: 'Please check the pincode and try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setPincodeLookupId(null);
+    }
+  };
+
+  const setField = (key: string, value: string | number) => {
+    if (isInteractionDisabled) return;
+    setFormData(prev => ({ ...prev, [key]: value }));
+  };
 
   const API_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications/collateral-details/';
 
@@ -73,6 +298,15 @@ export default function CollateralPage() {
   const handleSave = async () => {
     if (!currentLead || isSaving) return;
 
+    if (!isLocationReady) {
+      toast({
+        title: 'Location Required',
+        description: 'Please allow location access so we can capture your current coordinates.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (!formData.propertyValue) {
       toast({
         title: 'Property value required',
@@ -83,10 +317,19 @@ export default function CollateralPage() {
     }
 
     const numericValue = parseFloat(String(formData.propertyValue));
-    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    if (!Number.isFinite(numericValue) || numericValue <= 100000) {
       toast({
         title: 'Invalid property value',
-        description: 'Please enter a valid property value greater than zero.',
+        description: 'Please enter a valid property value greater than ₹1,00,000.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!formData.addressLine1 || !formData.landmark || !formData.pincode || formData.pincode.length !== 6) {
+      toast({
+        title: 'Incomplete address',
+        description: 'Please fill in all required address fields (Address Line 1, Landmark, and Pincode).',
         variant: 'destructive',
       });
       return;
@@ -106,11 +349,19 @@ export default function CollateralPage() {
 
     const payload = {
       application_id: currentLead.appId,
-      collateral_type: 'property',
-      ownership_type: 'self_ownership',
-      estimated_property_value: numericValue,
+      collateral_type: formData.collateralType || 'property',
+      ownership_type: formData.ownershipType || 'self_ownership',
+      estimated_property_value: String(numericValue),
       collateral_description: formData.description || '',
-      location: formData.location || '',
+      location: {
+        address_line_1: formData.addressLine1.trim(),
+        address_line_2: formData.addressLine2.trim() || '',
+        address_line_3: formData.addressLine3.trim() || '',
+        landmark: formData.landmark.trim(),
+        pincode: formData.pincode.trim(),
+        latitude: locationCoords.latitude || '90',
+        longitude: locationCoords.longitude || '90',
+      },
     };
 
     try {
@@ -137,11 +388,27 @@ export default function CollateralPage() {
           ...currentLead.formData,
           step6: {
             ...formData,
-            collateralType: 'property',
-            ownershipType: 'selfOwnership',
+            collateralType: formData.collateralType || 'property',
+            ownershipType: formData.ownershipType || 'self_ownership',
             propertyValue: formData.propertyValue,
             description: formData.description,
-            location: formData.location,
+            addressLine1: formData.addressLine1,
+            addressLine2: formData.addressLine2,
+            addressLine3: formData.addressLine3,
+            landmark: formData.landmark,
+            pincode: formData.pincode,
+            city,
+            stateCode,
+            stateName,
+            location: {
+              address_line_1: formData.addressLine1,
+              address_line_2: formData.addressLine2,
+              address_line_3: formData.addressLine3,
+              landmark: formData.landmark,
+              pincode: formData.pincode,
+              latitude: locationCoords.latitude,
+              longitude: locationCoords.longitude,
+            },
           },
         },
       });
@@ -181,6 +448,46 @@ export default function CollateralPage() {
       onExit={handleExit}
     >
       <div className="max-w-2xl mx-auto mb-20">
+        <div
+          className={cn(
+            'mb-4 p-4 rounded-xl border transition-colors',
+            locationStatus === 'pending' && 'bg-blue-50 border-blue-200',
+            locationStatus === 'success' && 'bg-emerald-50 border-emerald-200',
+            locationStatus === 'error' && 'bg-red-50 border-red-200'
+          )}
+        >
+          <p className="text-sm font-semibold text-[#003366]">Location Access Required</p>
+          {locationStatus === 'pending' && (
+            <p className="mt-1 text-sm text-[#003366]">
+              Requesting your current GPS coordinates. Please allow location access in the popup to continue.
+            </p>
+          )}
+          {locationStatus === 'success' && (
+            <>
+              <p className="mt-1 text-sm text-[#003366]">
+                Location captured successfully. You can now fill in the collateral details.
+              </p>
+              <p className="mt-2 text-xs text-gray-600">
+                Latitude: <span className="font-mono">{locationCoords.latitude}</span> · Longitude:{' '}
+                <span className="font-mono">{locationCoords.longitude}</span>
+              </p>
+            </>
+          )}
+          {locationStatus === 'error' && (
+            <>
+              <p className="mt-1 text-sm text-[#8B0000]">
+                We need your location permission to proceed. Please allow access when prompted.
+              </p>
+              {locationErrorMessage && (
+                <p className="mt-2 text-xs text-[#8B0000]">
+                  {locationErrorMessage} If you denied the request, please enable location access from your browser settings and we
+                  will ask again.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
         <div className="bg-white rounded-xl shadow-sm p-6 space-y-6">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Collateral Information</h2>
@@ -195,8 +502,9 @@ export default function CollateralPage() {
                   onValueChange={(value:string) => {
                     setFormData({...formData, collateralType: value, collateralSubType: ''});
                   }}
+                  disabled={isInteractionDisabled}
                 >
-                  <SelectTrigger id="collateralType" className="h-12">
+                  <SelectTrigger id="collateralType" className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
                     <SelectValue placeholder="Select collateral type" />
                   </SelectTrigger>
                   <SelectContent>
@@ -214,8 +522,9 @@ export default function CollateralPage() {
                   <Select
                     value={formData.collateralSubType}
                     onValueChange={(value:string) => setField('collateralSubType', value)}
+                    disabled={isInteractionDisabled}
                   >
-                    <SelectTrigger id="collateralSubType" className="h-12">
+                    <SelectTrigger id="collateralSubType" className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
                       <SelectValue placeholder="Select collateral sub type" />
                     </SelectTrigger>
                     <SelectContent>
@@ -236,13 +545,14 @@ export default function CollateralPage() {
                 <Select
                   value={formData.ownershipType}
                   onValueChange={(value:string) => setField('ownershipType', value)}
+                  disabled={isInteractionDisabled}
                 >
-                  <SelectTrigger id="ownershipType" className="h-12">
+                  <SelectTrigger id="ownershipType" className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
                     <SelectValue placeholder="Select ownership type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="selfOwnership">Self Ownership</SelectItem>
-                    <SelectItem value="jointOwnership">Joint Ownership</SelectItem>
+                    <SelectItem value="self_ownership">Self Ownership</SelectItem>
+                    <SelectItem value="joint_ownership">Joint Ownership</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -264,7 +574,8 @@ export default function CollateralPage() {
                       setField('propertyValue', value);
                     }}
                     placeholder="Enter estimated value"
-                    className="h-12 rounded-l-none"
+                    disabled={isInteractionDisabled}
+                    className={cn("h-12 rounded-l-none", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
                   />
                 </div>
                 <p className="text-xs text-gray-500 mt-1">Enter value between ₹1,00,000 to ₹99,99,99,999</p>
@@ -277,21 +588,106 @@ export default function CollateralPage() {
                   value={formData.description}
                   onChange={(e) => setField('description', e.target.value)}
                   placeholder="Enter detailed description of the collateral"
-                  className="min-h-[100px]"
+                  disabled={isInteractionDisabled}
+                  className={cn("min-h-[100px]", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
                 />
                 <p className="text-xs text-gray-500 mt-1">Optional: Provide additional details about the collateral</p>
               </div>
 
-              <div>
-                <Label htmlFor="location">Location</Label>
-                <Input
-                  id="location"
-                  type="text"
-                  value={formData.location}
-                  onChange={(e) => setField('location', e.target.value)}
-                  placeholder="Enter collateral location"
-                  className="h-12"
-                />
+              <div className="space-y-4 pt-4 border-t">
+                <h3 className="text-lg font-semibold text-[#003366]">Collateral Location</h3>
+                
+                <div>
+                  <Label htmlFor="addressLine1">
+                    Address Line 1 <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="addressLine1"
+                    type="text"
+                    value={formData.addressLine1}
+                    onChange={(e) => setField('addressLine1', e.target.value)}
+                    placeholder="House/Flat No., Building Name"
+                    disabled={isInteractionDisabled}
+                    className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
+                    maxLength={255}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="addressLine2">Address Line 2</Label>
+                  <Input
+                    id="addressLine2"
+                    type="text"
+                    value={formData.addressLine2}
+                    onChange={(e) => setField('addressLine2', e.target.value)}
+                    placeholder="Street Name, Area"
+                    disabled={isInteractionDisabled}
+                    className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
+                    maxLength={255}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="addressLine3">Address Line 3</Label>
+                  <Input
+                    id="addressLine3"
+                    type="text"
+                    value={formData.addressLine3}
+                    onChange={(e) => setField('addressLine3', e.target.value)}
+                    placeholder="Block / Locality"
+                    disabled={isInteractionDisabled}
+                    className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
+                    maxLength={255}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="landmark">
+                    Landmark <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="landmark"
+                    type="text"
+                    value={formData.landmark}
+                    onChange={(e) => setField('landmark', e.target.value)}
+                    placeholder="Nearby landmark"
+                    disabled={isInteractionDisabled}
+                    className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
+                    maxLength={255}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="pincode">
+                    Postal Code <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="pincode"
+                      type="text"
+                      value={formData.pincode}
+                      onChange={(e) => handlePincodeChange(e.target.value)}
+                      placeholder="Enter 6-digit postal code"
+                      disabled={isInteractionDisabled}
+                      className={cn(
+                        'h-12 rounded-lg',
+                        (pincodeLookupId || city || stateCode) && 'pr-28',
+                        isInteractionDisabled && 'bg-gray-50 cursor-not-allowed'
+                      )}
+                      maxLength={6}
+                    />
+                    {(pincodeLookupId || city || stateCode) && (
+                      <div className="absolute inset-y-0 right-3 flex items-center gap-2 pointer-events-none">
+                        {pincodeLookupId && <Loader className="w-4 h-4 animate-spin text-[#0072CE]" />}
+                        {city && stateCode && !pincodeLookupId && (
+                          <span className="text-sm font-medium text-gray-600 whitespace-nowrap">
+                            {city} {stateCode}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -301,8 +697,13 @@ export default function CollateralPage() {
           <div className="flex gap-3 max-w-2xl mx-auto">
             <Button
               onClick={handleSave}
-              disabled={isSaving}
-              className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white"
+              disabled={isSaving || !isLocationReady}
+              className={cn(
+                "flex-1 h-12 rounded-lg font-medium text-white",
+                isSaving || !isLocationReady
+                  ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                  : "bg-[#0072CE] hover:bg-[#005a9e]"
+              )}
             >
               {isSaving ? (
                 <span className="flex items-center justify-center gap-2">
@@ -316,6 +717,26 @@ export default function CollateralPage() {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={isPermissionModalOpen} onOpenChange={setIsPermissionModalOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-yellow-600" />
+              <AlertDialogTitle>Location Access Required</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription>
+              Please allow location access in your browser settings to capture your GPS coordinates. This is required to proceed with the collateral details submission.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRetryPermission}>
+              Try Again
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }
