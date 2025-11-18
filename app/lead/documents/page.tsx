@@ -7,7 +7,8 @@ import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-im
 import 'react-image-crop/dist/ReactCrop.css';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { uploadDocument, getDetailedInfo, submitPersonalInfo, isApiError, type ApiSuccess } from '@/lib/api';
+import { uploadDocument, uploadCoApplicantDocument, getDetailedInfo, submitPersonalInfo, isApiError, type ApiSuccess } from '@/lib/api';
+import { useGeolocation } from '@uidotdev/usehooks';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -386,6 +387,21 @@ export default function Step8Page() {
     const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null);
     const [showPreview, setShowPreview] = useState(false);
 
+    // Geolocation for co-applicant document uploads
+    const geolocation = useGeolocation({
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+    });
+
+    const locationCoords = useMemo(() => {
+        const latitude =
+            typeof geolocation.latitude === 'number' ? geolocation.latitude.toFixed(6) : '90';
+        const longitude =
+            typeof geolocation.longitude === 'number' ? geolocation.longitude.toFixed(6) : '90';
+        return { latitude, longitude };
+    }, [geolocation.latitude, geolocation.longitude]);
+
     const totalSteps = 10;
     
     // Generate dynamic document list based on current lead data
@@ -538,24 +554,60 @@ export default function Step8Page() {
         const docInfo = availableDocuments.find(doc => doc.value === documentType);
         const { baseValue: baseDocType, coApplicantId: documentCoApplicantId } = parseDocumentValue(documentType);
         const backendDocType = mapDocumentTypeToBackend(documentType);
-        const metadata: Record<string, any> = {};
-        if (docInfo?.applicantType === 'coapplicant' && docInfo.coApplicantId) {
-            metadata.co_applicant_id = docInfo.coApplicantId;
-        }
-        if (docInfo?.applicantType === 'collateral') {
-            metadata.document_owner = 'collateral';
-        }
+        
+        // Check if this is a co-applicant PAN/Aadhaar document
+        const isCoApplicantPanOrAadhaar = 
+            docInfo?.applicantType === 'coapplicant' && 
+            docInfo.coApplicantId && 
+            (backendDocType === 'pan_card' || backendDocType === 'aadhaar_card');
+        
+        let uploadResponse;
         
         try {
-            // Endpoint 5: Upload document - https://uatlb.api.saarathifinance.com/api/lead-collection/applications/document-upload/
-            const uploadResponse = await uploadDocument({
-                application_id: currentLead.appId,
-                document_type: backendDocType,
-                front_file: file,
-                back_file: backFile,
-                document_name: docInfo?.label || file.name,
-                metadata: Object.keys(metadata).length ? metadata : undefined,
-            });
+            if (isCoApplicantPanOrAadhaar) {
+                // Find the co-applicant to get workflowIndex
+                const coApplicants = currentLead.formData?.coApplicants || [];
+                const coApplicant = coApplicants.find((coApp: any) => coApp.id === docInfo.coApplicantId);
+                
+                if (!coApplicant || typeof coApplicant.workflowIndex !== 'number') {
+                    toast({
+                        title: 'Co-applicant Setup Error',
+                        description: 'Unable to find co-applicant workflow index. Please try again.',
+                        variant: 'destructive',
+                    });
+                    return { success: false };
+                }
+                
+                // Use new co-applicant document upload API
+                uploadResponse = await uploadCoApplicantDocument({
+                    application_id: currentLead.appId,
+                    co_applicant_index: coApplicant.workflowIndex,
+                    document_type: backendDocType as 'pan_card' | 'aadhaar_card',
+                    front_file: file,
+                    back_file: backFile,
+                    document_name: docInfo?.label || file.name,
+                    latitude: locationCoords.latitude,
+                    longitude: locationCoords.longitude,
+                });
+            } else {
+                // Use existing document upload API for applicant and other documents
+                const metadata: Record<string, any> = {};
+                if (docInfo?.applicantType === 'coapplicant' && docInfo.coApplicantId) {
+                    metadata.co_applicant_id = docInfo.coApplicantId;
+                }
+                if (docInfo?.applicantType === 'collateral') {
+                    metadata.document_owner = 'collateral';
+                }
+                
+                uploadResponse = await uploadDocument({
+                    application_id: currentLead.appId,
+                    document_type: backendDocType,
+                    front_file: file,
+                    back_file: backFile,
+                    document_name: docInfo?.label || file.name,
+                    metadata: Object.keys(metadata).length ? metadata : undefined,
+                });
+            }
 
             // Only approve if backend returns success (200 OK)
             if (isApiError(uploadResponse) || !uploadResponse.success) {

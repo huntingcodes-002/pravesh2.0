@@ -717,6 +717,88 @@ export async function uploadDocument(data: DocumentUploadRequest): Promise<ApiRe
 }
 
 /**
+ * Endpoint: Upload Co-Applicant Document
+ * POST /api/lead-collection/applications/{application_id}/document-upload/{co_applicant_index}/
+ */
+export interface CoApplicantDocumentUploadRequest {
+  application_id: string;
+  co_applicant_index: number;
+  document_type: 'pan_card' | 'aadhaar_card';
+  front_file: File;
+  back_file?: File;
+  document_name?: string;
+  latitude: string;
+  longitude: string;
+}
+
+export interface CoApplicantDocumentUploadResponse {
+  success: boolean;
+  message?: string;
+  application_id: string;
+  co_applicant_index: number;
+  next_step?: string;
+  data?: {
+    document_type: string;
+    uploaded_at: string;
+    reference_ids?: {
+      front: string | null;
+      back: string | null;
+    };
+  };
+}
+
+export async function uploadCoApplicantDocument(
+  data: CoApplicantDocumentUploadRequest
+): Promise<ApiResponse<CoApplicantDocumentUploadResponse>> {
+  try {
+    const accessToken = getAccessToken();
+    
+    const formData = new FormData();
+    formData.append('document_type', data.document_type);
+    formData.append('front_file', data.front_file);
+    
+    if (data.back_file) {
+      formData.append('back_file', data.back_file);
+    } else {
+      formData.append('back_file', '');
+    }
+    
+    if (data.document_name) {
+      formData.append('document_name', data.document_name);
+    }
+    
+    formData.append('metadata', JSON.stringify({}));
+    formData.append('latitude', data.latitude);
+    formData.append('longitude', data.longitude);
+    
+    const headers: HeadersInit = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+    
+    const response = await fetch(
+      `${API_BASE_URL}applications/${encodeURIComponent(data.application_id)}/document-upload/${data.co_applicant_index}/`,
+      {
+        method: 'POST',
+        headers,
+        body: formData,
+        credentials: 'include',
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      return result as ApiError;
+    }
+
+    return result as ApiSuccess<CoApplicantDocumentUploadResponse>;
+  } catch (error: any) {
+    return handleApiError(error);
+  }
+}
+
+/**
  * Endpoint 6: Get Detailed Application Info
  * GET /api/lead-collection/applications/{application_id}/detailed-info/
  */

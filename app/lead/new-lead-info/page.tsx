@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Eye, Image as ImageIcon, Users } from 'lucide-react';
+import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -10,8 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { fetchPaymentStatus, isApiError } from '@/lib/api';
+import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess } from '@/lib/api';
 
 type SectionStatus = 'incomplete' | 'in-progress' | 'completed';
 
@@ -26,10 +25,10 @@ export default function NewLeadInfoPage() {
   const { currentLead, updateLead, submitLead } = useLead();
   const router = useRouter();
   const { toast } = useToast();
-  const [previewFile, setPreviewFile] = useState<any>(null);
-  const [showPreview, setShowPreview] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('Pending');
   const [isPaymentStatusLoading, setIsPaymentStatusLoading] = useState(false);
+  const [apiCoApplicants, setApiCoApplicants] = useState<Array<{ index: number; name: string }>>([]);
+  const [isCoApplicantsLoading, setIsCoApplicantsLoading] = useState(false);
 
   // Redirect if no current lead
   useEffect(() => {
@@ -117,6 +116,63 @@ export default function NewLeadInfoPage() {
     };
 
     void loadPaymentStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentLead?.appId]);
+
+  // Fetch co-applicants from API
+  useEffect(() => {
+    if (!currentLead?.appId) {
+      setApiCoApplicants([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchCoApplicants = async () => {
+      setIsCoApplicantsLoading(true);
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+        if (!isMounted) return;
+
+        if (isApiError(response)) {
+          setApiCoApplicants([]);
+          return;
+        }
+
+        // Extract application_details from response
+        const responseData = response.data ?? (response as any);
+        const applicationDetails = responseData?.application_details ?? responseData;
+        const participants = applicationDetails?.participants ?? [];
+
+        // Filter and extract co-applicants
+        const coApplicants = participants
+          .filter((participant: any) => participant?.participant_type === 'co-applicant')
+          .map((participant: any) => {
+            const fullName = participant?.personal_info?.full_name;
+            const name = fullName?.value || fullName || 'Unnamed Co-applicant';
+            const index = typeof participant?.co_applicant_index === 'number' 
+              ? participant.co_applicant_index 
+              : -1;
+            return { index, name };
+          })
+          .filter((coApp: { index: number; name: string }) => coApp.index >= 0)
+          .sort((a: { index: number; name: string }, b: { index: number; name: string }) => a.index - b.index);
+
+        setApiCoApplicants(coApplicants);
+      } catch (error) {
+        console.warn('Failed to fetch co-applicants from API', error);
+        setApiCoApplicants([]);
+      } finally {
+        if (isMounted) {
+          setIsCoApplicantsLoading(false);
+        }
+      }
+    };
+
+    void fetchCoApplicants();
 
     return () => {
       isMounted = false;
@@ -397,9 +453,17 @@ export default function NewLeadInfoPage() {
     }
   };
 
-  const handlePreview = (file: any) => {
-    setPreviewFile(file);
-    setShowPreview(true);
+  // Helper function to map loan purpose backend values to display labels
+  const getLoanPurposeLabel = (purpose: string): string => {
+    const mapping: Record<string, string> = {
+      'business_expansion': 'Business Expansion',
+      'working_capital': 'Working Capital',
+      'home-purchase': 'Home Purchase',
+      'home-construction': 'Home Construction',
+      'home-renovation': 'Home Renovation',
+      'plot-purchase': 'Plot Purchase',
+    };
+    return mapping[purpose] || purpose || 'N/A';
   };
 
   // Calculate overall application status
@@ -425,8 +489,7 @@ export default function NewLeadInfoPage() {
   const collateralStatus = getCollateralStatus();
   const loanStatus = getLoanRequirementStatus();
   const coApplicantStatus = getCoApplicantStatus();
-  const coApplicants = currentLead?.formData?.coApplicants || [];
-  const coApplicantCount = coApplicants.length;
+  const coApplicantCount = apiCoApplicants.length;
   const hasCoApplicants = coApplicantCount > 0;
   const requiredSectionsCompleted =
     applicantStatus === 'completed' &&
@@ -652,17 +715,30 @@ export default function NewLeadInfoPage() {
             <CardContent className="p-5 space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900">Co-Applicant(s)</h3>
-                <Badge
-                  className={cn(
-                    'rounded-full px-3 py-1 text-xs font-medium',
-                    hasCoApplicants ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-gray-50 text-gray-500 border border-gray-200'
-                  )}
-                >
-                  {hasCoApplicants ? `${coApplicantCount} Added` : 'No Data'}
-                </Badge>
+                {isCoApplicantsLoading ? (
+                  <Badge className="rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                    Loading...
+                  </Badge>
+                ) : (
+                  <Badge
+                    className={cn(
+                      'rounded-full px-3 py-1 text-xs font-medium',
+                      hasCoApplicants ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-gray-50 text-gray-500 border border-gray-200'
+                    )}
+                  >
+                    {hasCoApplicants ? `${coApplicantCount} Added` : 'No Data'}
+                  </Badge>
+                )}
               </div>
 
-              {!hasCoApplicants ? (
+              {isCoApplicantsLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Loading co-applicants...</span>
+                  </div>
+                </div>
+              ) : !hasCoApplicants ? (
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
@@ -702,25 +778,20 @@ export default function NewLeadInfoPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => router.push('/lead/co-applicant-info')}
-                    className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
-                  >
+                      className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
+                    >
                       Manage
                     </Button>
                   </div>
                   <div className="space-y-2">
-                    {coApplicants.map((coApp: any, index: number) => {
-                      const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
-                      const fullName =
-                        [basic.firstName, basic.lastName].filter(Boolean).join(' ') || 'Unnamed Co-applicant';
-                      return (
-                        <div
-                          key={coApp.id}
-                          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-900"
-                        >
-                          {`Co-Applicant ${index + 1} – ${fullName}`}
-                        </div>
-                      );
-                    })}
+                    {apiCoApplicants.map((coApp) => (
+                      <div
+                        key={`co-applicant-${coApp.index}`}
+                        className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-900"
+                      >
+                        {`Co-Applicant ${coApp.index + 1} – ${coApp.name}`}
+                      </div>
+                    ))}
                   </div>
                 </>
               )}
@@ -813,11 +884,7 @@ export default function NewLeadInfoPage() {
                             const tenureMonths = step7.tenure || 0;
                             const tenureYears = Math.floor(tenureMonths / 12);
                             const purpose = step7.loanPurpose || currentLead.loanPurpose || '';
-                            const purposeLabel = purpose === 'home-purchase' ? 'Home Purchase' :
-                                                 purpose === 'home-construction' ? 'Home Construction' :
-                                                 purpose === 'home-renovation' ? 'Home Renovation' :
-                                                 purpose === 'plot-purchase' ? 'Plot Purchase' :
-                                                 purpose || 'N/A';
+                            const purposeLabel = getLoanPurposeLabel(purpose);
                             return `₹${formattedAmount}${tenureYears > 0 ? ` · ${tenureYears} Years` : ''} · ${purposeLabel}`;
                           })()}
                         </p>
@@ -867,8 +934,7 @@ export default function NewLeadInfoPage() {
                   {uploadedDocuments.map((file: any) => (
                     <div
                       key={file.id}
-                      className="flex items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
-                      onClick={() => handlePreview(file)}
+                      className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg"
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <div className="flex-shrink-0">
@@ -886,9 +952,6 @@ export default function NewLeadInfoPage() {
                           </p>
                           <p className="text-xs text-gray-500 truncate">{file.type}</p>
                         </div>
-                      </div>
-                      <div className="flex-shrink-0">
-                        <Eye className="w-4 h-4 text-gray-400" />
                       </div>
                     </div>
                   ))}
@@ -923,54 +986,6 @@ export default function NewLeadInfoPage() {
           </div>
         </div>
       </div>
-
-      {/* Document Preview Dialog */}
-      <Dialog open={showPreview} onOpenChange={setShowPreview}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle>{previewFile?.name || 'Document Preview'}</DialogTitle>
-          </DialogHeader>
-          <div className="mt-4">
-            {previewFile?.fileType === 'pdf' ? (
-              <iframe
-                src={previewFile.previewUrl || previewFile.frontPreviewUrl}
-                className="w-full h-[600px] border rounded-lg"
-                title="PDF Preview"
-              />
-            ) : (
-              <div className="space-y-4">
-                {previewFile?.frontPreviewUrl && (
-                  <div>
-                    <p className="text-sm font-medium mb-2">Front</p>
-                    <img
-                      src={previewFile.frontPreviewUrl}
-                      alt="Front"
-                      className="w-full rounded-lg border"
-                    />
-                  </div>
-                )}
-                {previewFile?.backPreviewUrl && (
-                  <div>
-                    <p className="text-sm font-medium mb-2">Back</p>
-                    <img
-                      src={previewFile.backPreviewUrl}
-                      alt="Back"
-                      className="w-full rounded-lg border"
-                    />
-                  </div>
-                )}
-                {previewFile?.previewUrl && !previewFile?.frontPreviewUrl && (
-                  <img
-                    src={previewFile.previewUrl}
-                    alt="Preview"
-                    className="w-full rounded-lg border"
-                  />
-                )}
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </DashboardLayout>
   );
 }

@@ -254,11 +254,11 @@ export default function LoanRequirementPage() {
                   onValueChange={(value: string) => setField('loanPurpose', value)}
                 >
                   <SelectTrigger id="loanPurpose" className="h-12">
-                    <SelectValue placeholder="Select Loan Purpose" />
+                    <SelectValue placeholder="Select loan purpose" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="business-expansion">Business Expansion</SelectItem>
-                    <SelectItem value="working-capital">Working Capital</SelectItem>
+                    <SelectItem value="business_expansion">Business Expansion</SelectItem>
+                    <SelectItem value="working_capital">Working Capital</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
