@@ -529,46 +529,6 @@ const performPincodeLookup = async (id: string, zip: string) => {
       </AlertDialog>
 
       <div className="max-w-2xl mx-auto pb-24">
-        <div
-          className={cn(
-            'mb-4 p-4 rounded-xl border transition-colors',
-            locationStatus === 'pending' && 'bg-blue-50 border-blue-200',
-            locationStatus === 'success' && 'bg-emerald-50 border-emerald-200',
-            locationStatus === 'error' && 'bg-red-50 border-red-200'
-          )}
-        >
-          <p className="text-sm font-semibold text-[#003366]">Location Access Required</p>
-          {locationStatus === 'pending' && (
-            <p className="mt-1 text-sm text-[#003366]">
-              Requesting your current GPS coordinates. Please allow location access in the popup to continue.
-            </p>
-          )}
-          {locationStatus === 'success' && (
-            <>
-              <p className="mt-1 text-sm text-[#003366]">
-                Location captured successfully. You can now fill in the co-applicant address details.
-              </p>
-              <p className="mt-2 text-xs text-gray-600">
-                Latitude: <span className="font-mono">{locationCoords.latitude}</span> · Longitude:{' '}
-                <span className="font-mono">{locationCoords.longitude}</span>
-              </p>
-            </>
-          )}
-          {locationStatus === 'error' && (
-            <>
-              <p className="mt-1 text-sm text-[#8B0000]">
-                We need location permission to proceed. Please allow access when prompted.
-              </p>
-              {locationErrorMessage && (
-                <p className="mt-2 text-xs text-[#8B0000]">
-                  {locationErrorMessage} If you previously denied the request, enable location access in your browser settings and we
-                  will keep asking.
-                </p>
-              )}
-            </>
-          )}
-        </div>
-
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
           <div className="flex items-center justify-between">
             <div>

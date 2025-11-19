@@ -56,12 +56,12 @@ export default function LoginPage() {
 
   async function onSubmit(data: LoginFormValues) {
     setIsSubmitting(true);
-    const success = await login(data.email);
+    const success = await login(data.email, data.password);
 
     if (success) {
       toast({
         title: 'OTP Sent',
-        description: 'An OTP has been sent to your email address. Redirecting to verification.',
+        description: 'An OTP has been sent to your registered mobile number. Redirecting to verification.',
         className: 'bg-green-50 border-green-200',
       });
       // Redirect to the OTP page
@@ -69,7 +69,7 @@ export default function LoginPage() {
     } else {
       toast({
         title: 'Login Failed',
-        description: 'An error occurred. Please try again.',
+        description: 'Invalid credentials. Please try again.',
         variant: 'destructive',
       });
       setIsSubmitting(false);

@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { RefreshCw } from 'lucide-react';
+import { getAccessToken } from '@/lib/api';
 
 export default function LoanRequirementPage() {
   const { currentLead, updateLead } = useLead();
@@ -51,18 +52,6 @@ export default function LoanRequirementPage() {
 
   const API_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications/loan-details/';
   const HARD_CODED_LOAN_PURPOSE = 'business_expansion';
-
-  const getAccessToken = () => {
-    if (typeof window === 'undefined') return null;
-    const authData = sessionStorage.getItem('auth');
-    if (!authData) return null;
-    try {
-      const parsed = JSON.parse(authData);
-      return parsed?.access_token ?? null;
-    } catch {
-      return null;
-    }
-  };
 
   const formatNumberWithCommas = (value: number): string => {
     if (isNaN(value) || value === 0) return '';

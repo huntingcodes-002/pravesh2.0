@@ -14,12 +14,13 @@ import { Label } from '@/components/ui/label'; // <-- ADDED IMPORT FOR LABEL
 
 export default function OtpVerificationPage() {
   const router = useRouter();
-  const { pendingAuth, verifyOtpAndSignIn } = useAuth();
+  const { pendingAuth, verifyOtpAndSignIn, resendOtp, user } = useAuth();
   const { toast } = useToast();
   
   const [otp, setOtp] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [resendTimer, setResendTimer] = useState(30);
+  const [shouldRedirect, setShouldRedirect] = useState(false);
 
   // Redirect if no pending auth data
   useEffect(() => {
@@ -27,6 +28,13 @@ export default function OtpVerificationPage() {
       router.replace('/login');
     }
   }, [pendingAuth, router]);
+
+  // Redirect to dashboard when user is authenticated (after successful OTP verification)
+  useEffect(() => {
+    if (shouldRedirect && user) {
+      router.replace('/dashboard');
+    }
+  }, [shouldRedirect, user, router]);
 
   // Resend Timer Logic
   useEffect(() => {
@@ -41,10 +49,10 @@ export default function OtpVerificationPage() {
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (otp.length !== 4) {
+    if (otp.length !== 6) {
       toast({
         title: 'Error',
-        description: 'Please enter the 4-digit OTP.',
+        description: 'Please enter the 6-digit OTP.',
         variant: 'destructive',
       });
       return;
@@ -62,21 +70,31 @@ export default function OtpVerificationPage() {
 
     setIsVerifying(true);
 
-    const success = await verifyOtpAndSignIn(pendingAuth.email, otp);
+    const success = await verifyOtpAndSignIn(otp);
     
     if (success) {
       toast({
         title: 'Verification Successful',
-        description: 'Email verified. Redirecting to Dashboard.',
+        description: 'OTP verified. Redirecting to Dashboard.',
         className: 'bg-green-50 border-green-200',
         action: <CircleCheck className='h-4 w-4'/>
       });
       
-      // Wait a moment for state to update before redirecting
-      // This ensures the AuthContext has time to set the user state
+      // Set flag to trigger redirect when user state is available
+      // The useEffect will handle the actual redirect when user is set
+      setShouldRedirect(true);
+      
+      // Fallback: if user state doesn't update within 500ms, redirect anyway
+      // (auth data should be in localStorage by now)
       setTimeout(() => {
-        router.replace('/dashboard'); 
-      }, 100);
+        if (typeof window !== 'undefined') {
+          const storedAuth = localStorage.getItem('auth') || sessionStorage.getItem('auth');
+          const storedUser = localStorage.getItem('user') || sessionStorage.getItem('user');
+          if (storedAuth && storedUser) {
+            router.replace('/dashboard');
+          }
+        }
+      }, 500);
     } else {
       toast({
         title: 'Verification Failed',
@@ -88,32 +106,41 @@ export default function OtpVerificationPage() {
     setIsVerifying(false);
   };
   
-  const handleResend = () => {
-    // Resend OTP functionality will be implemented later
-    setResendTimer(60); // Reset timer to 60 seconds
-    toast({
-      title: 'OTP Resent',
-      description: 'A new OTP has been sent to your email address.',
-      className: 'bg-blue-50 border-blue-200',
-      action: <RotateCcw className='h-4 w-4'/>
-    });
+  const handleResend = async () => {
+    if (!pendingAuth) {
+      toast({
+        title: 'Error',
+        description: 'Session expired. Please login again.',
+        variant: 'destructive',
+      });
+      router.push('/login');
+      return;
+    }
+
+    const success = await resendOtp();
+    
+    if (success) {
+      setResendTimer(60); // Reset timer to 60 seconds
+      toast({
+        title: 'OTP Resent',
+        description: 'A new OTP has been sent to your registered mobile number.',
+        className: 'bg-blue-50 border-blue-200',
+        action: <RotateCcw className='h-4 w-4'/>
+      });
+    } else {
+      toast({
+        title: 'Resend Failed',
+        description: 'Failed to resend OTP. Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   if (!pendingAuth) {
     return null;
   }
   
-  const isOtpValidLength = otp.length === 4;
-  
-  // Mask email for display
-  const maskEmail = (email: string) => {
-    const [localPart, domain] = email.split('@');
-    if (localPart.length <= 2) {
-      return `${'*'.repeat(localPart.length)}@${domain}`;
-    }
-    const masked = localPart[0] + '*'.repeat(localPart.length - 2) + localPart[localPart.length - 1];
-    return `${masked}@${domain}`;
-  };
+  const isOtpValidLength = otp.length === 6;
   const buttonClass = cn(
     'w-full h-14 py-4 rounded-xl font-semibold text-lg transition-colors flex items-center justify-center',
     isVerifying && 'opacity-70 cursor-not-allowed',
@@ -138,17 +165,17 @@ export default function OtpVerificationPage() {
           </div>
           <CardTitle className="text-2xl font-bold text-[#003366]">Verify Your Identity</CardTitle>
           <CardDescription className="text-sm text-[#6B7280] px-4">
-            An OTP has been sent to your email address {maskEmail(pendingAuth.email)}
+            An OTP has been sent to {pendingAuth.maskedPhone || 'your registered mobile number'}
           </CardDescription>
         </CardHeader>
         <CardContent className='px-6 py-4'>
           <form onSubmit={handleVerify} className="space-y-6">
             
             <div className="space-y-4">
-                <Label className={labelClass}>Enter 4-digit OTP</Label>
+                <Label className={labelClass}>Enter 6-digit OTP</Label>
                 <div id="otp-inputs" className={otpGroupClass}>
                     <InputOTP 
-                        maxLength={4}
+                        maxLength={6}
                         value={otp}
                         onChange={(value) => setOtp(value)}
                         disabled={isVerifying}
@@ -159,6 +186,8 @@ export default function OtpVerificationPage() {
                             <InputOTPSlot index={1} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
                             <InputOTPSlot index={2} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
                             <InputOTPSlot index={3} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
+                            <InputOTPSlot index={4} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
+                            <InputOTPSlot index={5} className={cn(otpSlotClass, 'focus:!ring-2 focus:!ring-[#0072CE] focus:!border-[#0072CE] !border-r-2 !border-y-2 !border-l-2')} />
                         </InputOTPGroup>
                     </InputOTP>
                 </div>

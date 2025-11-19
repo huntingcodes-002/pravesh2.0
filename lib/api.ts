@@ -3,6 +3,7 @@
  */
 
 const API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/';
+const AUTH_API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/auth/';
 
 export interface ApiError {
   success: false;
@@ -53,11 +54,23 @@ export function isApiError(response: ApiResponse): response is ApiError {
 }
 
 /**
- * Helper function to get access token from sessionStorage
+ * Helper function to get access token from localStorage (with sessionStorage fallback)
+ * Exported for use across the application
  */
-function getAccessToken(): string | null {
+export function getAccessToken(): string | null {
   if (typeof window !== 'undefined') {
-    const authData = sessionStorage.getItem('auth');
+    // Check localStorage first (new auth)
+    let authData = localStorage.getItem('auth');
+    if (authData) {
+      try {
+        const parsed = JSON.parse(authData);
+        return parsed.access_token || null;
+      } catch {
+        // Invalid data, try sessionStorage as fallback
+      }
+    }
+    // Fallback to sessionStorage for backward compatibility
+    authData = sessionStorage.getItem('auth');
     if (authData) {
       try {
         const parsed = JSON.parse(authData);
@@ -172,73 +185,169 @@ async function apiFetchFormData<T = any>(
   }
 }
 
+/**
+ * Base fetch function for auth endpoints (uses different base URL)
+ * Supports both JSON and urlencoded formats
+ * Optionally includes Authorization header for authenticated requests
+ */
+async function apiFetchAuth<T = any>(
+  endpoint: string,
+  options: RequestInit = {},
+  useUrlEncoded: boolean = false,
+  includeAuth: boolean = false
+): Promise<ApiResponse<T>> {
+  try {
+    // Get access token if needed
+    const accessToken = includeAuth ? getAccessToken() : null;
+    
+    // Build fetch options ensuring method from options takes precedence
+    const fetchOptions: RequestInit = {
+      ...options, // Spread options first (includes method if specified)
+      headers: {
+        ...(useUrlEncoded ? { 'Content-Type': 'application/x-www-form-urlencoded' } : { 'Content-Type': 'application/json' }),
+        ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        ...options.headers, // Allow custom headers to override
+      },
+    };
+
+    // If no method specified, default to GET (but POST should be specified in options)
+    if (!fetchOptions.method) {
+      fetchOptions.method = 'GET';
+    }
+
+    const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, fetchOptions);
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      // Return error response
+      return data as ApiError;
+    }
+
+    // Return success response
+    return data as ApiSuccess<T>;
+  } catch (error: any) {
+    return handleApiError(error);
+  }
+}
+
 // ============================================================================
-// Authentication API Endpoints
+// Authentication API Endpoints (Pravesh - New Auth Flow)
 // ============================================================================
 
 /**
- * Authentication: Request Login OTP
- * POST /api/lead-collection/auth/login/
+ * Authentication: Login with Username/Password (Pravesh)
+ * POST /api/auth/login-pravesh/
  */
-export interface LoginRequest {
-  email: string;
+export interface LoginPraveshRequest {
+  username: string; // User's email
+  password: string;
 }
 
-export interface LoginResponse {
-  success: true;
-  message: string;
-  email_masked: string;
-  expires_in_minutes: number;
+export interface LoginPraveshResponse {
+  masked_phone_number: string;
+  verification_code: string; // Encrypted session token required for next steps
 }
 
-export async function requestLoginOTP(data: LoginRequest): Promise<ApiResponse<LoginResponse>> {
-  return apiFetch<LoginResponse>('auth/login/', {
+export async function loginPravesh(data: LoginPraveshRequest): Promise<ApiResponse<LoginPraveshResponse>> {
+  // Convert to URL-encoded format as per API spec
+  const formData = new URLSearchParams();
+  formData.append('username', data.username);
+  formData.append('password', data.password);
+  
+  return apiFetchAuth<LoginPraveshResponse>('login-pravesh/', {
     method: 'POST',
-    body: JSON.stringify(data),
-  });
+    body: formData.toString(),
+  }, true);
 }
 
 /**
- * Authentication: Verify OTP
- * POST /api/lead-collection/auth/verify-otp/
+ * Authentication: Verify OTP Response (Pravesh)
+ * Response structure from /api/auth/verify-otp/
+ * Based on Postman collection, tokens are in data object
  */
-export interface VerifyOTPRequest {
-  email: string;
-  otp: string;
+export interface VerifyOTPResponseData {
+  access_token: string;
+  expires_in: number;
+  refresh_expires_in: number;
+  refresh_token: string;
+  token_type: string;
+  id_token: string;
+  not_before_policy: number;
+  session_state: string;
+  scope: string;
 }
 
 export interface VerifyOTPResponse {
-  success: true;
-  message: string;
   access_token: string;
   refresh_token: string;
   token_type: string;
   expires_in: number;
-  user_info: {
-    user_id: number;
-    username: string;
-    email: string;
-    first_name: string;
-    last_name: string;
-    employee_code: string;
-    designation: string | null;
-    branch: {
-      id: number;
-      name: string;
-      code: string;
-    } | null;
-    state: {
-      id: number;
-      name: string;
-    } | null;
-  };
+  id_token?: string;
 }
 
-export async function verifyOTP(data: VerifyOTPRequest): Promise<ApiResponse<VerifyOTPResponse>> {
-  return apiFetch<VerifyOTPResponse>('auth/verify-otp/', {
+/**
+ * Authentication: Verify OTP (Pravesh)
+ * POST /api/auth/verify-otp/
+ */
+export interface VerifyPraveshOTPRequest {
+  otp: string;
+  verification_code: string; // From Login Response
+}
+
+export async function verifyPraveshOTP(data: VerifyPraveshOTPRequest): Promise<ApiResponse<VerifyOTPResponseData>> {
+  // Convert to URL-encoded format as per API spec
+  const formData = new URLSearchParams();
+  formData.append('otp', data.otp);
+  formData.append('verification_code', data.verification_code);
+  
+  return apiFetchAuth<VerifyOTPResponseData>('verify-otp/', {
     method: 'POST',
-    body: JSON.stringify(data),
-  });
+    body: formData.toString(),
+  }, true);
+}
+
+/**
+ * Authentication: Resend OTP (Pravesh)
+ * POST /api/auth/resend-otp/
+ */
+export interface ResendPraveshOTPRequest {
+  verification_code: string; // From Login/Previous Resend Response
+}
+
+export async function resendPraveshOTP(data: ResendPraveshOTPRequest): Promise<ApiResponse<LoginPraveshResponse>> {
+  // Convert to URL-encoded format as per API spec
+  const formData = new URLSearchParams();
+  formData.append('verification_code', data.verification_code);
+  
+  return apiFetchAuth<LoginPraveshResponse>('resend-otp/', {
+    method: 'POST',
+    body: formData.toString(),
+  }, true);
+}
+
+/**
+ * Authentication: Get User Profile
+ * GET /api/auth/user-profile/
+ */
+export interface UserProfileResponse {
+  id: string;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  email_verified: boolean;
+  is_active: boolean;
+  user_type: string;
+  branch_code: string;
+  employee_code: string;
+  permissions: string[];
+}
+
+export async function getUserProfile(): Promise<ApiResponse<UserProfileResponse>> {
+  return apiFetchAuth<UserProfileResponse>('user-profile/', {
+    method: 'GET',
+  }, false, true); // Include auth token
 }
 
 // ============================================================================

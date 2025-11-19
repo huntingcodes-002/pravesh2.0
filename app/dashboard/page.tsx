@@ -14,6 +14,30 @@ export default function DashboardPage() {
   const { leads, createLead } = useLead();
   const router = useRouter();
 
+  // Check localStorage as fallback while AuthContext is loading
+  React.useEffect(() => {
+    if (!authLoading && !user) {
+      // Double-check localStorage before redirecting
+      if (typeof window !== 'undefined') {
+        const storedAuth = localStorage.getItem('auth') || sessionStorage.getItem('auth');
+        const storedUser = localStorage.getItem('user') || sessionStorage.getItem('user');
+        
+        // If we have auth data but user state is null, give AuthContext a moment to load
+        if (storedAuth && storedUser) {
+          // Wait a bit for AuthContext to sync from storage
+          return;
+        }
+        
+        // Only redirect if we truly don't have a user and no auth data
+        if (!storedAuth || !storedUser) {
+          router.replace('/login');
+        }
+      } else {
+        router.replace('/login');
+      }
+    }
+  }, [user, authLoading, router]);
+
   if (authLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -22,8 +46,23 @@ export default function DashboardPage() {
     );
   }
 
-  // Redirect unauthenticated users
+  // Redirect unauthenticated users (only after checking storage)
   if (!user) {
+    // Check storage one more time before redirecting
+    if (typeof window !== 'undefined') {
+      const storedAuth = localStorage.getItem('auth') || sessionStorage.getItem('auth');
+      const storedUser = localStorage.getItem('user') || sessionStorage.getItem('user');
+      if (!storedAuth || !storedUser) {
+        router.replace('/login');
+        return null;
+      }
+      // If we have stored auth/user, wait for AuthContext to load
+      return (
+        <div className="flex min-h-screen items-center justify-center">
+          <p className="text-gray-500">Loading user data...</p>
+        </div>
+      );
+    }
     router.replace('/login');
     return null;
   }

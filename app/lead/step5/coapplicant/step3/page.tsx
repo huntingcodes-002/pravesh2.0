@@ -15,6 +15,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from "@/lib/utils";
 import { useToast } from '@/hooks/use-toast';
+import { getAccessToken } from '@/lib/api';
 
 interface Address {
   id: string;
@@ -52,18 +53,6 @@ function CoApplicantStep3PageContent() {
   const [isSaving, setIsSaving] = useState(false);
 
   const API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications';
-
-  const getAccessToken = () => {
-    if (typeof window === 'undefined') return null;
-    const authRaw = sessionStorage.getItem('auth');
-    if (!authRaw) return null;
-    try {
-      const parsed = JSON.parse(authRaw);
-      return parsed?.access_token ?? null;
-    } catch {
-      return null;
-    }
-  };
 
   useEffect(() => {
     if (coApplicantData.addresses) {

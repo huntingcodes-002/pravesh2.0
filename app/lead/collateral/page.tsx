@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { RefreshCw, Loader, AlertTriangle } from 'lucide-react';
 import { useGeolocation } from '@uidotdev/usehooks';
-import { lookupPincode, isApiError } from '@/lib/api';
+import { lookupPincode, isApiError, getAccessToken } from '@/lib/api';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -282,18 +282,6 @@ export default function CollateralPage() {
   };
 
   const API_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications/collateral-details/';
-
-  const getAccessToken = () => {
-    if (typeof window === 'undefined') return null;
-    const authData = sessionStorage.getItem('auth');
-    if (!authData) return null;
-    try {
-      const parsed = JSON.parse(authData);
-      return parsed?.access_token ?? null;
-    } catch {
-      return null;
-    }
-  };
 
   const handleSave = async () => {
     if (!currentLead || isSaving) return;

@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { startCoApplicantWorkflow, submitCoApplicantConsentMobile, isApiError } from '@/lib/api';
+import { startCoApplicantWorkflow, submitCoApplicantConsentMobile, isApiError, getAccessToken } from '@/lib/api';
 import { CheckCircle, Edit, Loader, Send } from 'lucide-react';
 
 const RELATIONSHIPS = [
@@ -167,17 +167,6 @@ function CoApplicantNewPageContent() {
     return () => clearTimeout(timerId);
   }, [isOtpModalOpen, resendTimer]);
 
-  const getAccessToken = () => {
-    if (typeof window === 'undefined') return null;
-    const authRaw = sessionStorage.getItem('auth');
-    if (!authRaw) return null;
-    try {
-      const parsed = JSON.parse(authRaw);
-      return parsed?.access_token ?? null;
-    } catch {
-      return null;
-    }
-  };
 
   const handleRelationChange = async (value: string) => {
     setFormData(prev => ({ ...prev, relation: value }));

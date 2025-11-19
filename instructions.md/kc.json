@@ -1,0 +1,1666 @@
+{
+	"info": {
+		"_postman_id": "f29cd071-92cc-4399-9834-4b5b919578d2",
+		"name": "Auth Service API",
+		"description": "Simple auth flow for Django backend with Keycloak",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "49069005",
+		"_collection_link": "https://soumalya-roy-6694134.postman.co/workspace/Soumalya-Roy's-Workspace~98de0b6b-2bfa-43d4-8fd1-8fdfa2f10a58/collection/49069005-f29cd071-92cc-4399-9834-4b5b919578d2?action=share&source=collection_link&creator=49069005"
+	},
+	"item": [
+		{
+			"name": "1. Browser Login",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{BASE_URL}}auth/login/",
+					"host": [
+						"{{BASE_URL}}auth"
+					],
+					"path": [
+						"login",
+						""
+					]
+				},
+				"description": "Open the Location header URL in a browser, complete login, and copy the token from the final redirect URL."
+			},
+			"response": []
+		},
+		{
+			"name": "2. Browser Login Google IDP",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{BASE_URL}}auth/login/google",
+					"host": [
+						"{{BASE_URL}}auth"
+					],
+					"path": [
+						"login",
+						"google"
+					]
+				},
+				"description": "Open the Location header URL in a browser, complete login, and copy the token from the final redirect URL."
+			},
+			"response": []
+		},
+		{
+			"name": "3. Post Login",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// Parse the JSON response",
+							"let jsonData = pm.response.json();",
+							"",
+							"// Set collection variables",
+							"pm.collectionVariables.set(\"access_token\", jsonData.data.access_token);",
+							"pm.collectionVariables.set(\"refresh_token\", jsonData.data.refresh_token);",
+							"pm.collectionVariables.set(\"user_id\", jsonData.data.user_id);",
+							"pm.collectionVariables.set(\"username\", jsonData.data.username);",
+							"pm.collectionVariables.set(\"permissions\", jsonData.data.permissions)",
+							"pm.collectionVariables.set(\"id_token\", jsonData.data.id_token)",
+							"",
+							"// Optional: log for debugging",
+							"console.log(\"Tokens set:\", jsonData.data.access_token, jsonData.data.refresh_token);"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"protocolProfileBehavior": {
+				"disabledSystemHeaders": {}
+			},
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "username",
+							"value": "soumalya.roy@saarathifinance.com",
+							"type": "text"
+						},
+						{
+							"key": "password",
+							"value": "intra@123",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/login/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"login",
+						""
+					]
+				},
+				"description": "Generated from cURL: curl -X POST http://localhost:8001/auth/login/ \\\n  -d \"username=admin\" \\\n  -d \"password=MyPass123\""
+			},
+			"response": [
+				{
+					"name": "Happy flow 200 Get tokens",
+					"originalRequest": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "username",
+									"value": "soumalya.roy@saarathifinance.com",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "intra@123",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/login/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login",
+								""
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "Server",
+							"value": "nginx/1.29.2"
+						},
+						{
+							"key": "Date",
+							"value": "Wed, 19 Nov 2025 07:28:05 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Content-Length",
+							"value": "4056"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Allow",
+							"value": "GET, POST, HEAD, OPTIONS"
+						},
+						{
+							"key": "X-Frame-Options",
+							"value": "DENY"
+						},
+						{
+							"key": "Vary",
+							"value": "Cookie, origin"
+						},
+						{
+							"key": "X-Content-Type-Options",
+							"value": "nosniff"
+						},
+						{
+							"key": "Referrer-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Cross-Origin-Opener-Policy",
+							"value": "same-origin"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"message\": \"Login successful\",\n    \"data\": {\n        \"access_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJmaDNObGJjV0NjZEs2b09zMWFlTWoza2xROTJXdkl5M0l3WXpmbFFQV3ZrIn0.eyJleHAiOjE3NjM1Mzc1ODUsImlhdCI6MTc2MzUzNzI4NSwianRpIjoiMmM3NjY0NmMtMjQ3ZS00MTE5LTgwYjctZGVmMGFkZjZmNDc1IiwiaXNzIjoiaHR0cHM6Ly9rZXljbG9hay56YWthcmlhcy5pbi9rY19hdXRoL3JlYWxtcy9zYWFyYXRoaV9pbnRlcm5hbF9zdGFnaW5nIiwiYXVkIjoiYWNjb3VudCIsInN1YiI6ImVmM2FhMzgyLTNmYzUtNGZmNy04M2I2LTFhNDJhN2JhMDk0YyIsInR5cCI6IkJlYXJlciIsImF6cCI6ImF1dGhfc2VydmljZV9iYWNrZW5kIiwic2Vzc2lvbl9zdGF0ZSI6IjRjNzJkOTk1LTBmMTktNDI5Mi1hODkwLTdkNjE3MDU2MjUzNSIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiKiJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1zYWFyYXRoaV9pbnRlcm5hbF9zdGFnaW5nIiwib2ZmbGluZV9hY2Nlc3MiLCJ1bWFfYXV0aG9yaXphdGlvbiJdfSwicmVzb3VyY2VfYWNjZXNzIjp7ImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfX0sInNjb3BlIjoib3BlbmlkIGVtYWlsIHByb2ZpbGUiLCJzaWQiOiI0YzcyZDk5NS0wZjE5LTQyOTItYTg5MC03ZDYxNzA1NjI1MzUiLCJicmFuY2hfY29kZSI6IkIwMDAxIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInVzZXJfdHlwZSI6ImludGVybmFsIiwibmFtZSI6IlNvdW1hbHlhIFJveSIsInBob25lX251bWJlciI6IjkxNjcxNjEzMjQiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJzb3VtYWx5YS5yb3lAc2FhcmF0aGlmaW5hbmNlLmNvbSIsImdpdmVuX25hbWUiOiJTb3VtYWx5YSIsImZhbWlseV9uYW1lIjoiUm95IiwiZW1haWwiOiJzb3VtYWx5YS5yb3lAc2FhcmF0aGlmaW5hbmNlLmNvbSIsImVtcGxveWVlX2NvZGUiOiJTRjA3MjQifQ.mi3jJgS2dj513x9c4hHuDL8Q2NqjJuFEdvYdG3E3v2ejxJbXBep2AGuS0Xg_s_vlvfF11-8s7PADgdOoFqonBswM0dxs4nzHWkVLuLHumkhlQzdtX6MBVRWwpNeRnp1WcvxO9BB_ZIPbrGQToCA3oPx-_bXE6sxy7sFs7h0fYk_bEjcvjL9Fc7y_ewwBMAnvsmpa5y9NCGnqBT2V-IVFPAaNNMT78kx3PUDjcNZw5P8BQx68PDcKGxwF8flFy5fyloVwMMLp-BY1lxVRCmuTmor97tbel71r4BtjOO0E9N91jj0Oquel2vnB4t5_CcbSdK2ktZC6JrvCtdbyOZ0vMw\",\n        \"expires_in\": 300,\n        \"refresh_expires_in\": 1800,\n        \"refresh_token\": \"eyJhbGciOiJIUzUxMiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICIyNTI1YmE5NS00YmQyLTQzYWEtODVkZS1kN2QzZTZhNGRlZGMifQ.eyJleHAiOjE3NjM1MzkwODUsImlhdCI6MTc2MzUzNzI4NSwianRpIjoiMDJmNDcxYmUtMWM4NC00YjdjLThhOGYtYjA4MjMwZmJiZTM4IiwiaXNzIjoiaHR0cHM6Ly9rZXljbG9hay56YWthcmlhcy5pbi9rY19hdXRoL3JlYWxtcy9zYWFyYXRoaV9pbnRlcm5hbF9zdGFnaW5nIiwiYXVkIjoiaHR0cHM6Ly9rZXljbG9hay56YWthcmlhcy5pbi9rY19hdXRoL3JlYWxtcy9zYWFyYXRoaV9pbnRlcm5hbF9zdGFnaW5nIiwic3ViIjoiZWYzYWEzODItM2ZjNS00ZmY3LTgzYjYtMWE0MmE3YmEwOTRjIiwidHlwIjoiUmVmcmVzaCIsImF6cCI6ImF1dGhfc2VydmljZV9iYWNrZW5kIiwic2Vzc2lvbl9zdGF0ZSI6IjRjNzJkOTk1LTBmMTktNDI5Mi1hODkwLTdkNjE3MDU2MjUzNSIsInNjb3BlIjoib3BlbmlkIGVtYWlsIHByb2ZpbGUiLCJzaWQiOiI0YzcyZDk5NS0wZjE5LTQyOTItYTg5MC03ZDYxNzA1NjI1MzUifQ.0IgAdMkSl3qM93PFV_CfItLcQVZnvmpgwPPqwzseCCns7_ED3xiDxSsb_9TprIdKgDG2lNQ-1TxpIsHkb95PWw\",\n        \"token_type\": \"Bearer\",\n        \"id_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJmaDNObGJjV0NjZEs2b09zMWFlTWoza2xROTJXdkl5M0l3WXpmbFFQV3ZrIn0.eyJleHAiOjE3NjM1Mzc1ODUsImlhdCI6MTc2MzUzNzI4NSwiYXV0aF90aW1lIjowLCJqdGkiOiJjNzY5Y2UzMS00Mzk3LTRmY2UtOWEyNS0yODEyMzViOGYzZTgiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnpha2FyaWFzLmluL2tjX2F1dGgvcmVhbG1zL3NhYXJhdGhpX2ludGVybmFsX3N0YWdpbmciLCJhdWQiOiJhdXRoX3NlcnZpY2VfYmFja2VuZCIsInN1YiI6ImVmM2FhMzgyLTNmYzUtNGZmNy04M2I2LTFhNDJhN2JhMDk0YyIsInR5cCI6IklEIiwiYXpwIjoiYXV0aF9zZXJ2aWNlX2JhY2tlbmQiLCJzZXNzaW9uX3N0YXRlIjoiNGM3MmQ5OTUtMGYxOS00MjkyLWE4OTAtN2Q2MTcwNTYyNTM1IiwiYXRfaGFzaCI6IndSdEhER295RlJIZ1lxUk9TeXVhYWciLCJhY3IiOiIxIiwic2lkIjoiNGM3MmQ5OTUtMGYxOS00MjkyLWE4OTAtN2Q2MTcwNTYyNTM1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJTb3VtYWx5YSBSb3kiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJzb3VtYWx5YS5yb3lAc2FhcmF0aGlmaW5hbmNlLmNvbSIsImdpdmVuX25hbWUiOiJTb3VtYWx5YSIsImZhbWlseV9uYW1lIjoiUm95IiwiZW1haWwiOiJzb3VtYWx5YS5yb3lAc2FhcmF0aGlmaW5hbmNlLmNvbSJ9.lSW4dmEocc-XzX9erfNNAZIWniBD14Eo1HPHjWImJZfOuKxzjiWosK0xDsANhIsKylSp0GNZhsDWO0Vq-v1ZiOEDq9DhLpEEGBPXHLiOuWc1kmMccfkQ56ZLE6dJvR7pFtWa1e07LQrjrABpRfr9Akq1iTXOvFP5s3s5vnekHVvZV92rtzHLuPLrYa8dc1BYRt3vUlR2V_fFmxg-zswoDvROs4ewvtDCzKLLzMID61j67AunflbVXp-tPv1cSpILIQz6_eQBFz5nwenJPY543HTa5dYfJnk-JY_QTm3FQcccWurvFQD_gOSkuR3q3XeT8WBI1d7rxW6B-jI4ukdYsw\",\n        \"not-before-policy\": 0,\n        \"session_state\": \"4c72d995-0f19-4292-a890-7d6170562535\",\n        \"scope\": \"openid email profile\"\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "4. Post Login Pravesh",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// Parse the JSON response",
+							"let jsonData = pm.response.json();",
+							"",
+							"// Set collection variables",
+							"pm.collectionVariables.set(\"verification_code\", jsonData.data.verification_code);",
+							"console.log(\"Verification code stored:\", jsonData.data.verification_code);",
+							""
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"protocolProfileBehavior": {
+				"disabledSystemHeaders": {}
+			},
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "username",
+							"value": "ishan.vaidya@saarathifinance.com",
+							"type": "text"
+						},
+						{
+							"key": "password",
+							"value": "intra@123",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/login-pravesh/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"login-pravesh",
+						""
+					]
+				},
+				"description": "Generated from cURL: curl -X POST http://localhost:8001/auth/login/ \\\n  -d \"username=admin\" \\\n  -d \"password=MyPass123\""
+			},
+			"response": [
+				{
+					"name": "Happy Flow",
+					"originalRequest": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "username",
+									"value": "soumaly.roy@saarathifinance.com",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "intra@123",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/login-pravesh/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login-pravesh",
+								""
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "Server",
+							"value": "nginx/1.29.2"
+						},
+						{
+							"key": "Date",
+							"value": "Tue, 18 Nov 2025 11:49:19 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Content-Length",
+							"value": "321"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Allow",
+							"value": "GET, HEAD, OPTIONS"
+						},
+						{
+							"key": "X-Frame-Options",
+							"value": "DENY"
+						},
+						{
+							"key": "Vary",
+							"value": "Cookie, origin"
+						},
+						{
+							"key": "X-Content-Type-Options",
+							"value": "nosniff"
+						},
+						{
+							"key": "Referrer-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Cross-Origin-Opener-Policy",
+							"value": "same-origin"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"message\": \"OTP sent successfully to +91***324\",\n    \"data\": {\n        \"masked_phone_number\": \"+91***324\",\n        \"verification_code\": \"gAAAAABpHF0_o-X5JFyr-CVSd56xAnhOwNcL6VZIV5RCGQxXMzvsqAVTazoqaQwjRKZb15FyiUzD-t43vSmMkr0yOei4G9Z5v4kqByM9bRCbtwGqTIvEWlPIJ4gGe5r0rB7B8UblaaCf3vl-ieJYfdI0Ne4TegFTHQu4iLIIyb8v5-NZm-RB_wU=\"\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "5. Logout",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Redirect to logout', function () {",
+							"  pm.expect(pm.response.code).to.be.oneOf([302, 303]);",
+							"});",
+							"",
+							"if (pm.response.code >= 300 && pm.response.code < 400) {",
+							"  console.log('Logout redirect:', pm.response.headers.get('Location'));",
+							"}"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{id_token}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/logout/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"logout",
+						""
+					]
+				},
+				"description": "Logout and redirect to Keycloak logout endpoint"
+			},
+			"response": []
+		},
+		{
+			"name": "6. Get OTP",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true,
+				"disabledSystemHeaders": {}
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}",
+						"type": "text",
+						"disabled": true
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": []
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/otp/?email=gaurav.tiwari@saarathifinance.com&phone_number=9459529222&employee_user_name=Ishan Vaidya",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"otp",
+						""
+					],
+					"query": [
+						{
+							"key": "email",
+							"value": "gaurav.tiwari@saarathifinance.com"
+						},
+						{
+							"key": "phone_number",
+							"value": "9459529222"
+						},
+						{
+							"key": "employee_user_name",
+							"value": "Ishan Vaidya"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "7. OTP Verification",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// Parse the JSON response",
+							"let jsonData = pm.response.json();",
+							"",
+							"// Set collection variables",
+							"pm.collectionVariables.set(\"access_token\", jsonData.data.access_token);",
+							"pm.collectionVariables.set(\"refresh_token\", jsonData.data.refresh_token);",
+							"pm.collectionVariables.set(\"user_id\", jsonData.data.user_id);",
+							"pm.collectionVariables.set(\"username\", jsonData.data.username);",
+							"pm.collectionVariables.set(\"permissions\", jsonData.data.permissions)",
+							"pm.collectionVariables.set(\"id_token\", jsonData.data.id_token)",
+							"",
+							"// Optional: log for debugging",
+							"console.log(\"Tokens set:\", jsonData.data.access_token, jsonData.data.refresh_token);"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "otp",
+							"value": "395515",
+							"type": "text"
+						},
+						{
+							"key": "verification_code",
+							"value": "{{verification_code}}",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/verify-otp/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"verify-otp",
+						""
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Happy Flow",
+					"originalRequest": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "otp",
+									"value": "395515",
+									"type": "text"
+								},
+								{
+									"key": "verification_code",
+									"value": "{{verification_code}}",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/verify-otp/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"verify-otp",
+								""
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "Server",
+							"value": "nginx/1.24.0 (Ubuntu)"
+						},
+						{
+							"key": "Date",
+							"value": "Tue, 18 Nov 2025 12:10:52 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Content-Length",
+							"value": "4417"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Allow",
+							"value": "POST, OPTIONS"
+						},
+						{
+							"key": "X-Frame-Options",
+							"value": "DENY"
+						},
+						{
+							"key": "Vary",
+							"value": "Cookie, origin"
+						},
+						{
+							"key": "X-Content-Type-Options",
+							"value": "nosniff"
+						},
+						{
+							"key": "Referrer-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Cross-Origin-Opener-Policy",
+							"value": "same-origin"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"message\": \"OTP verified successfully\",\n    \"data\": {\n        \"access_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJPdU1tUDJXd2JzYVlnX0xoVy1GdU1TYTIzSi1kUXZUdl9CQnlPeFRCMmxzIn0.eyJleHAiOjE3NjM0Njg0MzYsImlhdCI6MTc2MzQ2NzgzNiwianRpIjoiODczYTk0YjMtYjJjNC00MDA0LTgxMGMtMmViYjk1MzM5NGM5IiwiaXNzIjoiaHR0cHM6Ly9hdXRoLXVhdC5teXNhYXJhdGhpLmluL2tjX2F1dGgvcmVhbG1zL3NhYXJhdGhpX2ludGVybmFsX3VhdCIsImF1ZCI6ImFjY291bnQiLCJzdWIiOiJjODIyYjgxMy0zYTJhLTQxY2YtODM5Ny02MzE0ZWFhNzAzMDQiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJhdXRoLXNlcnZpY2UtaW50ZXJuYWwtYmFja2VuZCIsInNlc3Npb25fc3RhdGUiOiJjMGIzOTllMi02NDU3LTQzNzQtOTdmYi1mMTNiNTY3M2FmMDMiLCJhY3IiOiIxIiwiYWxsb3dlZC1vcmlnaW5zIjpbImh0dHBzOi8vMTAuNDAuMzAuNDkiXSwicmVhbG1fYWNjZXNzIjp7InJvbGVzIjpbImVtcGxveWVlLmNhbl9hY2Nlc3NfcHJhdmVzaCIsImVtcGxveWVlLmRldmlhdGlvbl9yYWlzZSIsImVtcGxveWVlLmRldmlhdGlvbl92aWV3IiwiZW1wbG95ZWUudHJhaW5pbmdfdmlkZW9zIiwib2ZmbGluZV9hY2Nlc3MiLCJlbXBsb3llZS5zdXBwb3J0X2JvdCIsImVtcGxveWVlLmFubm91bmNlbWVudHMiLCJlbXBsb3llZS5ocl9wb2xpY2llcyIsInVtYV9hdXRob3JpemF0aW9uIiwiZW1wbG95ZWUucHJlbWl1bV9jYWxjdWxhdG9yIiwiZW1wbG95ZWUuc2FhcmF0aGlfYXBwX2Rvd25sb2FkIiwiZGVmYXVsdC1yb2xlcy1zYWFyYXRoaV9pbnRlcm5hbF91YXQiXX0sInJlc291cmNlX2FjY2VzcyI6eyJhY2NvdW50Ijp7InJvbGVzIjpbIm1hbmFnZS1hY2NvdW50IiwibWFuYWdlLWFjY291bnQtbGlua3MiLCJ2aWV3LXByb2ZpbGUiXX19LCJzY29wZSI6Im9wZW5pZCBlbWFpbCBwcm9maWxlIiwic2lkIjoiYzBiMzk5ZTItNjQ1Ny00Mzc0LTk3ZmItZjEzYjU2NzNhZjAzIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInVzZXJfdHlwZSI6ImludGVybmFsIiwibmFtZSI6IlRhbmlzaCBLaGFyZSIsInBob25lX251bWJlciI6Ijg4NTE5NTc0ODQiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJ0YW5pc2gua2hhcmVAc2FhcmF0aGlmaW5hbmNlLmNvbSIsImdpdmVuX25hbWUiOiJUYW5pc2giLCJmYW1pbHlfbmFtZSI6IktoYXJlIiwiZW1haWwiOiJ0YW5pc2gua2hhcmVAc2FhcmF0aGlmaW5hbmNlLmNvbSIsImVtcGxveWVlX2NvZGUiOiJTRjA0NjcifQ.cQbp49bdbsLVrEmA2JzXAkZL7rNgFo4lZ-evZKSf8thuUXZekPtGTb2ReXZzkZNUZ4zAt2l8MUEgfw0feL0qJyxVI4uGjoHrakGg9cJQ8zh4agG6gqYABOG1sya1RVPt2i_E274CRIgntG7GzYfJZI6Az8KeYA2hkVu6dhdtl9RVTLJg2ApICV6-DUu2bcA74lFb0Ln2-7PauH25NOLj1I6XFFMk23slnjmIQQc6zOewPZk-yXrKwibuzGZ2vaaYjhViIvgP6Km_73MLHu65xe3ZztcM0f31kKWG6kdHdY2I2lOY0M4waeXJ4zE6XL8nMJeZC6XTz6DPA7fpsKBT7Q\",\n        \"expires_in\": 600,\n        \"refresh_expires_in\": 1800,\n        \"refresh_token\": \"eyJhbGciOiJIUzUxMiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICIzYjZlNTI4YS00MjE2LTQ0ODItYWM3Ni01OWZiMGJhMmM5MDkifQ.eyJleHAiOjE3NjM0Njk2MzYsImlhdCI6MTc2MzQ2NzgzNiwianRpIjoiOTAyY2ZmZTEtMTU5My00NmE5LWI3YWYtNmM4YWE3NTZlMDU0IiwiaXNzIjoiaHR0cHM6Ly9hdXRoLXVhdC5teXNhYXJhdGhpLmluL2tjX2F1dGgvcmVhbG1zL3NhYXJhdGhpX2ludGVybmFsX3VhdCIsImF1ZCI6Imh0dHBzOi8vYXV0aC11YXQubXlzYWFyYXRoaS5pbi9rY19hdXRoL3JlYWxtcy9zYWFyYXRoaV9pbnRlcm5hbF91YXQiLCJzdWIiOiJjODIyYjgxMy0zYTJhLTQxY2YtODM5Ny02MzE0ZWFhNzAzMDQiLCJ0eXAiOiJSZWZyZXNoIiwiYXpwIjoiYXV0aC1zZXJ2aWNlLWludGVybmFsLWJhY2tlbmQiLCJzZXNzaW9uX3N0YXRlIjoiYzBiMzk5ZTItNjQ1Ny00Mzc0LTk3ZmItZjEzYjU2NzNhZjAzIiwic2NvcGUiOiJvcGVuaWQgZW1haWwgcHJvZmlsZSIsInNpZCI6ImMwYjM5OWUyLTY0NTctNDM3NC05N2ZiLWYxM2I1NjczYWYwMyJ9.eQkpabUoolg8PDzlEC-TfwUHANl8HOPeMoVvj3lx546ABCV_E90TjkvbQpjrHWGOMv2JG-kT54lwDTKdK_Qidw\",\n        \"token_type\": \"Bearer\",\n        \"id_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJPdU1tUDJXd2JzYVlnX0xoVy1GdU1TYTIzSi1kUXZUdl9CQnlPeFRCMmxzIn0.eyJleHAiOjE3NjM0Njg0MzYsImlhdCI6MTc2MzQ2NzgzNiwiYXV0aF90aW1lIjowLCJqdGkiOiI4ODRkNTFjOC0zYjg4LTQzYTQtODQ0My1jNjk5ZTAzYzlkYTUiLCJpc3MiOiJodHRwczovL2F1dGgtdWF0Lm15c2FhcmF0aGkuaW4va2NfYXV0aC9yZWFsbXMvc2FhcmF0aGlfaW50ZXJuYWxfdWF0IiwiYXVkIjoiYXV0aC1zZXJ2aWNlLWludGVybmFsLWJhY2tlbmQiLCJzdWIiOiJjODIyYjgxMy0zYTJhLTQxY2YtODM5Ny02MzE0ZWFhNzAzMDQiLCJ0eXAiOiJJRCIsImF6cCI6ImF1dGgtc2VydmljZS1pbnRlcm5hbC1iYWNrZW5kIiwic2Vzc2lvbl9zdGF0ZSI6ImMwYjM5OWUyLTY0NTctNDM3NC05N2ZiLWYxM2I1NjczYWYwMyIsImF0X2hhc2giOiJPY1FKNnNsOW9KTERUdnFnWUFkRWNBIiwiYWNyIjoiMSIsInNpZCI6ImMwYjM5OWUyLTY0NTctNDM3NC05N2ZiLWYxM2I1NjczYWYwMyIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJuYW1lIjoiVGFuaXNoIEtoYXJlIiwicHJlZmVycmVkX3VzZXJuYW1lIjoidGFuaXNoLmtoYXJlQHNhYXJhdGhpZmluYW5jZS5jb20iLCJnaXZlbl9uYW1lIjoiVGFuaXNoIiwiZmFtaWx5X25hbWUiOiJLaGFyZSIsImVtYWlsIjoidGFuaXNoLmtoYXJlQHNhYXJhdGhpZmluYW5jZS5jb20ifQ.i2qTK0_vdFxIBzq2gti34_Dy5SPP7LsnTkdw_4OcImfMs234hCaMz-FCo8VsFOflyP47zMEXR4LZ4ZWN6xYWCHrqXNQX1fYY9vsZU90exzYG_hXOt60dm8fn7NPvJfyLcVnNV7bGf4wzcTw2SqWJrVv5UKsL8xVEtVWdRaumYCnaHdArHFON9Fh_Xx16IQO-4FkXQsiYe4h64wBQlxogzGjDg81Tkt9_pS7Ueg6VNIuC_T0AqyRFdKUu_vSDY6WiQmQ82RvJEm0dWXJuKwYa68ppEMlvkBSLhZgkjH7P5l-tVzDvY7_jwBMFIBudPEzvH1CwuwSDQkyuYwqCJoGW5A\",\n        \"not-before-policy\": 0,\n        \"session_state\": \"c0b399e2-6457-4374-97fb-f13b5673af03\",\n        \"scope\": \"openid email profile\"\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "8. Exchange Refresh Token",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{refresh_token}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "phone_number",
+							"value": "9167161324",
+							"type": "text"
+						},
+						{
+							"key": "otp",
+							"value": "829123",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/refresh/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"refresh",
+						""
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Happy flow",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{refresh_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "phone_number",
+									"value": "9167161324",
+									"type": "text"
+								},
+								{
+									"key": "otp",
+									"value": "829123",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/refresh/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"refresh",
+								""
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "Server",
+							"value": "nginx/1.29.2"
+						},
+						{
+							"key": "Date",
+							"value": "Wed, 19 Nov 2025 07:30:40 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Content-Length",
+							"value": "4076"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Allow",
+							"value": "POST, OPTIONS"
+						},
+						{
+							"key": "X-Frame-Options",
+							"value": "DENY"
+						},
+						{
+							"key": "X-Content-Type-Options",
+							"value": "nosniff"
+						},
+						{
+							"key": "Referrer-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Cross-Origin-Opener-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Vary",
+							"value": "origin"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"message\": \"Refresh token exchanged successfully\",\n    \"data\": {\n        \"access_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJmaDNObGJjV0NjZEs2b09zMWFlTWoza2xROTJXdkl5M0l3WXpmbFFQV3ZrIn0.eyJleHAiOjE3NjM1Mzc3NDAsImlhdCI6MTc2MzUzNzQ0MCwianRpIjoiOGEzNzg1ZGEtZDNmZi00OTliLTg2NjYtMDc1YTcyNDNiNTgwIiwiaXNzIjoiaHR0cHM6Ly9rZXljbG9hay56YWthcmlhcy5pbi9rY19hdXRoL3JlYWxtcy9zYWFyYXRoaV9pbnRlcm5hbF9zdGFnaW5nIiwiYXVkIjoiYWNjb3VudCIsInN1YiI6ImVmM2FhMzgyLTNmYzUtNGZmNy04M2I2LTFhNDJhN2JhMDk0YyIsInR5cCI6IkJlYXJlciIsImF6cCI6ImF1dGhfc2VydmljZV9iYWNrZW5kIiwic2Vzc2lvbl9zdGF0ZSI6IjRjNzJkOTk1LTBmMTktNDI5Mi1hODkwLTdkNjE3MDU2MjUzNSIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiKiJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1zYWFyYXRoaV9pbnRlcm5hbF9zdGFnaW5nIiwib2ZmbGluZV9hY2Nlc3MiLCJ1bWFfYXV0aG9yaXphdGlvbiJdfSwicmVzb3VyY2VfYWNjZXNzIjp7ImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfX0sInNjb3BlIjoib3BlbmlkIGVtYWlsIHByb2ZpbGUiLCJzaWQiOiI0YzcyZDk5NS0wZjE5LTQyOTItYTg5MC03ZDYxNzA1NjI1MzUiLCJicmFuY2hfY29kZSI6IkIwMDAxIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInVzZXJfdHlwZSI6ImludGVybmFsIiwibmFtZSI6IlNvdW1hbHlhIFJveSIsInBob25lX251bWJlciI6IjkxNjcxNjEzMjQiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJzb3VtYWx5YS5yb3lAc2FhcmF0aGlmaW5hbmNlLmNvbSIsImdpdmVuX25hbWUiOiJTb3VtYWx5YSIsImZhbWlseV9uYW1lIjoiUm95IiwiZW1haWwiOiJzb3VtYWx5YS5yb3lAc2FhcmF0aGlmaW5hbmNlLmNvbSIsImVtcGxveWVlX2NvZGUiOiJTRjA3MjQifQ.Q-yw2GqvfMpKW7q4pBZlLN1wHuYIypfSv6qFJT9D9POT5c7w6Y40KBHzuHTPh5oQyIEaTTyDfuQAB-0u5ICCdulKTEtAePsKaq5_HlvBn2jHRwOfL1KgFgibm9UMuOEao957Qkh8xloQRikvPozg5F--cVaZgPfNlZcPxPEN0jPDNjynwLjokaDWxU2ZKJb81ydRksgmkgy9QHaLcjC21i-LQEIia5Q2Jey-xmjLgp5FXt-E0D_YVBM0SNbdu_WY6YfE6MIAd_I5JwcM1__2_AUlsqDxVs2cjH0DZiQtsUhSxL0qLriAHszdAXDUk6tUSdFCmnLBKqb30BOoNmTSwQ\",\n        \"expires_in\": 300,\n        \"refresh_expires_in\": 1800,\n        \"refresh_token\": \"eyJhbGciOiJIUzUxMiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICIyNTI1YmE5NS00YmQyLTQzYWEtODVkZS1kN2QzZTZhNGRlZGMifQ.eyJleHAiOjE3NjM1MzkyNDAsImlhdCI6MTc2MzUzNzQ0MCwianRpIjoiOGJhNmRmYWQtYWQ3Yy00ZTAwLWJhZDMtNGQxOTVmMDcwNzlkIiwiaXNzIjoiaHR0cHM6Ly9rZXljbG9hay56YWthcmlhcy5pbi9rY19hdXRoL3JlYWxtcy9zYWFyYXRoaV9pbnRlcm5hbF9zdGFnaW5nIiwiYXVkIjoiaHR0cHM6Ly9rZXljbG9hay56YWthcmlhcy5pbi9rY19hdXRoL3JlYWxtcy9zYWFyYXRoaV9pbnRlcm5hbF9zdGFnaW5nIiwic3ViIjoiZWYzYWEzODItM2ZjNS00ZmY3LTgzYjYtMWE0MmE3YmEwOTRjIiwidHlwIjoiUmVmcmVzaCIsImF6cCI6ImF1dGhfc2VydmljZV9iYWNrZW5kIiwic2Vzc2lvbl9zdGF0ZSI6IjRjNzJkOTk1LTBmMTktNDI5Mi1hODkwLTdkNjE3MDU2MjUzNSIsInNjb3BlIjoib3BlbmlkIGVtYWlsIHByb2ZpbGUiLCJzaWQiOiI0YzcyZDk5NS0wZjE5LTQyOTItYTg5MC03ZDYxNzA1NjI1MzUifQ.6K6EkAXx1boROOhxJ6Ag4oKatFLqZ19jpjm7p0Btjrt2rGvmEIz4FkiVRLRvyTNJTsxJdyN7kSPKxzsSjFMFYQ\",\n        \"token_type\": \"Bearer\",\n        \"id_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJmaDNObGJjV0NjZEs2b09zMWFlTWoza2xROTJXdkl5M0l3WXpmbFFQV3ZrIn0.eyJleHAiOjE3NjM1Mzc3NDAsImlhdCI6MTc2MzUzNzQ0MCwiYXV0aF90aW1lIjowLCJqdGkiOiJhNjZlZGJiMS04NTMyLTQ1M2YtYjM5OS02MGVkNWRhYjJmN2YiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnpha2FyaWFzLmluL2tjX2F1dGgvcmVhbG1zL3NhYXJhdGhpX2ludGVybmFsX3N0YWdpbmciLCJhdWQiOiJhdXRoX3NlcnZpY2VfYmFja2VuZCIsInN1YiI6ImVmM2FhMzgyLTNmYzUtNGZmNy04M2I2LTFhNDJhN2JhMDk0YyIsInR5cCI6IklEIiwiYXpwIjoiYXV0aF9zZXJ2aWNlX2JhY2tlbmQiLCJzZXNzaW9uX3N0YXRlIjoiNGM3MmQ5OTUtMGYxOS00MjkyLWE4OTAtN2Q2MTcwNTYyNTM1IiwiYXRfaGFzaCI6IjhTWV9tNEQ4ZTJ5TURKVnhYckh4RUEiLCJhY3IiOiIxIiwic2lkIjoiNGM3MmQ5OTUtMGYxOS00MjkyLWE4OTAtN2Q2MTcwNTYyNTM1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJTb3VtYWx5YSBSb3kiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJzb3VtYWx5YS5yb3lAc2FhcmF0aGlmaW5hbmNlLmNvbSIsImdpdmVuX25hbWUiOiJTb3VtYWx5YSIsImZhbWlseV9uYW1lIjoiUm95IiwiZW1haWwiOiJzb3VtYWx5YS5yb3lAc2FhcmF0aGlmaW5hbmNlLmNvbSJ9.SfuLGsjj8iDvgUfIKcysgS5Vo-zbagySFrDenxztgJYLKccOYUM4mHJRYBSm_oXNGIqFbzzszNbfRsl1wGCZhdy2kPo-gW9B8yt4b9m6GMgIayr1uWtKagZe0fsNf9wDGcICuxEG__Ls8uhydVoQgwb_bquEsG_crVxVE5KfdWw0WQV46xRfS6k1JKtdpdDrEG8GxCDZAV9eI9KSK78zmqazLYDAmYYfW1tUxYAJOtUDAQkNdLtWjxPi4ELtoX095mrtNjMnsHJNi73JJLhuTiai2rL0X5ZHCVbylkBYR830Tt2JNHVu2t9_jZ5KwK6NYncBFZ12Lo3iZ_CeUBLnng\",\n        \"not-before-policy\": 0,\n        \"session_state\": \"4c72d995-0f19-4292-a890-7d6170562535\",\n        \"scope\": \"openid email profile\"\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "9. Resend-otp",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "verification_code",
+							"value": "{{verification_code}}",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/resend-otp/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"resend-otp",
+						""
+					]
+				},
+				"description": "Generated from cURL: curl -X POST http://localhost:8000/api/auth/resend-otp/ \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"verification_code\": \"gAAAAABh...\"}'"
+			},
+			"response": [
+				{
+					"name": "{{BASE_URL}}/api/auth/resend-otp/",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "verification_code",
+									"value": "{{verification_code}}",
+									"type": "text"
+								}
+							],
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/resend-otp/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"resend-otp",
+								""
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "Server",
+							"value": "nginx/1.29.2"
+						},
+						{
+							"key": "Date",
+							"value": "Tue, 18 Nov 2025 11:49:28 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Content-Length",
+							"value": "323"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Allow",
+							"value": "POST, OPTIONS"
+						},
+						{
+							"key": "X-Frame-Options",
+							"value": "DENY"
+						},
+						{
+							"key": "Vary",
+							"value": "Cookie, origin"
+						},
+						{
+							"key": "X-Content-Type-Options",
+							"value": "nosniff"
+						},
+						{
+							"key": "Referrer-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Cross-Origin-Opener-Policy",
+							"value": "same-origin"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"message\": \"OTP resent successfully to +91***324\",\n    \"data\": {\n        \"masked_phone_number\": \"+91***324\",\n        \"verification_code\": \"gAAAAABpHF0_o-X5JFyr-CVSd56xAnhOwNcL6VZIV5RCGQxXMzvsqAVTazoqaQwjRKZb15FyiUzD-t43vSmMkr0yOei4G9Z5v4kqByM9bRCbtwGqTIvEWlPIJ4gGe5r0rB7B8UblaaCf3vl-ieJYfdI0Ne4TegFTHQu4iLIIyb8v5-NZm-RB_wU=\"\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "10. Verify Access Token",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "phone_number",
+							"value": "9167161324",
+							"type": "text"
+						},
+						{
+							"key": "otp",
+							"value": "829123",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/access/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"access",
+						""
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "11. Get User Profile",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status is 200', function () {",
+							"  pm.response.to.have.status(200);",
+							"});"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/user-profile/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"user-profile",
+						""
+					]
+				},
+				"description": "Fetch user permissions/roles"
+			},
+			"response": [
+				{
+					"name": "Happy Flow",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/user-profile/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"user-profile",
+								""
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "Server",
+							"value": "nginx/1.29.2"
+						},
+						{
+							"key": "Date",
+							"value": "Wed, 19 Nov 2025 07:32:30 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Content-Length",
+							"value": "536"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Allow",
+							"value": "GET, HEAD, OPTIONS"
+						},
+						{
+							"key": "X-Frame-Options",
+							"value": "DENY"
+						},
+						{
+							"key": "X-Content-Type-Options",
+							"value": "nosniff"
+						},
+						{
+							"key": "Referrer-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Cross-Origin-Opener-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Vary",
+							"value": "origin"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"message\": \"User profile fetched successfully\",\n    \"data\": {\n        \"id\": \"ef3aa382-3fc5-4ff7-83b6-1a42a7ba094c\",\n        \"username\": \"soumalya.roy@saarathifinance.com\",\n        \"email\": \"soumalya.roy@saarathifinance.com\",\n        \"first_name\": \"Soumalya\",\n        \"last_name\": \"Roy\",\n        \"email_verified\": true,\n        \"is_active\": true,\n        \"user_type\": \"internal\",\n        \"branch_code\": \"B0001\",\n        \"employee_code\": \"SF0724\",\n        \"permissions\": [\n            \"manage-account\",\n            \"uma_authorization\",\n            \"manage-account-links\",\n            \"view-profile\",\n            \"offline_access\",\n            \"default-roles-saarathi_internal_staging\"\n        ]\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "12. Exchange Client Credentials for Token.",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// Parse the JSON response",
+							"let jsonData = pm.response.json();",
+							"",
+							"// Set collection variables",
+							"pm.collectionVariables.set(\"access_token\", jsonData.data.access_token);",
+							"pm.collectionVariables.set(\"refresh_token\", jsonData.data.refresh_token);",
+							"pm.collectionVariables.set(\"user_id\", jsonData.data.user_id);",
+							"pm.collectionVariables.set(\"username\", jsonData.data.username);",
+							"pm.collectionVariables.set(\"permissions\", jsonData.data.permissions)",
+							"pm.collectionVariables.set(\"id_token\", jsonData.data.id_token)",
+							"",
+							"// Optional: log for debugging",
+							"console.log(\"Tokens set:\", jsonData.data.access_token, jsonData.data.refresh_token);"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "client_id",
+							"value": "temporal-uat",
+							"type": "text"
+						},
+						{
+							"key": "client_secret",
+							"value": "G7pETNmgEg7Bq7hMf7BRuxMQQgeDyUAq",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/exchange-client-credentials/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"exchange-client-credentials",
+						""
+					]
+				},
+				"description": "Generated from cURL: curl -X POST http://localhost:8000/api/auth/exchange-client-credentials/ \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n        \"client_id\": \"your-service-client\",\n        \"client_secret\": \"your-service-secret\",\n        \"scope\": \"openid profile email\"\n      }'"
+			},
+			"response": []
+		},
+		{
+			"name": "13. Forgot Password",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "email",
+							"value": "soumalya.roy@saarathifinance.com",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/forgotpassword/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"forgotpassword",
+						""
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "7. Forgot Password",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "email",
+									"value": "soumaly.roy@saarathifinance.com",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/forgotpassword/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"forgotpassword",
+								""
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "Server",
+							"value": "nginx/1.29.2"
+						},
+						{
+							"key": "Date",
+							"value": "Wed, 19 Nov 2025 03:41:21 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Content-Length",
+							"value": "141"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Allow",
+							"value": "POST, OPTIONS"
+						},
+						{
+							"key": "X-Frame-Options",
+							"value": "DENY"
+						},
+						{
+							"key": "Vary",
+							"value": "Cookie, origin"
+						},
+						{
+							"key": "X-Content-Type-Options",
+							"value": "nosniff"
+						},
+						{
+							"key": "Referrer-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Cross-Origin-Opener-Policy",
+							"value": "same-origin"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"message\": \"Password reset code sent to email and OTP sent to mobile number\",\n    \"data\": {\n        \"masked_phone_number\": \"+91***324\"\n    }\n}"
+				},
+				{
+					"name": "7. Forgot Password",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "email",
+									"value": "soumalya.roy@saarathifinance.com",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/forgotpassword/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"forgotpassword",
+								""
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "Server",
+							"value": "nginx/1.29.2"
+						},
+						{
+							"key": "Date",
+							"value": "Wed, 19 Nov 2025 03:43:50 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Content-Length",
+							"value": "141"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Allow",
+							"value": "POST, OPTIONS"
+						},
+						{
+							"key": "X-Frame-Options",
+							"value": "DENY"
+						},
+						{
+							"key": "Vary",
+							"value": "Cookie, origin"
+						},
+						{
+							"key": "X-Content-Type-Options",
+							"value": "nosniff"
+						},
+						{
+							"key": "Referrer-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Cross-Origin-Opener-Policy",
+							"value": "same-origin"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"message\": \"Password reset code sent to email and OTP sent to mobile number\",\n    \"data\": {\n        \"masked_phone_number\": \"+91***324\"\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "15. Reset password",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "otp",
+							"value": "450791",
+							"type": "text"
+						},
+						{
+							"key": "new_password",
+							"value": "Intra@123",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/reset-password/?reset_code=_Dla6kbEnH_J7Dmne_RXwu7hMt1qyqFUZF1qudOQZQM",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"reset-password",
+						""
+					],
+					"query": [
+						{
+							"key": "reset_code",
+							"value": "_Dla6kbEnH_J7Dmne_RXwu7hMt1qyqFUZF1qudOQZQM"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "13. Verify reset OTP Copy",
+					"originalRequest": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "otp",
+									"value": "450791",
+									"type": "text"
+								},
+								{
+									"key": "new_password",
+									"value": "Intra@123",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/reset-password/?reset_code=_Dla6kbEnH_J7Dmne_RXwu7hMt1qyqFUZF1qudOQZQM",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"reset-password",
+								""
+							],
+							"query": [
+								{
+									"key": "reset_code",
+									"value": "_Dla6kbEnH_J7Dmne_RXwu7hMt1qyqFUZF1qudOQZQM"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "Server",
+							"value": "nginx/1.29.2"
+						},
+						{
+							"key": "Date",
+							"value": "Wed, 19 Nov 2025 03:47:28 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Content-Length",
+							"value": "59"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Allow",
+							"value": "PUT, OPTIONS"
+						},
+						{
+							"key": "X-Frame-Options",
+							"value": "DENY"
+						},
+						{
+							"key": "Vary",
+							"value": "Cookie, origin"
+						},
+						{
+							"key": "X-Content-Type-Options",
+							"value": "nosniff"
+						},
+						{
+							"key": "Referrer-Policy",
+							"value": "same-origin"
+						},
+						{
+							"key": "Cross-Origin-Opener-Policy",
+							"value": "same-origin"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"message\": \"Password reset successfully\"\n}"
+				}
+			]
+		},
+		{
+			"name": "16. Enable LDAP User",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\"email\": \"gaurav.tiwari@saarathifinance.com\"}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/enable-ldap-user/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"enable-ldap-user",
+						""
+					]
+				},
+				"description": "Generated from cURL: curl -X PUT http://localhost:8000/api/auth/enable-ldap-user/ \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: Bearer YOUR_ACCESS_TOKEN\" \\\n  -d '{\"email\": \"user@example.com\"}'"
+			},
+			"response": []
+		},
+		{
+			"name": "17. Disable LDAP User",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\"email\": \"gaurav.tiwari@saarathifinance.com\"}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/api/auth/disable-ldap-user/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"auth",
+						"disable-ldap-user",
+						""
+					]
+				},
+				"description": "Generated from cURL: curl -X PUT http://localhost:8000/api/auth/enable-ldap-user/ \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: Bearer YOUR_ACCESS_TOKEN\" \\\n  -d '{\"email\": \"user@example.com\"}'"
+			},
+			"response": []
+		},
+		{
+			"name": "18. Zing Sync Test",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status is 200', function () {",
+							"  pm.response.to.have.status(200);",
+							"});"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer  {{access_token}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{BASE_URL}}/api/zing/zingsynctest/",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"api",
+						"zing",
+						"zingsynctest",
+						""
+					]
+				},
+				"description": "Fetch current user info using ?token= query param (middleware normalizes it)"
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "BASE_URL",
+			"value": "http://localhost:8000"
+		},
+		{
+			"key": "access_token",
+			"value": ""
+		},
+		{
+			"key": "refresh_token",
+			"value": ""
+		},
+		{
+			"key": "id_token",
+			"value": ""
+		},
+		{
+			"key": "verification_code",
+			"value": ""
+		},
+		{
+			"key": "user_id",
+			"value": ""
+		},
+		{
+			"key": "username",
+			"value": ""
+		},
+		{
+			"key": "permissions",
+			"value": ""
+		}
+	]
+}

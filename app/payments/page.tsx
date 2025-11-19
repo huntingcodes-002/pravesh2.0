@@ -13,22 +13,11 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { RefreshCw, CheckCircle, ChevronDown, Trash2, Send } from 'lucide-react';
 import { useLead } from '@/contexts/LeadContext';
+import { getAccessToken } from '@/lib/api';
 
 type PaymentStatus = 'Pending' | 'Paid' | 'Failed';
 
 const API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications';
-
-const getAccessToken = () => {
-  if (typeof window === 'undefined') return null;
-  const authData = sessionStorage.getItem('auth');
-  if (!authData) return null;
-  try {
-    const parsed = JSON.parse(authData);
-    return parsed?.access_token ?? null;
-  } catch {
-    return null;
-  }
-};
 
 export default function PaymentsPage() {
   const router = useRouter();
