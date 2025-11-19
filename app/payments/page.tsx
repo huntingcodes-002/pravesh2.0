@@ -456,9 +456,7 @@ export default function PaymentsPage() {
     >
       <div className="max-w-2xl mx-auto pb-24 space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
-          <p className="text-sm text-gray-600 text-center">
-            Collect the processing (Login/IMD) fee before submitting the application.
-          </p>
+          
 
           <Card className="w-full border-l-4 border-blue-600 shadow-md">
             <CardContent className="p-4">
@@ -612,7 +610,7 @@ export default function PaymentsPage() {
                 <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
                   <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <p className="text-sm text-green-700 font-medium">
-                    Payment received successfully. You can now proceed to submit the application.
+                    Payment received successfully.
                   </p>
                 </div>
               )}
@@ -677,11 +675,11 @@ export default function PaymentsPage() {
           </Card>
         )}
 
-        {isPaymentCompleted && (
+        {/* {isPaymentCompleted && (
           <div className="p-4 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 font-medium">
             Payment has been completed. This page is now view only.
           </div>
-        )}
+        )} */}
       </div>
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
         <div className="flex gap-3 max-w-2xl mx-auto">

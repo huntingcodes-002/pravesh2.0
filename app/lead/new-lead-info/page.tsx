@@ -524,23 +524,7 @@ export default function NewLeadInfoPage() {
             </div>
           </div>
 
-          {/* Application Status Section */}
-          <div className="mb-6 p-4 bg-gray-50 rounded-xl border border-gray-200">
-            <div className="mb-2">
-              <span className="text-sm font-semibold text-gray-700">Application Status: </span>
-              <span className={cn(
-                "text-sm font-semibold",
-                applicationStatus.status === 'Completed' ? "text-green-600" :
-                applicationStatus.status === 'In Progress' ? "text-yellow-600" :
-                "text-gray-600"
-              )}>
-                {applicationStatus.label}
-              </span>
-            </div>
-            <p className="text-sm text-gray-600">
-              Upload Documents or manually enter details to start the application
-            </p>
-          </div>
+          
 
           {/* Upload Documents Button */}
           <div className="mb-6">
