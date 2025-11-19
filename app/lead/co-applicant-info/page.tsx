@@ -249,6 +249,8 @@ export default function CoApplicantInfoPage() {
 
     // Find local co-applicant for navigation
     const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
+    const canEditBasic = status !== 'completed' && Boolean(localCoApp);
+    const isEditable = status !== 'completed' && Boolean(localCoApp);
 
     return (
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-1">
@@ -326,16 +328,20 @@ export default function CoApplicantInfoPage() {
 
         {localCoApp && (
           <div className="flex flex-wrap gap-3 pt-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                router.push(`/lead/co-applicant/basic-details?coApplicantId=${localCoApp.id}`);
-              }}
-              className="border-blue-600 text-blue-600 hover:bg-blue-50"
-            >
-              Edit
-            </Button>
+            {canEditBasic ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  router.push(`/lead/co-applicant/basic-details?coApplicantId=${localCoApp.id}`);
+                }}
+                className="border-blue-600 text-blue-600 hover:bg-blue-50"
+              >
+                Edit
+              </Button>
+            ) : (
+              <Badge className="bg-gray-200 text-gray-700 text-xs">Submitted</Badge>
+            )}
           </div>
         )}
       </div>
@@ -349,6 +355,7 @@ export default function CoApplicantInfoPage() {
 
     // Find local co-applicant for navigation
     const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
+    const canEditAddress = status !== 'completed' && Boolean(localCoApp);
 
     return (
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-1">
@@ -408,16 +415,22 @@ export default function CoApplicantInfoPage() {
         )}
 
         {localCoApp && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              router.push(`/lead/co-applicant/address-details?coApplicantId=${localCoApp.id}`);
-            }}
-            className="mt-3 border-blue-600 text-blue-600 hover:bg-blue-50"
-          >
-            Edit
-          </Button>
+          <div className="mt-3">
+            {canEditAddress ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  router.push(`/lead/co-applicant/address-details?coApplicantId=${localCoApp.id}`);
+                }}
+                className="border-blue-600 text-blue-600 hover:bg-blue-50"
+              >
+                Edit
+              </Button>
+            ) : (
+              <Badge className="bg-gray-200 text-gray-700 text-xs">Submitted</Badge>
+            )}
+          </div>
         )}
       </div>
     );

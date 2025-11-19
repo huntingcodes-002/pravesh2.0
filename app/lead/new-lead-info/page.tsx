@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -303,19 +303,47 @@ export default function NewLeadInfoPage() {
     return 'incomplete';
   };
 
-  // Get uploaded documents
-  const uploadedDocuments = useMemo(() => {
-    if (!currentLead?.formData?.step8?.files) return [];
-    return currentLead.formData.step8.files.filter((f: any) => f.status === 'Success');
-  }, [currentLead]);
+  const coApplicantRecords = useMemo(
+    () => currentLead?.formData?.coApplicants || [],
+    [currentLead?.formData?.coApplicants]
+  );
 
-  const completedCount = [
-    getApplicantDetailsStatus(),
-    getCoApplicantStatus(),
-    getCollateralStatus(),
-    getLoanRequirementStatus()
-  ].filter(s => s === 'completed').length;
-  const totalModules = 4;
+  // Get uploaded documents (include all owners and statuses)
+  const uploadedDocuments = useMemo(() => {
+    return currentLead?.formData?.step8?.files || [];
+  }, [currentLead?.formData?.step8?.files]);
+
+  const getDocumentOwnerLabel = useCallback(
+    (file: any) => {
+      if (file.ownerType === 'coapplicant') {
+        const coApp = coApplicantRecords.find((coApp: any) => coApp.id === file.coApplicantId);
+        if (coApp) {
+          const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
+          const fullName = [basic.firstName, basic.lastName].filter(Boolean).join(' ');
+          return fullName ? `Co-Applicant – ${fullName}` : 'Co-Applicant';
+        }
+        return 'Co-Applicant';
+      }
+      if (file.ownerType === 'collateral') {
+        return 'Collateral';
+      }
+      return 'Applicant';
+    },
+    [coApplicantRecords]
+  );
+
+  const getDocumentStatusClasses = useCallback((status?: string) => {
+    switch (status) {
+      case 'Success':
+        return 'bg-green-100 text-green-700 border-green-200';
+      case 'Failed':
+        return 'bg-red-100 text-red-700 border-red-200';
+      case 'Processing':
+      default:
+        return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+    }
+  }, []);
+
 
   // Helper function to generate required document list
   const mapAlternateIdTypeToDocumentValue = (alternateIdType: string): string => {
@@ -388,24 +416,10 @@ export default function NewLeadInfoPage() {
   const handleSubmit = () => {
     if (!currentLead) return;
     
-    const requiredSectionsCompleted =
-      getApplicantDetailsStatus() === 'completed' &&
-      getCollateralStatus() === 'completed' &&
-      getLoanRequirementStatus() === 'completed';
-    
-    if (!requiredSectionsCompleted) {
+    if (!canSubmitApplication) {
       toast({
         title: 'Cannot Submit',
-        description: 'Please complete all required sections before submitting.',
-        variant: 'destructive'
-      });
-      return;
-    }
-    
-    if (!areAllDocumentsUploaded) {
-      toast({
-        title: 'Cannot Submit',
-        description: 'Please upload all required documents before submitting.',
+        description: 'Please complete all steps before submitting.',
         variant: 'destructive'
       });
       return;
@@ -467,18 +481,6 @@ export default function NewLeadInfoPage() {
   };
 
   // Calculate overall application status
-  const getApplicationStatus = (): { status: 'Yet to begin' | 'In Progress' | 'Completed'; label: string } => {
-    if (completedCount === 0 && !areAllDocumentsUploaded) {
-      return { status: 'Yet to begin', label: 'Yet to begin' };
-    }
-    if (completedCount === totalModules && areAllDocumentsUploaded) {
-      return { status: 'Completed', label: 'Completed' };
-    }
-    return { status: 'In Progress', label: 'In Progress' };
-  };
-
-  const applicationStatus = getApplicationStatus();
-
   if (!currentLead) {
     return null;
   }
@@ -491,11 +493,61 @@ export default function NewLeadInfoPage() {
   const coApplicantStatus = getCoApplicantStatus();
   const coApplicantCount = apiCoApplicants.length;
   const hasCoApplicants = coApplicantCount > 0;
-  const requiredSectionsCompleted =
+
+  const isPaymentCompleted = paymentStatus === 'Paid';
+  const paymentStepStatus: SectionStatus = isPaymentCompleted ? 'completed' : paymentStatus === 'Failed' ? 'in-progress' : 'in-progress';
+  const documentsStepStatus: SectionStatus = areAllDocumentsUploaded
+    ? 'completed'
+    : uploadedDocuments.length > 0
+      ? 'in-progress'
+      : 'incomplete';
+  const isDocumentsCompleted = documentsStepStatus === 'completed';
+  const isCoApplicantStepCompleted = hasCoApplicants ? coApplicantStatus === 'completed' : true;
+
+  const progressSteps = useMemo(() => {
+    const steps: Array<{ id: string; label: string; status: SectionStatus }> = [
+      { id: 'applicant', label: 'Applicant Details', status: applicantStatus },
+      { id: 'payment', label: 'Payment', status: paymentStepStatus },
+      { id: 'documents', label: 'Documents', status: documentsStepStatus },
+      { id: 'collateral', label: 'Collateral', status: collateralStatus },
+      { id: 'loan', label: 'Loan Requirement', status: loanStatus },
+    ];
+    if (hasCoApplicants) {
+      steps.push({ id: 'coapplicant', label: 'Co-Applicant', status: coApplicantStatus });
+    }
+    return steps;
+  }, [applicantStatus, paymentStepStatus, documentsStepStatus, collateralStatus, loanStatus, coApplicantStatus, hasCoApplicants]);
+
+  const totalSteps = progressSteps.length;
+  const completedStepsCount = progressSteps.filter((step) => step.status === 'completed').length;
+  const progressPercent = totalSteps === 0 ? 0 : (completedStepsCount / totalSteps) * 100;
+
+  const applicationStatus = useMemo(() => {
+    if (totalSteps === 0 || completedStepsCount === 0) {
+      return { status: 'Yet to begin' as const, label: 'Yet to begin' };
+    }
+    if (completedStepsCount === totalSteps) {
+      return { status: 'Completed' as const, label: 'Completed' };
+    }
+    return { status: 'In Progress' as const, label: 'In Progress' };
+  }, [completedStepsCount, totalSteps]);
+
+  const canSubmitApplication = [
+    applicantStatus === 'completed',
+    isPaymentCompleted,
+    isDocumentsCompleted,
+    collateralStatus === 'completed',
+    loanStatus === 'completed',
+    isCoApplicantStepCompleted,
+  ].every(Boolean);
+
+  const showDocsWarning =
     applicantStatus === 'completed' &&
+    isPaymentCompleted &&
     collateralStatus === 'completed' &&
-    loanStatus === 'completed';
-  const canSubmitApplication = requiredSectionsCompleted && areAllDocumentsUploaded;
+    loanStatus === 'completed' &&
+    isCoApplicantStepCompleted &&
+    !isDocumentsCompleted;
 
   return (
     <DashboardLayout 
@@ -514,12 +566,14 @@ export default function NewLeadInfoPage() {
           <div className="mb-6">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-700">Progress</span>
-              <span className="text-sm font-semibold text-blue-600">{completedCount}/{totalModules} Modules Started</span>
+              <span className="text-sm font-semibold text-blue-600">
+                {completedStepsCount}/{totalSteps} Steps Completed
+              </span>
             </div>
             <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-blue-600 to-green-600 transition-all duration-300"
-                style={{ width: `${(completedCount / totalModules) * 100}%` }}
+                style={{ width: `${progressPercent}%` }}
               />
             </div>
           </div>
@@ -918,7 +972,7 @@ export default function NewLeadInfoPage() {
                   {uploadedDocuments.map((file: any) => (
                     <div
                       key={file.id}
-                      className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg"
+                      className="flex items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg"
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <div className="flex-shrink-0">
@@ -930,13 +984,22 @@ export default function NewLeadInfoPage() {
                         </div>
                         <div className="flex-1 min-w-0 overflow-hidden">
                           <p className="text-sm font-medium text-gray-900 truncate">
-                            {file.frontName && file.backName 
+                            {file.frontName && file.backName
                               ? `${file.frontName} / ${file.backName}`
                               : file.name}
                           </p>
                           <p className="text-xs text-gray-500 truncate">{file.type}</p>
+                          <p className="text-xs text-gray-400 truncate">{getDocumentOwnerLabel(file)}</p>
                         </div>
                       </div>
+                      <Badge
+                        className={cn(
+                          'text-xs font-semibold capitalize border',
+                          getDocumentStatusClasses(file.status)
+                        )}
+                      >
+                        {file.status || 'Processing'}
+                      </Badge>
                     </div>
                   ))}
                 </div>
@@ -944,7 +1007,7 @@ export default function NewLeadInfoPage() {
             </CardContent>
           </Card>
 
-          {requiredSectionsCompleted && !areAllDocumentsUploaded && (
+          {showDocsWarning && (
             <div className="mt-5 text-sm font-semibold text-red-600">
               Please upload all required documents to submit
             </div>
