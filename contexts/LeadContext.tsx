@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import {
   fetchApplicationsSummary,
   getDetailedInfo,
+  getAccessToken,
   isApiError,
   type ApplicationsSummaryResponse,
   type ApplicationSummaryItem,
@@ -112,19 +113,7 @@ const LeadContext = createContext<LeadContextType | undefined>(undefined);
 
 const DEFAULT_SUMMARY_STATS: LeadSummaryStats = { total: 0, draft: 0, completed: 0 };
 
-const AUTH_STORAGE_KEY = 'auth';
-
-function getStoredAccessToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  const authRaw = sessionStorage.getItem(AUTH_STORAGE_KEY);
-  if (!authRaw) return null;
-  try {
-    const parsed = JSON.parse(authRaw);
-    return parsed?.access_token ?? null;
-  } catch {
-    return null;
-  }
-}
+// Use centralized getAccessToken from lib/api.ts instead of local implementation
 
 function composeCustomerName(first?: string | null, last?: string | null, fallback?: string) {
   const parts = [first, last].filter(Boolean) as string[];
@@ -281,7 +270,7 @@ function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Le
   const coApplicantsData: any = (stepData as any).co_applicant_details;
 
   const addresses =
-    addressInfo?.addresses?.map((addr, index) => {
+    addressInfo?.addresses?.map((addr: any, index: number) => {
       const addrAny = addr as any;
       return {
         id: `${detail.application_id}-address-${index}`,
@@ -468,7 +457,7 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    const token = getStoredAccessToken();
+    const token = getAccessToken();
 
     if (!authLoading && user && token) {
       setLoading(true);

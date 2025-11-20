@@ -911,87 +911,135 @@ export async function uploadCoApplicantDocument(
  * Endpoint 6: Get Detailed Application Info
  * GET /api/lead-collection/applications/{application_id}/detailed-info/
  */
-export interface DetailedInfoResponse {
+export interface ParticipantPersonalInfo {
+  full_name?: {
+    value: string;
+    verified: boolean;
+  };
+  date_of_birth?: {
+    value: string;
+    verified: boolean;
+  };
+  mobile_number?: {
+    value: string;
+    verified: boolean;
+  };
+  pan_number?: {
+    value: string;
+    verified: boolean;
+  };
+  email?: string | null;
+  gender?: string;
+  marital_status?: string | null;
+}
+
+export interface ParticipantAddress {
+  address_line_1: string;
+  address_line_2?: string;
+  address_line_3?: string;
+  address_type: string;
+  city: string;
+  city_code?: string;
+  is_primary: boolean;
+  landmark?: string;
+  latitude?: string;
+  longitude?: string;
+  pincode: string;
+  state: string;
+  state_code?: string;
+}
+
+export interface Participant {
+  participant_type: 'primary_participant' | 'co-applicant';
+  co_applicant_index?: number;
+  personal_info?: ParticipantPersonalInfo;
+  addresses?: ParticipantAddress[];
+  employment_details?: any;
+  bureau_result?: any;
+}
+
+export interface CollateralDetails {
   application_id: string;
-  workflow_id: string;
-  workflow_status: string;
+  collateral_type: string;
+  ownership_type: string;
+  estimated_property_value: string;
+  collateral_description?: string;
+  address?: {
+    address_line_1: string;
+    address_line_2?: string;
+    address_line_3?: string;
+    city: string;
+    city_code?: string;
+    landmark?: string;
+    latitude?: string;
+    longitude?: string;
+    pincode: string;
+    state: string;
+    state_code?: string;
+  };
+  location?: {
+    address_line_1: string;
+    address_line_2?: string;
+    address_line_3?: string;
+    landmark?: string;
+    latitude?: string;
+    longitude?: string;
+    pincode: string;
+  };
+  submitted_at?: string;
+  submitted_by?: string;
+}
+
+export interface LoanDetails {
+  application_id: string;
+  loan_amount_requested: string;
+  loan_purpose: string;
+  loan_purpose_description?: string;
+  product_code: string;
+  interest_rate?: string;
+  tenure_months?: number;
+  sourcing_channel: string;
+  submitted_at?: string;
+  submitted_by?: string;
+}
+
+export interface PaymentResult {
+  amount: number;
+  created_on: string;
+  masked_customer_mobile: string;
+  order_id: string;
+  paid_on?: string;
+  state: 'completed' | 'pending' | 'failed' | 'cancelled';
+}
+
+export interface ApplicationDetails {
+  application_id: string;
+  collateral_details?: CollateralDetails;
+  loan_details?: LoanDetails;
+  participants?: Participant[];
+  payment_result?: PaymentResult;
+}
+
+export interface DetailedInfoResponse {
+  success: boolean;
+  application_details: ApplicationDetails;
+  // Legacy fields for backward compatibility
+  application_id?: string;
+  workflow_id?: string;
+  workflow_status?: string;
   current_step?: string;
   error_message?: string;
-  completed_steps: Record<string, any>;
+  completed_steps?: Record<string, any>;
   new_lead_data?: any;
-  personal_info?: {
-    pan_number?: string;
-    date_of_birth?: string;
-    gender?: string;
-    name?: string;
-    // Parsed data from PAN document
-    parsed_pan_data?: {
-      pan_number?: string;
-      date_of_birth?: string;
-      name?: string;
-      father_name?: string;
-      gender?: string;
-    };
-    // OCR result structure from backend
-    ocr_result?: {
-      ocr_data?: {
-        result?: {
-          card_number?: string;
-          date_of_birth?: string;
-          name_on_card?: string;
-          father_name?: string;
-          card_type?: string;
-          type_of_date?: string;
-          front_image_status?: boolean;
-          back_image_status?: boolean;
-        };
-      };
-      success?: boolean;
-    };
-  };
-  address_info?: {
-    addresses?: Array<{
-      address_type?: string;
-      address_line_1?: string;
-      address_line_2?: string;
-      address_line_3?: string;
-      city?: string;
-      state?: string;
-      pincode?: string;
-      landmark?: string;
-    }>;
-    // Parsed data from Aadhaar document
-    parsed_aadhaar_data?: {
-      address_line_1?: string;
-      address_line_2?: string;
-      address_line_3?: string;
-      city?: string;
-      state?: string;
-      pincode?: string;
-    };
-  };
+  personal_info?: any;
+  address_info?: any;
   employment_info?: any;
   co_applicant_info?: any;
   collateral_info?: any;
   loan_details?: any;
   participants?: any[];
   co_applicant_workflows?: any[];
-  workflow_state?: {
-    pan_ocr_data?: {
-      extracted_fields?: {
-        pan_number?: string;
-        date_of_birth?: string; // DD/MM/YYYY format
-        name_on_card?: string;
-        father_name?: string;
-      };
-      ocr_result?: any;
-      ocr_success?: boolean;
-      status?: string;
-    };
-    aadhaar_ocr_data?: any;
-    aadhaar_extracted_address?: any;
-    [key: string]: any;
-  };
+  workflow_state?: any;
 }
 
 export async function getDetailedInfo(application_id: string): Promise<ApiResponse<DetailedInfoResponse>> {

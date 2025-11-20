@@ -10,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess } from '@/lib/api';
+import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult } from '@/lib/api';
 
 type SectionStatus = 'incomplete' | 'in-progress' | 'completed';
 
@@ -29,6 +29,8 @@ export default function NewLeadInfoPage() {
   const [isPaymentStatusLoading, setIsPaymentStatusLoading] = useState(false);
   const [apiCoApplicants, setApiCoApplicants] = useState<Array<{ index: number; name: string }>>([]);
   const [isCoApplicantsLoading, setIsCoApplicantsLoading] = useState(false);
+  const [detailedInfo, setDetailedInfo] = useState<ApplicationDetails | null>(null);
+  const [isLoadingDetailedInfo, setIsLoadingDetailedInfo] = useState(false);
 
   // Redirect if no current lead
   useEffect(() => {
@@ -69,8 +71,81 @@ export default function NewLeadInfoPage() {
     }
   }, [currentLead]);
 
+  // Fetch all detailed info from API
   useEffect(() => {
-    if (!currentLead?.appId) return;
+    if (!currentLead?.appId) {
+      setDetailedInfo(null);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchAllDetails = async () => {
+      setIsLoadingDetailedInfo(true);
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+        if (!isMounted) return;
+
+        if (isApiError(response)) {
+          console.warn('Failed to fetch detailed info', response.error);
+          return;
+        }
+
+        // Extract application_details from response
+        const successResponse = response as ApiSuccess<any>;
+        const applicationDetails = successResponse.data?.application_details || successResponse.application_details;
+        
+        if (applicationDetails) {
+          setDetailedInfo(applicationDetails);
+          
+          // Update payment status from payment_result
+          if (applicationDetails.payment_result) {
+            const paymentState = applicationDetails.payment_result.state?.toLowerCase();
+            let nextStatus: PaymentStatus = 'Pending';
+            if (paymentState === 'completed') {
+              nextStatus = 'Paid';
+            } else if (paymentState === 'failed' || paymentState === 'cancelled') {
+              nextStatus = 'Failed';
+            }
+            setPaymentStatus(nextStatus);
+          }
+          
+          // Extract co-applicants from participants
+          const participants = applicationDetails.participants || [];
+          const coApplicants = participants
+            .filter((participant: Participant) => participant?.participant_type === 'co-applicant')
+            .map((participant: Participant) => {
+              const fullName = participant?.personal_info?.full_name;
+              const name = fullName?.value || (typeof fullName === 'string' ? fullName : 'Unnamed Co-applicant');
+              const index = typeof participant?.co_applicant_index === 'number' 
+                ? participant.co_applicant_index 
+                : -1;
+              return { index, name };
+            })
+            .filter((coApp: { index: number; name: string }) => coApp.index >= 0)
+            .sort((a: { index: number; name: string }, b: { index: number; name: string }) => a.index - b.index);
+          
+          setApiCoApplicants(coApplicants);
+        }
+      } catch (error) {
+        console.warn('Failed to fetch detailed info', error);
+      } finally {
+        if (isMounted) {
+          setIsLoadingDetailedInfo(false);
+        }
+      }
+    };
+
+    void fetchAllDetails();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentLead?.appId]);
+
+  // Fallback: Load payment status separately if not in detailed info
+  useEffect(() => {
+    if (!currentLead?.appId || detailedInfo?.payment_result) return;
 
     let isMounted = true;
 
@@ -95,17 +170,6 @@ export default function NewLeadInfoPage() {
         }
 
         setPaymentStatus(nextStatus);
-
-        if (typeof window !== 'undefined') {
-          const storageKey = `payment-state-${currentLead.appId}`;
-          try {
-            const raw = sessionStorage.getItem(storageKey);
-            const parsed = raw ? JSON.parse(raw) : {};
-            sessionStorage.setItem(storageKey, JSON.stringify({ ...parsed, paymentStatus: nextStatus }));
-          } catch (error) {
-            console.warn('Failed to persist payment status to storage', error);
-          }
-        }
       } catch (error) {
         console.warn('Failed to fetch payment status', error);
       } finally {
@@ -120,188 +184,13 @@ export default function NewLeadInfoPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentLead?.appId]);
+  }, [currentLead?.appId, detailedInfo?.payment_result]);
 
-  // Fetch co-applicants from API
-  useEffect(() => {
-    if (!currentLead?.appId) {
-      setApiCoApplicants([]);
-      return;
-    }
-
-    let isMounted = true;
-
-    const fetchCoApplicants = async () => {
-      setIsCoApplicantsLoading(true);
-      try {
-        const response = await getDetailedInfo(currentLead.appId);
-        if (!isMounted) return;
-
-        if (isApiError(response)) {
-          setApiCoApplicants([]);
-          return;
-        }
-
-        // Extract application_details from response
-        const responseData = response.data ?? (response as any);
-        const applicationDetails = responseData?.application_details ?? responseData;
-        const participants = applicationDetails?.participants ?? [];
-
-        // Filter and extract co-applicants
-        const coApplicants = participants
-          .filter((participant: any) => participant?.participant_type === 'co-applicant')
-          .map((participant: any) => {
-            const fullName = participant?.personal_info?.full_name;
-            const name = fullName?.value || fullName || 'Unnamed Co-applicant';
-            const index = typeof participant?.co_applicant_index === 'number' 
-              ? participant.co_applicant_index 
-              : -1;
-            return { index, name };
-          })
-          .filter((coApp: { index: number; name: string }) => coApp.index >= 0)
-          .sort((a: { index: number; name: string }, b: { index: number; name: string }) => a.index - b.index);
-
-        setApiCoApplicants(coApplicants);
-      } catch (error) {
-        console.warn('Failed to fetch co-applicants from API', error);
-        setApiCoApplicants([]);
-      } finally {
-        if (isMounted) {
-          setIsCoApplicantsLoading(false);
-        }
-      }
-    };
-
-    void fetchCoApplicants();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentLead?.appId]);
-
-  // Calculate Step 2 status (Basic Details) - based on completion flag
-  const getStep2Status = (): SectionStatus => {
-    if (!currentLead) return 'incomplete';
-    
-    if (currentLead.step2Completed === true) return 'completed';
-    
-    const step2 = currentLead.formData?.step2;
-    if (!step2) return 'incomplete';
-
-    const gender = currentLead.gender || step2.gender;
-    const dob = currentLead.dob || step2.dob;
-    const maritalStatus = step2.maritalStatus;
-
-    const hasAnyData = Boolean(
-      (step2.hasPan === 'yes' && (step2.pan || currentLead.panNumber)) ||
-      (step2.hasPan === 'no' && (step2.alternateIdType || step2.documentNumber || step2.panUnavailabilityReason)) ||
-      gender || dob || maritalStatus
-    );
-
-    const hasAllData = step2.hasPan === 'yes'
-      ? Boolean(
-          (currentLead.panNumber && currentLead.panNumber.length === 10) ||
-          (step2.pan && step2.pan.length === 10)
-        ) && Boolean(gender && dob)
-      : Boolean(
-          dob &&
-          gender &&
-          maritalStatus &&
-          step2.alternateIdType &&
-          step2.documentNumber &&
-          step2.panUnavailabilityReason
-        );
-    
-    if (hasAllData || hasAnyData) return 'in-progress';
-    return 'incomplete';
-  };
-
-  // Calculate Step 3 status (Address Details) - based on completion flag
-  const getStep3Status = (): SectionStatus => {
-    if (!currentLead) return 'incomplete';
-    
-    // Check completion flag first (from successful API submission)
-    if (currentLead.step3Completed === true) return 'completed';
-    
-    const step3 = currentLead.formData?.step3;
-    const addresses = step3?.addresses || [];
-    const hasAnyData = addresses.length > 0 && addresses.some((addr: any) =>
-      addr.addressType ||
-      addr.addressLine1 ||
-      addr.addressLine2 ||
-      addr.landmark ||
-      addr.postalCode
-    );
-    const hasRequiredData = addresses.length > 0 && addresses.every((addr: any) =>
-      addr.addressType &&
-      addr.addressLine1 &&
-      addr.landmark &&
-      addr.postalCode &&
-      addr.postalCode.length === 6
-    );
-    
-    if (hasRequiredData || hasAnyData) return 'in-progress';
-    return 'incomplete';
-  };
-
-  // Calculate Applicant Details overall status
-  // Both sections must be completed (via API) for this to be marked as completed
-  const getApplicantDetailsStatus = (): SectionStatus => {
-    if (!currentLead) return 'incomplete';
-    
-    // Check completion flags - both must be true
-    if (currentLead.step2Completed === true && currentLead.step3Completed === true) {
-      return 'completed';
-    }
-    
-    // Check if either section has been submitted
-    const step2Status = getStep2Status();
-    const step3Status = getStep3Status();
-    
-    if (step2Status === 'incomplete' && step3Status === 'incomplete') return 'incomplete';
-    return 'in-progress';
-  };
-
-  const getCoApplicantStatus = (): SectionStatus => {
-    if (!currentLead) return 'incomplete';
-    const coApplicants = currentLead.formData?.coApplicants || [];
-    if (!coApplicants.length) return 'completed';
-    const allComplete = coApplicants.every((coApp: any) => coApp.isComplete);
-    return allComplete ? 'completed' : 'in-progress';
-  };
-
-  const getCollateralStatus = (): SectionStatus => {
-    if (!currentLead) return 'incomplete';
-    
-    const step6 = currentLead.formData?.step6;
-    if (!step6) return 'incomplete';
-    
-    const hasRequiredFields = step6.collateralType && 
-      (step6.collateralType !== 'property' || step6.collateralSubType) &&
-      step6.ownershipType && 
-      step6.propertyValue;
-    
-    if (hasRequiredFields) return 'completed';
-    if (step6.collateralType || step6.ownershipType || step6.propertyValue) return 'in-progress';
-    return 'incomplete';
-  };
-
-  const getLoanRequirementStatus = (): SectionStatus => {
-    if (!currentLead) return 'incomplete';
-    
-    const step7 = currentLead.formData?.step7;
-    if (!step7) return 'incomplete';
-    
-    const hasRequiredFields = step7.loanAmount > 0 && 
-      step7.loanPurpose && 
-      step7.sourcingChannel && 
-      step7.interestRate && 
-      step7.tenure;
-    
-    if (hasRequiredFields) return 'completed';
-    if (step7.loanAmount > 0 || step7.loanPurpose || step7.sourcingChannel || step7.interestRate || step7.tenure) return 'in-progress';
-    return 'incomplete';
-  };
+  // Get primary participant from detailed info
+  const primaryParticipant = useMemo(() => {
+    if (!detailedInfo?.participants) return null;
+    return detailedInfo.participants.find((p: Participant) => p.participant_type === 'primary_participant');
+  }, [detailedInfo]);
 
   const coApplicantRecords = useMemo(
     () => currentLead?.formData?.coApplicants || [],
@@ -343,7 +232,6 @@ export default function NewLeadInfoPage() {
         return 'bg-yellow-100 text-yellow-700 border-yellow-200';
     }
   }, []);
-
 
   // Helper function to generate required document list
   const mapAlternateIdTypeToDocumentValue = (alternateIdType: string): string => {
@@ -400,6 +288,153 @@ export default function NewLeadInfoPage() {
     
     return allUploaded;
   }, [currentLead]);
+
+  // Calculate Step 2 status (Basic Details) - based on completion flag
+  const getStep2Status = (): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    
+    // If we have primary participant data from API, consider it completed
+    if (primaryParticipant?.personal_info) {
+      const personalInfo = primaryParticipant.personal_info;
+      if (personalInfo.full_name?.value || personalInfo.pan_number?.value || personalInfo.mobile_number?.value) {
+        return 'completed';
+      }
+    }
+    
+    if (currentLead.step2Completed === true) return 'completed';
+    
+    const step2 = currentLead.formData?.step2;
+    if (!step2) return 'incomplete';
+
+    const gender = currentLead.gender || step2.gender;
+    const dob = currentLead.dob || step2.dob;
+    const maritalStatus = step2.maritalStatus;
+
+    const hasAnyData = Boolean(
+      (step2.hasPan === 'yes' && (step2.pan || currentLead.panNumber)) ||
+      (step2.hasPan === 'no' && (step2.alternateIdType || step2.documentNumber || step2.panUnavailabilityReason)) ||
+      gender || dob || maritalStatus
+    );
+
+    const hasAllData = step2.hasPan === 'yes'
+      ? Boolean(
+          (currentLead.panNumber && currentLead.panNumber.length === 10) ||
+          (step2.pan && step2.pan.length === 10)
+        ) && Boolean(gender && dob)
+      : Boolean(
+          dob &&
+          gender &&
+          maritalStatus &&
+          step2.alternateIdType &&
+          step2.documentNumber &&
+          step2.panUnavailabilityReason
+        );
+    
+    if (hasAllData || hasAnyData) return 'in-progress';
+    return 'incomplete';
+  };
+
+  // Calculate Step 3 status (Address Details) - based on completion flag
+  const getStep3Status = (): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    
+    // If we have addresses from API, consider it completed
+    if (primaryParticipant?.addresses && primaryParticipant.addresses.length > 0) {
+      return 'completed';
+    }
+    
+    // Check completion flag first (from successful API submission)
+    if (currentLead.step3Completed === true) return 'completed';
+    
+    const step3 = currentLead.formData?.step3;
+    const addresses = step3?.addresses || [];
+    const hasAnyData = addresses.length > 0 && addresses.some((addr: any) =>
+      addr.addressType ||
+      addr.addressLine1 ||
+      addr.addressLine2 ||
+      addr.landmark ||
+      addr.postalCode
+    );
+    const hasRequiredData = addresses.length > 0 && addresses.every((addr: any) =>
+      addr.addressType &&
+      addr.addressLine1 &&
+      addr.landmark &&
+      addr.postalCode &&
+      addr.postalCode.length === 6
+    );
+    
+    if (hasRequiredData || hasAnyData) return 'in-progress';
+    return 'incomplete';
+  };
+
+  // Calculate Applicant Details overall status
+  // Both sections must be completed (via API) for this to be marked as completed
+  const getApplicantDetailsStatus = (): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    
+    // Check completion flags - both must be true
+    if (currentLead.step2Completed === true && currentLead.step3Completed === true) {
+      return 'completed';
+    }
+    
+    // Check if either section has been submitted
+    const step2Status = getStep2Status();
+    const step3Status = getStep3Status();
+    
+    if (step2Status === 'incomplete' && step3Status === 'incomplete') return 'incomplete';
+    return 'in-progress';
+  };
+
+  const getCoApplicantStatus = (): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    const coApplicants = currentLead.formData?.coApplicants || [];
+    if (!coApplicants.length) return 'completed';
+    const allComplete = coApplicants.every((coApp: any) => coApp.isComplete);
+    return allComplete ? 'completed' : 'in-progress';
+  };
+
+  const getCollateralStatus = (): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    
+    // If we have collateral details from API, consider it completed
+    if (detailedInfo?.collateral_details) {
+      return 'completed';
+    }
+    
+    const step6 = currentLead.formData?.step6;
+    if (!step6) return 'incomplete';
+    
+    const hasRequiredFields = step6.collateralType && 
+      (step6.collateralType !== 'property' || step6.collateralSubType) &&
+      step6.ownershipType && 
+      step6.propertyValue;
+    
+    if (hasRequiredFields) return 'completed';
+    if (step6.collateralType || step6.ownershipType || step6.propertyValue) return 'in-progress';
+    return 'incomplete';
+  };
+
+  const getLoanRequirementStatus = (): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    
+    // If we have loan details from API, consider it completed
+    if (detailedInfo?.loan_details) {
+      return 'completed';
+    }
+    
+    const step7 = currentLead.formData?.step7;
+    if (!step7) return 'incomplete';
+    
+    const hasRequiredFields = step7.loanAmount > 0 && 
+      step7.loanPurpose && 
+      step7.sourcingChannel && 
+      step7.interestRate && 
+      step7.tenure;
+    
+    if (hasRequiredFields) return 'completed';
+    if (step7.loanAmount > 0 || step7.loanPurpose || step7.sourcingChannel || step7.interestRate || step7.tenure) return 'in-progress';
+    return 'incomplete';
+  };
 
   const handleSectionClick = (route: string) => {
     router.push(route);
@@ -480,18 +515,14 @@ export default function NewLeadInfoPage() {
     return mapping[purpose] || purpose || 'N/A';
   };
 
-  // Calculate overall application status
-  if (!currentLead) {
-    return null;
-  }
-
-  const step2Status = getStep2Status();
-  const step3Status = getStep3Status();
-  const applicantStatus = getApplicantDetailsStatus();
-  const collateralStatus = getCollateralStatus();
-  const loanStatus = getLoanRequirementStatus();
-  const coApplicantStatus = getCoApplicantStatus();
-  const coApplicantCount = apiCoApplicants.length;
+  // Calculate status values (must be before early returns)
+  const step2Status = currentLead ? getStep2Status() : 'incomplete';
+  const step3Status = currentLead ? getStep3Status() : 'incomplete';
+  const applicantStatus = currentLead ? getApplicantDetailsStatus() : 'incomplete';
+  const collateralStatus = currentLead ? getCollateralStatus() : 'incomplete';
+  const loanStatus = currentLead ? getLoanRequirementStatus() : 'incomplete';
+  const coApplicantStatus = currentLead ? getCoApplicantStatus() : 'incomplete';
+  const coApplicantCount = detailedInfo?.participants?.filter((p: Participant) => p.participant_type === 'co-applicant').length || apiCoApplicants.length;
   const hasCoApplicants = coApplicantCount > 0;
 
   const isPaymentCompleted = paymentStatus === 'Paid';
@@ -504,7 +535,9 @@ export default function NewLeadInfoPage() {
   const isDocumentsCompleted = documentsStepStatus === 'completed';
   const isCoApplicantStepCompleted = hasCoApplicants ? coApplicantStatus === 'completed' : true;
 
+  // All hooks must be called before any early returns
   const progressSteps = useMemo(() => {
+    if (!currentLead) return [];
     const steps: Array<{ id: string; label: string; status: SectionStatus }> = [
       { id: 'applicant', label: 'Applicant Details', status: applicantStatus },
       { id: 'payment', label: 'Payment', status: paymentStepStatus },
@@ -516,7 +549,7 @@ export default function NewLeadInfoPage() {
       steps.push({ id: 'coapplicant', label: 'Co-Applicant', status: coApplicantStatus });
     }
     return steps;
-  }, [applicantStatus, paymentStepStatus, documentsStepStatus, collateralStatus, loanStatus, coApplicantStatus, hasCoApplicants]);
+  }, [currentLead, applicantStatus, paymentStepStatus, documentsStepStatus, collateralStatus, loanStatus, coApplicantStatus, hasCoApplicants]);
 
   const totalSteps = progressSteps.length;
   const completedStepsCount = progressSteps.filter((step) => step.status === 'completed').length;
@@ -531,6 +564,30 @@ export default function NewLeadInfoPage() {
     }
     return { status: 'In Progress' as const, label: 'In Progress' };
   }, [completedStepsCount, totalSteps]);
+
+  // Early returns must come AFTER all hooks
+  if (!currentLead) {
+    return null;
+  }
+
+  // Show loading state while fetching detailed info
+  if (isLoadingDetailedInfo && !detailedInfo) {
+    return (
+      <DashboardLayout 
+        title="New Lead Information" 
+        showNotifications={false}
+        showExitButton={true}
+        onExit={handleExit}
+      >
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+            <p className="text-sm text-gray-600">Loading application details...</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   const canSubmitApplication = [
     applicantStatus === 'completed',
@@ -598,6 +655,42 @@ export default function NewLeadInfoPage() {
                 <h3 className="text-lg font-semibold text-gray-900">Payment Details</h3>
                 {renderPaymentStatusBadge()}
               </div>
+              
+              {detailedInfo?.payment_result && (
+                <div className="mb-4 space-y-2 p-3 bg-gray-50 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-medium text-gray-600">Amount:</span>
+                    <span className="text-sm font-semibold text-gray-900">₹{detailedInfo.payment_result.amount.toLocaleString('en-IN')}</span>
+                  </div>
+                  {detailedInfo.payment_result.order_id && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-medium text-gray-600">Order ID:</span>
+                      <span className="text-xs text-gray-700 font-mono">{detailedInfo.payment_result.order_id}</span>
+                    </div>
+                  )}
+                  {detailedInfo.payment_result.paid_on && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-medium text-gray-600">Paid On:</span>
+                      <span className="text-xs text-gray-700">
+                        {new Date(detailedInfo.payment_result.paid_on).toLocaleString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
+                  )}
+                  {detailedInfo.payment_result.masked_customer_mobile && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-medium text-gray-600">Mobile:</span>
+                      <span className="text-xs text-gray-700">{detailedInfo.payment_result.masked_customer_mobile}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              
               <Button
                 onClick={handleGeneratePaymentLink}
                 className="w-full h-12 rounded-xl bg-[#0B63F6] hover:bg-[#0954d4] text-white font-semibold transition-colors"
@@ -650,30 +743,86 @@ export default function NewLeadInfoPage() {
                   </div>
                 </div>
                 
-                {step2Status !== 'incomplete' && currentLead && (
+                {step2Status !== 'incomplete' && (primaryParticipant || currentLead) && (
                   <div className="ml-[52px] space-y-1">
-                    {(currentLead.customerFirstName || currentLead.customerLastName) && (
-                      <p className="text-xs text-gray-600">
-                        <span className="font-medium">First Name:</span> {[currentLead.customerFirstName, currentLead.customerLastName].filter(Boolean).join(' ') || 'N/A'}
-                      </p>
-                    )}
-                    {currentLead.dob && (
-                      <p className="text-xs text-gray-600">
-                        <span className="font-medium">Date of Birth:</span> {new Date(currentLead.dob).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                      </p>
-                    )}
                     {(() => {
-                      const step2 = currentLead.formData?.step2;
-                      if (step2?.hasPan === 'yes' && currentLead.panNumber) {
+                      // Prefer API data, fallback to currentLead
+                      const fullName = primaryParticipant?.personal_info?.full_name;
+                      const nameValue = fullName?.value || (typeof fullName === 'string' ? fullName : null);
+                      const displayName = nameValue || 
+                        (currentLead?.customerFirstName || currentLead?.customerLastName 
+                          ? [currentLead.customerFirstName, currentLead.customerLastName].filter(Boolean).join(' ')
+                          : null);
+                      
+                      if (displayName) {
                         return (
                           <p className="text-xs text-gray-600">
-                            <span className="font-medium">PAN Number:</span> {currentLead.panNumber}
+                            <span className="font-medium">Full Name:</span> {displayName}
+                            {fullName?.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
                           </p>
                         );
-                      } else if (step2?.hasPan === 'no' && step2?.alternateIdType && step2?.documentNumber) {
+                      }
+                      return null;
+                    })()}
+                    {(() => {
+                      const dob = primaryParticipant?.personal_info?.date_of_birth;
+                      const dobValue = dob?.value || (typeof dob === 'string' ? dob : null) || currentLead?.dob;
+                      
+                      if (dobValue) {
+                        const dobDate = new Date(dobValue);
+                        return (
+                          <p className="text-xs text-gray-600">
+                            <span className="font-medium">Date of Birth:</span> {dobDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                            {dob?.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                          </p>
+                        );
+                      }
+                      return null;
+                    })()}
+                    {(() => {
+                      const pan = primaryParticipant?.personal_info?.pan_number;
+                      const panValue = pan?.value || (typeof pan === 'string' ? pan : null) || currentLead?.panNumber;
+                      
+                      if (panValue) {
+                        return (
+                          <p className="text-xs text-gray-600">
+                            <span className="font-medium">PAN Number:</span> {panValue}
+                            {pan?.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                          </p>
+                        );
+                      }
+                      
+                      // Fallback to currentLead formData
+                      const step2 = currentLead?.formData?.step2;
+                      if (step2?.hasPan === 'no' && step2?.alternateIdType && step2?.documentNumber) {
                         return (
                           <p className="text-xs text-gray-600">
                             <span className="font-medium">{step2.alternateIdType}:</span> {step2.documentNumber}
+                          </p>
+                        );
+                      }
+                      return null;
+                    })()}
+                    {(() => {
+                      const mobile = primaryParticipant?.personal_info?.mobile_number;
+                      const mobileValue = mobile?.value || (typeof mobile === 'string' ? mobile : null) || currentLead?.customerMobile;
+                      
+                      if (mobileValue) {
+                        return (
+                          <p className="text-xs text-gray-600">
+                            <span className="font-medium">Mobile:</span> {mobileValue}
+                            {mobile?.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                          </p>
+                        );
+                      }
+                      return null;
+                    })()}
+                    {(() => {
+                      const gender = primaryParticipant?.personal_info?.gender || currentLead?.gender;
+                      if (gender) {
+                        return (
+                          <p className="text-xs text-gray-600">
+                            <span className="font-medium">Gender:</span> {gender.charAt(0).toUpperCase() + gender.slice(1)}
                           </p>
                         );
                       }
@@ -720,19 +869,76 @@ export default function NewLeadInfoPage() {
                   </div>
                 </div>
                 
-                {step3Status !== 'incomplete' && currentLead?.formData?.step3?.addresses?.[0] && (
-                  <div className="ml-[52px] space-y-1">
-                    {currentLead.formData.step3.addresses[0].addressLine1 && (
-                      <p className="text-xs text-gray-600">
-                        <span className="font-medium">Address:</span> {currentLead.formData.step3.addresses[0].addressLine1}
-                        {currentLead.formData.step3.addresses[0].addressLine2 && `, ${currentLead.formData.step3.addresses[0].addressLine2}`}
-                      </p>
-                    )}
-                    {currentLead.formData.step3.addresses[0].postalCode && (
-                      <p className="text-xs text-gray-600">
-                        <span className="font-medium">Pincode:</span> {currentLead.formData.step3.addresses[0].postalCode}
-                      </p>
-                    )}
+                {step3Status !== 'incomplete' && ((primaryParticipant?.addresses && primaryParticipant.addresses.length > 0) || (currentLead?.formData?.step3?.addresses && currentLead.formData.step3.addresses.length > 0)) && (
+                  <div className="ml-[52px] space-y-3">
+                    {(() => {
+                      // Prefer API data, fallback to currentLead
+                      const apiAddresses = primaryParticipant?.addresses || [];
+                      const formAddresses = currentLead?.formData?.step3?.addresses || [];
+                      
+                      // Use API addresses if available, otherwise use form addresses
+                      const addressesToShow = apiAddresses.length > 0 
+                        ? apiAddresses.map(addr => ({
+                            address_line_1: addr.address_line_1,
+                            address_line_2: addr.address_line_2,
+                            address_line_3: addr.address_line_3,
+                            landmark: addr.landmark,
+                            city: addr.city,
+                            state: addr.state,
+                            pincode: addr.pincode,
+                            address_type: addr.address_type,
+                            is_primary: addr.is_primary
+                          }))
+                        : formAddresses.map((addr: any) => ({
+                            address_line_1: addr.addressLine1,
+                            address_line_2: addr.addressLine2,
+                            address_line_3: addr.addressLine3,
+                            landmark: addr.landmark,
+                            city: addr.city,
+                            state: addr.state,
+                            pincode: addr.postalCode,
+                            address_type: addr.addressType,
+                            is_primary: addr.isPrimary
+                          }));
+                      
+                      if (addressesToShow.length === 0) return null;
+                      
+                      return addressesToShow.map((address: any, idx: number) => (
+                        <div key={idx} className={idx > 0 ? "pt-2 border-t border-gray-100" : ""}>
+                          {addressesToShow.length > 1 && (
+                            <p className="text-xs font-medium text-gray-700 mb-1">
+                              {address.address_type ? address.address_type.charAt(0).toUpperCase() + address.address_type.slice(1) : 'Address'} 
+                              {address.is_primary && <span className="ml-2 text-blue-600 text-[10px]">(Primary)</span>}
+                            </p>
+                          )}
+                          {address.address_line_1 && (
+                            <p className="text-xs text-gray-600">
+                              <span className="font-medium">Address Line 1:</span> {address.address_line_1}
+                            </p>
+                          )}
+                          {address.address_line_2 && (
+                            <p className="text-xs text-gray-600">
+                              <span className="font-medium">Address Line 2:</span> {address.address_line_2}
+                            </p>
+                          )}
+                          {address.address_line_3 && (
+                            <p className="text-xs text-gray-600">
+                              <span className="font-medium">Address Line 3:</span> {address.address_line_3}
+                            </p>
+                          )}
+                          {address.landmark && (
+                            <p className="text-xs text-gray-600">
+                              <span className="font-medium">Landmark:</span> {address.landmark}
+                            </p>
+                          )}
+                          {(address.city || address.state || address.pincode) && (
+                            <p className="text-xs text-gray-600">
+                              <span className="font-medium">Location:</span> {[address.city, address.state, address.pincode].filter(Boolean).join(', ')}
+                            </p>
+                          )}
+                        </div>
+                      ));
+                    })()}
                     <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
                   </div>
                 )}
@@ -821,15 +1027,80 @@ export default function NewLeadInfoPage() {
                       Manage
                     </Button>
                   </div>
-                  <div className="space-y-2">
-                    {apiCoApplicants.map((coApp) => (
-                      <div
-                        key={`co-applicant-${coApp.index}`}
-                        className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-900"
-                      >
-                        {`Co-Applicant ${coApp.index + 1} – ${coApp.name}`}
-                      </div>
-                    ))}
+                  <div className="space-y-3">
+                    {detailedInfo?.participants
+                      ?.filter((p: Participant) => p.participant_type === 'co-applicant')
+                      .map((participant: Participant) => {
+                        const fullName = participant?.personal_info?.full_name;
+                        const name = fullName?.value || (typeof fullName === 'string' ? fullName : 'Unnamed Co-applicant');
+                        const index = participant?.co_applicant_index ?? -1;
+                        const pan = participant?.personal_info?.pan_number;
+                        const mobile = participant?.personal_info?.mobile_number;
+                        const dob = participant?.personal_info?.date_of_birth;
+                        
+                        return (
+                          <div
+                            key={`co-applicant-${index}`}
+                            className="rounded-lg border border-gray-200 bg-white px-4 py-3 space-y-2"
+                          >
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-semibold text-gray-900">
+                                Co-Applicant {index + 1} – {name}
+                              </p>
+                            </div>
+                            <div className="space-y-1 text-xs text-gray-600">
+                              {pan?.value && (
+                                <p>
+                                  <span className="font-medium">PAN:</span> {pan.value}
+                                  {pan.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                                </p>
+                              )}
+                              {mobile?.value && (
+                                <p>
+                                  <span className="font-medium">Mobile:</span> {mobile.value}
+                                  {mobile.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                                </p>
+                              )}
+                              {dob?.value && (
+                                <p>
+                                  <span className="font-medium">DOB:</span> {new Date(dob.value).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                  {dob.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                                </p>
+                              )}
+                              {participant?.addresses && participant.addresses.length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-gray-100">
+                                  <p className="font-medium mb-1">Addresses:</p>
+                                  {participant.addresses.map((addr, addrIdx) => (
+                                    <div key={addrIdx} className="ml-2 mb-2 last:mb-0">
+                                      <p className="text-[11px] text-gray-600">
+                                        {addr.address_type.charAt(0).toUpperCase() + addr.address_type.slice(1)}
+                                        {addr.is_primary && <span className="ml-1 text-blue-600">(Primary)</span>}
+                                      </p>
+                                      <p className="text-[11px] text-gray-500">
+                                        {[addr.address_line_1, addr.address_line_2, addr.address_line_3].filter(Boolean).join(', ')}
+                                      </p>
+                                      <p className="text-[11px] text-gray-500">
+                                        {[addr.city, addr.state, addr.pincode].filter(Boolean).join(', ')}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    {apiCoApplicants.length > 0 && !detailedInfo?.participants && (
+                      // Fallback to simple list if detailed info not available
+                      apiCoApplicants.map((coApp) => (
+                        <div
+                          key={`co-applicant-${coApp.index}`}
+                          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-900"
+                        >
+                          {`Co-Applicant ${coApp.index + 1} – ${coApp.name}`}
+                        </div>
+                      ))
+                    )}
                   </div>
                 </>
               )}
@@ -854,23 +1125,67 @@ export default function NewLeadInfoPage() {
                     <Home className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    {collateralStatus !== 'incomplete' && currentLead?.formData?.step6 ? (
+                    {collateralStatus !== 'incomplete' && (detailedInfo?.collateral_details || currentLead?.formData?.step6) ? (
                       <div className="space-y-1">
-                        <p className="text-sm font-semibold text-gray-900">
-                          {(() => {
-                            const step6 = currentLead.formData.step6;
-                            const collateralType = step6.collateralSubType || step6.collateralType || '';
-                            const typeLabel = collateralType === 'ready-property' ? 'Apartment' :
-                                            collateralType === 'builder-property-under-construction' ? 'Builder Property' :
-                                            collateralType === 'construction-on-land' ? 'Construction on Land' :
-                                            collateralType === 'plot-self-construction' ? 'Plot + Self Construction' :
-                                            collateralType === 'purchase-plot' ? 'Plot' :
-                                            collateralType || 'Property';
-                            const value = step6.propertyValue || 0;
-                            const formattedValue = value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-                            return `${typeLabel} ₹${formattedValue}`;
-                          })()}
-                        </p>
+                        {(() => {
+                          const collateral = detailedInfo?.collateral_details;
+                          const step6 = currentLead?.formData?.step6;
+                          
+                          const collateralType = collateral?.collateral_type || step6?.collateralType || '';
+                          const typeLabel = collateralType === 'ready-property' ? 'Apartment' :
+                                          collateralType === 'builder-property-under-construction' ? 'Builder Property' :
+                                          collateralType === 'construction-on-land' ? 'Construction on Land' :
+                                          collateralType === 'plot-self-construction' ? 'Plot + Self Construction' :
+                                          collateralType === 'purchase-plot' ? 'Plot' :
+                                          collateralType || 'Property';
+                          const value = collateral?.estimated_property_value || step6?.propertyValue || 0;
+                          const formattedValue = typeof value === 'string' 
+                            ? parseFloat(value).toLocaleString('en-IN')
+                            : value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                          
+                          return (
+                            <p className="text-sm font-semibold text-gray-900">
+                              {typeLabel} ₹{formattedValue}
+                            </p>
+                          );
+                        })()}
+                        {detailedInfo?.collateral_details?.ownership_type && (
+                          <p className="text-xs text-gray-600">
+                            <span className="font-medium">Ownership:</span> {
+                              detailedInfo.collateral_details.ownership_type === 'self_ownership' ? 'Self Ownership' :
+                              detailedInfo.collateral_details.ownership_type === 'joint_ownership' ? 'Joint Ownership' :
+                              detailedInfo.collateral_details.ownership_type
+                            }
+                          </p>
+                        )}
+                        {detailedInfo?.collateral_details?.address && (
+                          <div className="mt-2 space-y-0.5">
+                            <p className="text-xs text-gray-600">
+                              <span className="font-medium">Address:</span> {[
+                                detailedInfo.collateral_details.address.address_line_1,
+                                detailedInfo.collateral_details.address.address_line_2,
+                                detailedInfo.collateral_details.address.address_line_3
+                              ].filter(Boolean).join(', ')}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              <span className="font-medium">Location:</span> {[
+                                detailedInfo.collateral_details.address.city,
+                                detailedInfo.collateral_details.address.state,
+                                detailedInfo.collateral_details.address.pincode
+                              ].filter(Boolean).join(', ')}
+                            </p>
+                            {detailedInfo.collateral_details.address.landmark && (
+                              <p className="text-xs text-gray-600">
+                                <span className="font-medium">Landmark:</span> {detailedInfo.collateral_details.address.landmark}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {detailedInfo?.collateral_details?.collateral_description && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {detailedInfo.collateral_details.collateral_description}
+                          </p>
+                        )}
                       </div>
                     ) : (
                       <div>
@@ -912,20 +1227,56 @@ export default function NewLeadInfoPage() {
                     <IndianRupee className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    {loanStatus !== 'incomplete' && currentLead?.formData?.step7 ? (
+                    {loanStatus !== 'incomplete' && (detailedInfo?.loan_details || currentLead?.formData?.step7) ? (
                       <div className="space-y-1">
-                        <p className="text-sm font-semibold text-gray-900">
-                          {(() => {
-                            const step7 = currentLead.formData.step7;
-                            const amount = step7.loanAmount || currentLead.loanAmount || 0;
-                            const formattedAmount = amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-                            const tenureMonths = step7.tenure || 0;
-                            const tenureYears = Math.floor(tenureMonths / 12);
-                            const purpose = step7.loanPurpose || currentLead.loanPurpose || '';
-                            const purposeLabel = getLoanPurposeLabel(purpose);
-                            return `₹${formattedAmount}${tenureYears > 0 ? ` · ${tenureYears} Years` : ''} · ${purposeLabel}`;
-                          })()}
-                        </p>
+                        {(() => {
+                          const loanDetails = detailedInfo?.loan_details;
+                          const step7 = currentLead?.formData?.step7;
+                          
+                          const amount = loanDetails?.loan_amount_requested || step7?.loanAmount || currentLead?.loanAmount || 0;
+                          const formattedAmount = typeof amount === 'string' 
+                            ? parseFloat(amount).toLocaleString('en-IN')
+                            : amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                          
+                          const tenureMonths = loanDetails?.tenure_months || step7?.tenure || 0;
+                          const tenureYears = Math.floor(Number(tenureMonths) / 12);
+                          const tenureMonthsRemainder = Number(tenureMonths) % 12;
+                          
+                          const purpose = loanDetails?.loan_purpose || step7?.loanPurpose || currentLead?.loanPurpose || '';
+                          const purposeLabel = getLoanPurposeLabel(purpose);
+                          
+                          return (
+                            <>
+                              <p className="text-sm font-semibold text-gray-900">
+                                ₹{formattedAmount}
+                                {tenureYears > 0 && ` · ${tenureYears} Year${tenureYears > 1 ? 's' : ''}`}
+                                {tenureMonthsRemainder > 0 && ` ${tenureMonthsRemainder} Month${tenureMonthsRemainder > 1 ? 's' : ''}`}
+                                {tenureYears === 0 && tenureMonthsRemainder > 0 && ` · ${tenureMonthsRemainder} Month${tenureMonthsRemainder > 1 ? 's' : ''}`}
+                                {purposeLabel && ` · ${purposeLabel}`}
+                              </p>
+                              {loanDetails?.interest_rate && (
+                                <p className="text-xs text-gray-600">
+                                  <span className="font-medium">Interest Rate:</span> {loanDetails.interest_rate}%
+                                </p>
+                              )}
+                              {loanDetails?.product_code && (
+                                <p className="text-xs text-gray-600">
+                                  <span className="font-medium">Product:</span> {loanDetails.product_code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                </p>
+                              )}
+                              {loanDetails?.loan_purpose_description && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {loanDetails.loan_purpose_description}
+                                </p>
+                              )}
+                              {loanDetails?.sourcing_channel && (
+                                <p className="text-xs text-gray-600">
+                                  <span className="font-medium">Sourcing Channel:</span> {loanDetails.sourcing_channel.charAt(0).toUpperCase() + loanDetails.sourcing_channel.slice(1)}
+                                </p>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     ) : (
                       <div>
