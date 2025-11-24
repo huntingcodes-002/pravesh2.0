@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, CheckCircle, XCircle, Loader, Trash2, RotateCcw, Camera, AlertTriangle, User, Users, Home, ChevronDown, X, Image as ImageIcon, RefreshCw } from 'lucide-react';
+import { Upload, CheckCircle, XCircle, Loader, Trash2, RotateCcw, Camera, AlertTriangle, User, Users, Home, ChevronDown, X, Image as ImageIcon, RefreshCw, Eye, MapPin } from 'lucide-react';
 import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -214,10 +214,6 @@ const PROPERTY_PHOTO_OPTIONS = [
 type PropertyPhotoType = (typeof PROPERTY_PHOTO_OPTIONS)[number]['value'];
 const PROPERTY_PHOTO_REQUIRED_COUNT = PROPERTY_PHOTO_OPTIONS.length;
 
-interface PropertyPhotoCapture extends TempFile {
-  photoType: PropertyPhotoType;
-}
-
 const generateDocumentList = (lead: any): DocumentDefinition[] => {
   const documents: DocumentDefinition[] = [];
 
@@ -335,6 +331,7 @@ const categorizeUploadedFiles = (files: UploadedFile[], availableDocuments: any[
     const applicantDocs: UploadedFile[] = [];
     const coApplicantDocsMap: { [key: string]: UploadedFile[] } = {};
     const collateralDocs: UploadedFile[] = [];
+    const propertyPhotoDocs: UploadedFile[] = [];
     
     // Initialize co-applicant docs map
     coApplicants.forEach((coApp: any) => {
@@ -353,12 +350,16 @@ const categorizeUploadedFiles = (files: UploadedFile[], availableDocuments: any[
                     coApplicantDocsMap[coApplicantId].push(file);
                 }
             } else if (docInfo.applicantType === 'collateral') {
-                collateralDocs.push(file);
+                if (docInfo.value === 'PropertyPhotos') {
+                    propertyPhotoDocs.push(file);
+                } else {
+                    collateralDocs.push(file);
+                }
             }
         }
     });
     
-    return { applicantDocs, coApplicantDocsMap, collateralDocs };
+    return { applicantDocs, coApplicantDocsMap, collateralDocs, propertyPhotoDocs };
 };
 
 // Helper function to get document display name
@@ -386,8 +387,10 @@ export default function Step8Page() {
         currentLead?.formData?.step8?.files || []
     );
     const [selectedPropertyPhotoType, setSelectedPropertyPhotoType] = useState<PropertyPhotoType | ''>('');
-    const [pendingPropertyPhoto, setPendingPropertyPhoto] = useState<PropertyPhotoCapture | null>(null);
     const [isUploadingPropertyPhoto, setIsUploadingPropertyPhoto] = useState(false);
+    const [manualLocation, setManualLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [isRequestingLocation, setIsRequestingLocation] = useState(false);
+    const [showPropertyGallery, setShowPropertyGallery] = useState(false);
 
     // New states for front/back handling
     const [frontFile, setFrontFile] = useState<TempFile | null>(null);
@@ -426,13 +429,29 @@ export default function Step8Page() {
         maximumAge: 0,
     });
 
+    const resolvedLatitude = typeof manualLocation?.latitude === 'number'
+        ? manualLocation.latitude
+        : (typeof geolocation.latitude === 'number' ? geolocation.latitude : null);
+
+    const resolvedLongitude = typeof manualLocation?.longitude === 'number'
+        ? manualLocation.longitude
+        : (typeof geolocation.longitude === 'number' ? geolocation.longitude : null);
+
     const locationCoords = useMemo(() => {
-        const latitude =
-            typeof geolocation.latitude === 'number' ? geolocation.latitude.toFixed(6) : '90';
-        const longitude =
-            typeof geolocation.longitude === 'number' ? geolocation.longitude.toFixed(6) : '90';
-        return { latitude, longitude };
-    }, [geolocation.latitude, geolocation.longitude]);
+        if (typeof resolvedLatitude === 'number' && typeof resolvedLongitude === 'number') {
+            return {
+                latitude: resolvedLatitude.toFixed(6),
+                longitude: resolvedLongitude.toFixed(6)
+            };
+        }
+        return null;
+    }, [resolvedLatitude, resolvedLongitude]);
+
+    const isLocationReady = Boolean(locationCoords);
+    const locationErrorMessage =
+        typeof geolocation.error === 'string'
+            ? geolocation.error
+            : geolocation.error?.message || '';
 
     const totalSteps = 10;
     
@@ -520,7 +539,6 @@ export default function Step8Page() {
     useEffect(() => {
         if (documentType !== 'PropertyPhotos') {
             setSelectedPropertyPhotoType('');
-            setPendingPropertyPhoto(null);
         }
     }, [documentType]);
 
@@ -544,6 +562,12 @@ export default function Step8Page() {
             option => propertyPhotoFiles[option.value]?.status === 'Success'
         ).length;
     }, [propertyPhotoFiles]);
+
+    const capturedPropertyPhotos = useMemo(() => {
+        return PROPERTY_PHOTO_OPTIONS.filter(option => propertyPhotoFiles[option.value]);
+    }, [propertyPhotoFiles]);
+
+    const allPropertyPhotosComplete = propertyPhotoSuccessCount === PROPERTY_PHOTO_REQUIRED_COUNT;
 
     useEffect(() => {
         if (documentType === 'PropertyPhotos' && !selectedPropertyPhotoType) {
@@ -614,6 +638,14 @@ export default function Step8Page() {
             toast({
                 title: 'Error',
                 description: 'Application ID not found. Please create a new lead first.',
+                variant: 'destructive',
+            });
+            return { success: false };
+        }
+        if (!locationCoords) {
+            toast({
+                title: 'Location Required',
+                description: 'Please allow location access to continue with document uploads.',
                 variant: 'destructive',
             });
             return { success: false };
@@ -1230,6 +1262,15 @@ export default function Step8Page() {
             toast({ title: 'Error', description: 'Please select a document type first', variant: 'destructive' });
             return;
         }
+
+        if (!isLocationReady) {
+            toast({
+                title: 'Location Required',
+                description: 'Allow location access before capturing documents.',
+                variant: 'destructive',
+            });
+            return;
+        }
         
         const doc = selectedDocument;
         if (doc && !doc.requiresCamera) {
@@ -1429,17 +1470,7 @@ export default function Step8Page() {
                     });
                     return;
                 }
-
-                setPendingPropertyPhoto({
-                    name: `property_${selectedPropertyPhotoType}_${fileId}.jpg`,
-                    file: null,
-                    dataUrl,
-                    photoType: selectedPropertyPhotoType,
-                });
-                toast({
-                    title: 'Preview Ready',
-                    description: 'Review the captured image and click upload to continue.',
-                });
+                await uploadPropertyPhotoCapture(dataUrl, selectedPropertyPhotoType as PropertyPhotoType);
                 return;
             }
 
@@ -1545,50 +1576,41 @@ export default function Step8Page() {
         }
     };
 
-    const handleUploadPropertyPhoto = async () => {
-        if (!pendingPropertyPhoto || !selectedDocument || selectedDocument.value !== 'PropertyPhotos') {
+    const uploadPropertyPhotoCapture = async (dataUrl: string, photoType: PropertyPhotoType) => {
+        if (!selectedDocument || selectedDocument.value !== 'PropertyPhotos') {
             toast({
-                title: 'No Photo Selected',
-                description: 'Capture a property image before uploading.',
+                title: 'Select Property Photos',
+                description: 'Choose a property image type before capturing.',
                 variant: 'destructive',
             });
             return;
         }
 
-        const captureType = pendingPropertyPhoto.photoType;
-        const option = PROPERTY_PHOTO_OPTIONS.find(opt => opt.value === captureType);
+        const option = PROPERTY_PHOTO_OPTIONS.find(opt => opt.value === photoType);
         const displayLabel = option ? `Property Photos - ${option.label}` : selectedDocument.label || 'Property Photo';
         const ownerType = selectedDocument.applicantType;
         const ownerId = selectedDocument.coApplicantId;
         const fileId = Date.now().toString();
-        const fileName = pendingPropertyPhoto.name || `property_${captureType}.jpg`;
-        const fileSource = pendingPropertyPhoto.file || (pendingPropertyPhoto.dataUrl ? dataURLtoFile(pendingPropertyPhoto.dataUrl, fileName) : null);
-
-        if (!fileSource) {
-            toast({
-                title: 'Error',
-                description: 'Unable to process the captured image. Please capture again.',
-                variant: 'destructive',
-            });
-            return;
-        }
-
-        const newFile: UploadedFile = {
-            id: fileId,
-            name: fileName,
-            type: 'PropertyPhotos',
-            subType: captureType,
-            status: 'Processing',
-            previewUrl: pendingPropertyPhoto.dataUrl,
-            fileType: 'image',
-            ownerType,
-            ownerId,
-            label: displayLabel,
-        };
+        const fileName = `property_${photoType}_${fileId}.jpg`;
+        const fileSource = dataURLtoFile(dataUrl, fileName);
 
         setUploadedFiles(prev => {
-            const filtered = prev.filter(file => !(file.type === 'PropertyPhotos' && file.subType === captureType));
-            return [...filtered, newFile];
+            const filtered = prev.filter(file => !(file.type === 'PropertyPhotos' && file.subType === photoType));
+            return [
+                ...filtered,
+                {
+                    id: fileId,
+                    name: fileName,
+                    type: 'PropertyPhotos',
+                    subType: photoType,
+                    status: 'Processing',
+                    previewUrl: dataUrl,
+                    fileType: 'image',
+                    ownerType,
+                    ownerId,
+                    label: displayLabel,
+                },
+            ];
         });
 
         setIsUploadingPropertyPhoto(true);
@@ -1596,7 +1618,7 @@ export default function Step8Page() {
 
         const uploadResult = await handleDocumentUpload(fileSource, 'PropertyPhotos', fileId, undefined, {
             documentLabel: displayLabel,
-            metadata: { property_photo_type: captureType },
+            metadata: { property_photo_type: photoType },
         });
 
         const isSuccess = uploadResult?.success === true;
@@ -1621,7 +1643,6 @@ export default function Step8Page() {
                 description: `${option?.label ?? 'Property photo'} uploaded successfully.`,
                 className: 'bg-green-50 border-green-200',
             });
-            setPendingPropertyPhoto(null);
             setSelectedPropertyPhotoType('');
         } else {
             toast({
@@ -1634,11 +1655,8 @@ export default function Step8Page() {
 
     const handlePropertyPhotoDelete = (photoType: PropertyPhotoType) => {
         setUploadedFiles(prev => prev.filter(file => !(file.type === 'PropertyPhotos' && file.subType === photoType)));
-        if (pendingPropertyPhoto?.photoType === photoType) {
-            setPendingPropertyPhoto(null);
-        }
-        if (selectedPropertyPhotoType === photoType) {
-            setSelectedPropertyPhotoType('');
+        if (selectedDocument?.value === 'PropertyPhotos') {
+            setSelectedPropertyPhotoType(photoType);
         }
         const label = PROPERTY_PHOTO_OPTIONS.find(opt => opt.value === photoType)?.label || 'Property photo';
         toast({
@@ -1650,9 +1668,6 @@ export default function Step8Page() {
 
     const handlePropertyPhotoReplace = (photoType: PropertyPhotoType) => {
         setUploadedFiles(prev => prev.filter(file => !(file.type === 'PropertyPhotos' && file.subType === photoType)));
-        if (pendingPropertyPhoto?.photoType === photoType) {
-            setPendingPropertyPhoto(null);
-        }
         setSelectedPropertyPhotoType(photoType);
         toast({
             title: 'Capture New Photo',
@@ -1861,6 +1876,37 @@ export default function Step8Page() {
         router.push('/lead/new-lead-info');
     };
 
+    const requestLocationPermission = () => {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) {
+            toast({
+                title: 'Location Unavailable',
+                description: 'Geolocation is not supported in this browser.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        setIsRequestingLocation(true);
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                setManualLocation({
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                });
+                setIsRequestingLocation(false);
+            },
+            (error) => {
+                setIsRequestingLocation(false);
+                toast({
+                    title: 'Location Required',
+                    description: error.message || 'Please allow location access from browser settings.',
+                    variant: 'destructive',
+                });
+            },
+            { enableHighAccuracy: true, timeout: 20000 }
+        );
+    };
+
     const getUploadedDocTypes = () => {
         const completed = new Set<string>();
         const successFiles = uploadedFiles.filter(file => file.status === 'Success');
@@ -1884,6 +1930,35 @@ export default function Step8Page() {
 
         return completed;
     };
+
+    if (!isLocationReady) {
+        return (
+            <DashboardLayout title="Document Upload" showNotifications={false} showExitButton={true} onExit={handleExit}>
+                <div className="max-w-md mx-auto py-24 px-6 text-center flex flex-col items-center gap-4">
+                    <MapPin className="w-10 h-10 text-blue-600" />
+                    <div>
+                        <h2 className="text-xl font-semibold text-gray-900 mb-2">Location Access Required</h2>
+                        <p className="text-sm text-gray-600">
+                            Please allow location permission to continue with document uploads.
+                        </p>
+                        {locationErrorMessage && (
+                            <p className="text-xs text-red-600 mt-2">{locationErrorMessage}</p>
+                        )}
+                    </div>
+                    <Button onClick={requestLocationPermission} disabled={isRequestingLocation} className="min-w-[200px]">
+                        {isRequestingLocation ? (
+                            <>
+                                <Loader className="w-4 h-4 mr-2 animate-spin" />
+                                Requesting...
+                            </>
+                        ) : (
+                            'Allow Location Access'
+                        )}
+                    </Button>
+                </div>
+            </DashboardLayout>
+        );
+    }
 
     return (
         <DashboardLayout title="Document Upload" showNotifications={false} showExitButton={true} onExit={handleExit}>
@@ -2050,7 +2125,6 @@ export default function Step8Page() {
                                     setUploadError('');
                                     if (value !== 'PropertyPhotos') {
                                         setSelectedPropertyPhotoType('');
-                                        setPendingPropertyPhoto(null);
                                     }
                                 }}>
                                     <SelectTrigger id="documentType" className="h-12">
@@ -2088,7 +2162,6 @@ export default function Step8Page() {
                                                         value={selectedPropertyPhotoType}
                                                         onValueChange={(value) => {
                                                             setSelectedPropertyPhotoType(value as PropertyPhotoType);
-                                                            setPendingPropertyPhoto(null);
                                                         }}
                                                     >
                                                         <SelectTrigger className="h-12">
@@ -2120,81 +2193,76 @@ export default function Step8Page() {
                                                         const currentType = selectedPropertyPhotoType as PropertyPhotoType;
                                                         const activeOption = PROPERTY_PHOTO_OPTIONS.find(opt => opt.value === currentType);
                                                         const existingFile = propertyPhotoFiles[currentType];
-                                                        const pendingForType = pendingPropertyPhoto?.photoType === currentType ? pendingPropertyPhoto : null;
 
-                                                        if (existingFile && existingFile.status === 'Success') {
-                                                            return (
-                                                                <div className="border rounded-lg p-4 bg-green-50 space-y-3">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <h4 className="text-sm font-semibold text-gray-800">{activeOption?.label}</h4>
-                                                                        <CheckCircle className="w-5 h-5 text-green-600" />
+                                                        return (
+                                                            <div className="space-y-4 border rounded-lg p-4 bg-gray-50">
+                                                                <div className="flex items-center justify-between">
+                                                                    <div>
+                                                                        <h4 className="text-sm font-semibold text-gray-800 mb-1">{activeOption?.label}</h4>
+                                                                        <p className="text-xs text-gray-600">
+                                                                            Capture, crop, and confirm to upload automatically.
+                                                                        </p>
                                                                     </div>
-                                                                    {existingFile.previewUrl && (
-                                                                        <img
-                                                                            src={existingFile.previewUrl}
-                                                                            alt={existingFile.label}
-                                                                            className="w-full h-48 object-cover rounded-lg border"
-                                                                        />
+                                                                    {existingFile?.status === 'Success' && (
+                                                                        <span className="flex items-center gap-1 text-xs font-medium text-green-700">
+                                                                            <CheckCircle className="w-4 h-4" />
+                                                                            Uploaded
+                                                                        </span>
                                                                     )}
-                                                                    <div className="flex flex-col sm:flex-row gap-2">
+                                                                </div>
+
+                                                                {existingFile?.status === 'Success' ? (
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        {existingFile.previewUrl && (
+                                                                            <Button
+                                                                                variant="secondary"
+                                                                                className="flex items-center gap-2"
+                                                                                onClick={() => {
+                                                                                    setPreviewFile(existingFile);
+                                                                                    setShowPreview(true);
+                                                                                }}
+                                                                            >
+                                                                                <Eye className="w-4 h-4" />
+                                                                                Preview
+                                                                            </Button>
+                                                                        )}
                                                                         <Button
                                                                             variant="outline"
-                                                                            className="flex-1"
                                                                             onClick={() => handlePropertyPhotoReplace(currentType)}
                                                                         >
                                                                             Replace
                                                                         </Button>
                                                                         <Button
                                                                             variant="ghost"
-                                                                            className="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
                                                                             onClick={() => handlePropertyPhotoDelete(currentType)}
                                                                         >
                                                                             Delete
                                                                         </Button>
                                                                     </div>
-                                                                </div>
-                                                            );
-                                                        }
-
-                                                        return (
-                                                            <div className="space-y-4 border rounded-lg p-4 bg-gray-50">
-                                                                <div>
-                                                                    <h4 className="text-sm font-semibold text-gray-800 mb-1">{activeOption?.label}</h4>
-                                                                    <p className="text-xs text-gray-600">Capture using your device camera. Upload option is disabled for this document.</p>
-                                                                </div>
-                                                                <div className="flex items-center gap-3 flex-wrap">
-                                                                    <Button
-                                                                        onClick={startCamera}
-                                                                        variant="outline"
-                                                                        className="flex items-center gap-2 border-2 border-blue-300 hover:bg-blue-50"
-                                                                    >
-                                                                        <Camera className="w-4 h-4 text-blue-600" />
-                                                                        Capture from Camera
-                                                                    </Button>
-                                                                </div>
-                                                                {pendingForType?.dataUrl && (
-                                                                    <div className="space-y-3">
-                                                                        <div className="border rounded-lg overflow-hidden">
-                                                                            <img
-                                                                                src={pendingForType.dataUrl}
-                                                                                alt="Captured preview"
-                                                                                className="w-full h-48 object-cover"
-                                                                            />
-                                                                        </div>
+                                                                ) : (
+                                                                    <div className="flex flex-wrap items-center gap-3">
                                                                         <Button
-                                                                            className="w-full bg-blue-600 hover:bg-blue-700"
-                                                                            onClick={handleUploadPropertyPhoto}
+                                                                            onClick={startCamera}
+                                                                            variant="outline"
+                                                                            className="flex items-center gap-2 border-2 border-blue-300 hover:bg-blue-50"
                                                                             disabled={isUploadingPropertyPhoto}
                                                                         >
                                                                             {isUploadingPropertyPhoto ? (
                                                                                 <>
-                                                                                    <Loader className="w-4 h-4 mr-2 animate-spin" />
-                                                                                    Uploading...
+                                                                                    <Loader className="w-4 h-4 animate-spin" />
+                                                                                    Processing...
                                                                                 </>
                                                                             ) : (
-                                                                                'Upload Photo'
+                                                                                <>
+                                                                                    <Camera className="w-4 h-4 text-blue-600" />
+                                                                                    Capture from Camera
+                                                                                </>
                                                                             )}
                                                                         </Button>
+                                                                        <p className="text-xs text-gray-600">
+                                                                            Upload starts automatically after you choose &ldquo;Use Cropped Image&rdquo;.
+                                                                        </p>
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -2202,36 +2270,41 @@ export default function Step8Page() {
                                                     })()
                                                 )}
 
-                                                <div>
-                                                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Required Photos</h4>
-                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                        {PROPERTY_PHOTO_OPTIONS.map(option => {
-                                                            const file = propertyPhotoFiles[option.value];
-                                                            return (
-                                                                <div key={option.value} className="border rounded-lg p-3 bg-white space-y-2">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <span className="text-sm font-medium text-gray-900">{option.label}</span>
-                                                                        {file?.status === 'Success' ? (
-                                                                            <CheckCircle className="w-4 h-4 text-green-600" />
-                                                                        ) : file?.status === 'Processing' ? (
-                                                                            <Loader className="w-4 h-4 text-blue-600 animate-spin" />
-                                                                        ) : (
-                                                                            <span className="text-xs text-gray-500">Pending</span>
-                                                                        )}
-                                                                    </div>
-                                                                    {file?.previewUrl && (
-                                                                        <img
-                                                                            src={file.previewUrl}
-                                                                            alt={file.label}
-                                                                            className="w-full h-24 object-cover rounded-md border"
-                                                                        />
-                                                                    )}
-                                                                    {file && (
-                                                                        <div className="flex gap-2">
+                                                {capturedPropertyPhotos.length > 0 && (
+                                                    <div className="space-y-2">
+                                                        <h4 className="text-sm font-semibold text-gray-800">Captured Photos</h4>
+                                                        <div className="space-y-2">
+                                                            {capturedPropertyPhotos.map(option => {
+                                                                const file = propertyPhotoFiles[option.value];
+                                                                const statusLabel = file?.status === 'Success'
+                                                                    ? 'Uploaded'
+                                                                    : file?.status === 'Processing'
+                                                                        ? 'Processing...'
+                                                                        : 'Failed';
+                                                                return (
+                                                                    <div key={option.value} className="border rounded-lg p-3 bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                                                        <div>
+                                                                            <p className="text-sm font-medium text-gray-900">{option.label}</p>
+                                                                            <p className="text-xs text-gray-500">{statusLabel}</p>
+                                                                        </div>
+                                                                        <div className="flex flex-wrap gap-2">
+                                                                            {file?.previewUrl && file.status === 'Success' && (
+                                                                                <Button
+                                                                                    size="sm"
+                                                                                    variant="ghost"
+                                                                                    className="flex items-center gap-1"
+                                                                                    onClick={() => {
+                                                                                        setPreviewFile(file);
+                                                                                        setShowPreview(true);
+                                                                                    }}
+                                                                                >
+                                                                                    <Eye className="w-4 h-4" />
+                                                                                    Preview
+                                                                                </Button>
+                                                                            )}
                                                                             <Button
                                                                                 size="sm"
                                                                                 variant="outline"
-                                                                                className="flex-1"
                                                                                 onClick={() => handlePropertyPhotoReplace(option.value as PropertyPhotoType)}
                                                                             >
                                                                                 Replace
@@ -2239,18 +2312,18 @@ export default function Step8Page() {
                                                                             <Button
                                                                                 size="sm"
                                                                                 variant="ghost"
-                                                                                className="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
                                                                                 onClick={() => handlePropertyPhotoDelete(option.value as PropertyPhotoType)}
                                                                             >
                                                                                 Delete
                                                                             </Button>
                                                                         </div>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        })}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     </div>
-                                                </div>
+                                                )}
                                             </CardContent>
                                         </Card>
                                     ) : selectedDocument.requiresFrontBack ? (
@@ -2416,7 +2489,9 @@ export default function Step8Page() {
                                     <h3 className="font-semibold text-gray-900 my-4">Uploaded Documents</h3>
                                     {(() => {
                                         const coApplicants = currentLead?.formData?.coApplicants || [];
-                                        const { applicantDocs, coApplicantDocsMap, collateralDocs } = categorizeUploadedFiles(uploadedFiles, availableDocuments, coApplicants);
+                                        const { applicantDocs, coApplicantDocsMap, collateralDocs, propertyPhotoDocs } = categorizeUploadedFiles(uploadedFiles, availableDocuments, coApplicants);
+                                        const shouldShowPropertyGalleryCard = allPropertyPhotosComplete && propertyPhotoDocs.length > 0;
+                                        const hasCollateralSection = collateralDocs.length > 0 || shouldShowPropertyGalleryCard;
                                         
                                         const renderDocumentCard = (file: UploadedFile) => (
                                             <Card key={file.id} className={cn(
@@ -2546,7 +2621,7 @@ export default function Step8Page() {
                                                 })}
 
                                                 {/* Collateral Documents */}
-                                                {collateralDocs.length > 0 && (
+                                                {hasCollateralSection && (
                                                     <Collapsible
                                                         open={openSections['collateral']}
                                                         onOpenChange={(open) => setOpenSections(prev => ({ ...prev, collateral: open }))}
@@ -2566,6 +2641,23 @@ export default function Step8Page() {
                                                         <CollapsibleContent>
                                                             <CardContent className="px-4 pb-4 pt-0 space-y-2">
                                                                 {collateralDocs.map(renderDocumentCard)}
+                                                                {shouldShowPropertyGalleryCard && (
+                                                                    <Card className="border border-purple-100 bg-purple-50/50">
+                                                                        <CardContent className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                                                            <div>
+                                                                                <p className="text-sm font-semibold text-gray-900">Property Images</p>
+                                                                                <p className="text-xs text-gray-600">{PROPERTY_PHOTO_REQUIRED_COUNT} photos uploaded</p>
+                                                                            </div>
+                                                                            <Button
+                                                                                variant="outline"
+                                                                                size="sm"
+                                                                                onClick={() => setShowPropertyGallery(true)}
+                                                                            >
+                                                                                Preview
+                                                                            </Button>
+                                                                        </CardContent>
+                                                                    </Card>
+                                                                )}
                                                             </CardContent>
                                                         </CollapsibleContent>
                                                         </Card>
@@ -2579,6 +2671,7 @@ export default function Step8Page() {
                             )}
                         </div>
                     </div>
+                </div>
 
                     <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
                         <div className="flex gap-3 max-w-2xl mx-auto">
@@ -2592,7 +2685,6 @@ export default function Step8Page() {
                     </div>
 
                 </div>
-            </div>
 
             {/* Preview Modal */}
             <Dialog open={showPreview} onOpenChange={setShowPreview}>
@@ -2692,6 +2784,34 @@ export default function Step8Page() {
                                 )}
                             </>
                         )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+            <Dialog open={showPropertyGallery} onOpenChange={setShowPropertyGallery}>
+                <DialogContent className="max-w-4xl">
+                    <DialogHeader>
+                        <DialogTitle>Property Images</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        {PROPERTY_PHOTO_OPTIONS.map(option => {
+                            const file = propertyPhotoFiles[option.value];
+                            return (
+                                <div key={option.value} className="space-y-2">
+                                    <p className="text-sm font-medium text-gray-900">{option.label}</p>
+                                    {file?.previewUrl ? (
+                                        <img
+                                            src={file.previewUrl}
+                                            alt={file.label}
+                                            className="w-full h-48 object-cover rounded-lg border"
+                                        />
+                                    ) : (
+                                        <div className="border rounded-lg p-4 text-center text-xs text-gray-500">
+                                            Not available
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
                 </DialogContent>
             </Dialog>
