@@ -104,6 +104,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
+      // Clear any old tokens and auth data before starting new login
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        sessionStorage.removeItem(AUTH_STORAGE_KEY);
+        localStorage.removeItem('auth');
+        sessionStorage.removeItem('auth');
+        // Don't clear user yet - wait until OTP is verified
+      }
+      
       const response = await loginPravesh({ username: email, password });
 
       if (isApiError(response)) {
@@ -170,7 +179,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      // Store tokens in localStorage
+      // Clear any old tokens first to ensure fresh tokens are used
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        sessionStorage.removeItem(AUTH_STORAGE_KEY);
+        localStorage.removeItem('auth');
+        sessionStorage.removeItem('auth');
+      }
+      
+      // Store new tokens in localStorage
       const authData = {
         access_token: successResponse.data.access_token,
         refresh_token: successResponse.data.refresh_token,
@@ -285,10 +302,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = () => {
     setUser(null);
+    setPendingAuth(null);
+    
+    // Clear all auth-related storage from both localStorage and sessionStorage
     removeFromStorage(USER_STORAGE_KEY);
     removeFromStorage(AUTH_STORAGE_KEY);
     removeFromStorage(PENDING_AUTH_KEY);
-    setPendingAuth(null);
+    
+    // Additional cleanup: explicitly clear all possible auth keys
+    if (typeof window !== 'undefined') {
+      // Clear from localStorage
+      localStorage.removeItem(USER_STORAGE_KEY);
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem(PENDING_AUTH_KEY);
+      // Clear from sessionStorage
+      sessionStorage.removeItem(USER_STORAGE_KEY);
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
+      sessionStorage.removeItem(PENDING_AUTH_KEY);
+      // Clear any other possible auth-related keys
+      localStorage.removeItem('auth');
+      sessionStorage.removeItem('auth');
+      localStorage.removeItem('user');
+      sessionStorage.removeItem('user');
+      localStorage.removeItem('pendingAuth');
+      sessionStorage.removeItem('pendingAuth');
+    }
+    
     router.push('/login');
   };
 

@@ -56,27 +56,42 @@ export function isApiError(response: ApiResponse): response is ApiError {
 /**
  * Helper function to get access token from localStorage (with sessionStorage fallback)
  * Exported for use across the application
+ * Always fetches fresh token from storage (no caching)
  */
 export function getAccessToken(): string | null {
   if (typeof window !== 'undefined') {
-    // Check localStorage first (new auth)
+    // Check localStorage first (new auth) - always read fresh
     let authData = localStorage.getItem('auth');
     if (authData) {
       try {
         const parsed = JSON.parse(authData);
-        return parsed.access_token || null;
+        const token = parsed.access_token;
+        // Validate token exists and is not empty
+        if (token && typeof token === 'string' && token.trim().length > 0) {
+          return token;
+        }
+        // Invalid token, clear it
+        localStorage.removeItem('auth');
       } catch {
-        // Invalid data, try sessionStorage as fallback
+        // Invalid JSON, clear it
+        localStorage.removeItem('auth');
       }
     }
-    // Fallback to sessionStorage for backward compatibility
+    // Fallback to sessionStorage for backward compatibility - always read fresh
     authData = sessionStorage.getItem('auth');
     if (authData) {
       try {
         const parsed = JSON.parse(authData);
-        return parsed.access_token || null;
+        const token = parsed.access_token;
+        // Validate token exists and is not empty
+        if (token && typeof token === 'string' && token.trim().length > 0) {
+          return token;
+        }
+        // Invalid token, clear it
+        sessionStorage.removeItem('auth');
       } catch {
-        return null;
+        // Invalid JSON, clear it
+        sessionStorage.removeItem('auth');
       }
     }
   }
