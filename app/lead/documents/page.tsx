@@ -34,6 +34,7 @@ interface UploadedFile {
     ownerType?: 'main' | 'coapplicant' | 'collateral';
     ownerId?: string;
     label?: string;
+    subType?: string;
 }
 
 interface EntityOption {
@@ -198,6 +199,23 @@ interface DocumentDefinition {
   required?: boolean;
   requiresFrontBack?: boolean;
   coApplicantId?: string;
+  isPropertyPhotos?: boolean;
+}
+
+const PROPERTY_PHOTO_OPTIONS = [
+  { value: 'front', label: 'Front' },
+  { value: 'side', label: 'Side' },
+  { value: 'approach_road', label: 'Approach Road' },
+  { value: 'surrounding_view', label: 'Surrounding View' },
+  { value: 'inside_living_room', label: 'Inside - Living Room' },
+  { value: 'selfie_with_owner', label: 'Selfie with Owner' },
+] as const;
+
+type PropertyPhotoType = (typeof PROPERTY_PHOTO_OPTIONS)[number]['value'];
+const PROPERTY_PHOTO_REQUIRED_COUNT = PROPERTY_PHOTO_OPTIONS.length;
+
+interface PropertyPhotoCapture extends TempFile {
+  photoType: PropertyPhotoType;
 }
 
 const generateDocumentList = (lead: any): DocumentDefinition[] => {
@@ -290,12 +308,23 @@ const generateDocumentList = (lead: any): DocumentDefinition[] => {
 
   documents.push({
     value: 'CollateralPapers',
-    label: 'Collateral Papers',
+    label: 'Sale Deed',
     fileTypes: ['pdf'],
     requiresCamera: false,
     applicantType: 'collateral',
     required: true,
     requiresFrontBack: false,
+  });
+
+  documents.push({
+    value: 'PropertyPhotos',
+    label: 'Property Photos',
+    fileTypes: ['image'],
+    requiresCamera: true,
+    applicantType: 'collateral',
+    required: true,
+    requiresFrontBack: false,
+    isPropertyPhotos: true,
   });
 
   return documents;
@@ -356,6 +385,9 @@ export default function Step8Page() {
     const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>(
         currentLead?.formData?.step8?.files || []
     );
+    const [selectedPropertyPhotoType, setSelectedPropertyPhotoType] = useState<PropertyPhotoType | ''>('');
+    const [pendingPropertyPhoto, setPendingPropertyPhoto] = useState<PropertyPhotoCapture | null>(null);
+    const [isUploadingPropertyPhoto, setIsUploadingPropertyPhoto] = useState(false);
 
     // New states for front/back handling
     const [frontFile, setFrontFile] = useState<TempFile | null>(null);
@@ -484,11 +516,45 @@ export default function Step8Page() {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filteredDocuments]);
-    
+
+    useEffect(() => {
+        if (documentType !== 'PropertyPhotos') {
+            setSelectedPropertyPhotoType('');
+            setPendingPropertyPhoto(null);
+        }
+    }, [documentType]);
+
     const selectedDocument = useMemo(
         () => filteredDocuments.find(doc => doc.value === documentType),
         [filteredDocuments, documentType]
     );
+
+    const propertyPhotoFiles = useMemo(() => {
+        const map: Partial<Record<PropertyPhotoType, UploadedFile>> = {};
+        uploadedFiles.forEach(file => {
+            if (file.type === 'PropertyPhotos' && file.subType) {
+                map[file.subType as PropertyPhotoType] = file;
+            }
+        });
+        return map;
+    }, [uploadedFiles]);
+
+    const propertyPhotoSuccessCount = useMemo(() => {
+        return PROPERTY_PHOTO_OPTIONS.filter(
+            option => propertyPhotoFiles[option.value]?.status === 'Success'
+        ).length;
+    }, [propertyPhotoFiles]);
+
+    useEffect(() => {
+        if (documentType === 'PropertyPhotos' && !selectedPropertyPhotoType) {
+            const nextPending = PROPERTY_PHOTO_OPTIONS.find(
+                option => propertyPhotoFiles[option.value]?.status !== 'Success'
+            );
+            if (nextPending) {
+                setSelectedPropertyPhotoType(nextPending.value);
+            }
+        }
+    }, [documentType, propertyPhotoFiles, selectedPropertyPhotoType]);
 
     // Clean up old alternate/collateral documents that no longer match configuration
     useEffect(() => {
@@ -528,6 +594,7 @@ export default function Step8Page() {
             'Passport': 'passport',
             'VoterID': 'voter_id',
             'CollateralPapers': 'collateral_documents',
+            'PropertyPhotos': 'collateral_documents',
             'BankStatement': 'bank_statement',
             'SalarySlip': 'salary_slip',
             'ITR': 'itr',
@@ -540,7 +607,8 @@ export default function Step8Page() {
         file: File,
         documentType: string,
         fileId: string,
-        backFile?: File
+        backFile?: File,
+        options?: { metadata?: Record<string, any>; documentLabel?: string }
     ) => {
         if (!currentLead?.appId) {
             toast({
@@ -591,7 +659,7 @@ export default function Step8Page() {
                 });
             } else {
                 // Use existing document upload API for applicant and other documents
-                const metadata: Record<string, any> = {};
+                const metadata: Record<string, any> = { ...(options?.metadata || {}) };
                 if (docInfo?.applicantType === 'coapplicant' && docInfo.coApplicantId) {
                     metadata.co_applicant_id = docInfo.coApplicantId;
                 }
@@ -604,7 +672,7 @@ export default function Step8Page() {
                     document_type: backendDocType,
                     front_file: file,
                     back_file: backFile,
-                    document_name: docInfo?.label || file.name,
+                    document_name: options?.documentLabel || docInfo?.label || file.name,
                     metadata: Object.keys(metadata).length ? metadata : undefined,
                 });
             }
@@ -1111,7 +1179,9 @@ export default function Step8Page() {
         }
 
         if (fileInputRef.current) fileInputRef.current.value = '';
-        setDocumentType('');
+        if (documentType !== 'PropertyPhotos') {
+            setDocumentType('');
+        }
     };
 
     // Handle file selection for front/back documents from modal
@@ -1167,6 +1237,14 @@ export default function Step8Page() {
                 title: 'Camera Not Available', 
                 description: 'This document type only accepts file uploads, not camera capture', 
                 variant: 'destructive' 
+            });
+            return;
+        }
+        if (doc?.value === 'PropertyPhotos' && !selectedPropertyPhotoType) {
+            toast({
+                title: 'Select Photo Type',
+                description: 'Choose which property image you want to capture before opening the camera.',
+                variant: 'destructive',
             });
             return;
         }
@@ -1342,6 +1420,29 @@ export default function Step8Page() {
                 return;
             }
 
+            if (selectedDocument.isPropertyPhotos) {
+                if (!selectedPropertyPhotoType) {
+                    toast({
+                        title: 'Select Photo Type',
+                        description: 'Choose which property image you want to capture before uploading.',
+                        variant: 'destructive',
+                    });
+                    return;
+                }
+
+                setPendingPropertyPhoto({
+                    name: `property_${selectedPropertyPhotoType}_${fileId}.jpg`,
+                    file: null,
+                    dataUrl,
+                    photoType: selectedPropertyPhotoType,
+                });
+                toast({
+                    title: 'Preview Ready',
+                    description: 'Review the captured image and click upload to continue.',
+                });
+                return;
+            }
+
             const { baseValue: baseDocType } = parseDocumentValue(documentType);
             const fileName = baseDocType === 'PAN' ? 'pan.jpg' : baseDocType === 'Adhaar' ? 'aadhaar.jpg' : `capture_${fileId}.jpg`;
             const ownerType = selectedDocument.applicantType;
@@ -1438,8 +1539,125 @@ export default function Step8Page() {
                 });
             }
             
-            setDocumentType('');
+            if (documentType !== 'PropertyPhotos') {
+                setDocumentType('');
+            }
         }
+    };
+
+    const handleUploadPropertyPhoto = async () => {
+        if (!pendingPropertyPhoto || !selectedDocument || selectedDocument.value !== 'PropertyPhotos') {
+            toast({
+                title: 'No Photo Selected',
+                description: 'Capture a property image before uploading.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        const captureType = pendingPropertyPhoto.photoType;
+        const option = PROPERTY_PHOTO_OPTIONS.find(opt => opt.value === captureType);
+        const displayLabel = option ? `Property Photos - ${option.label}` : selectedDocument.label || 'Property Photo';
+        const ownerType = selectedDocument.applicantType;
+        const ownerId = selectedDocument.coApplicantId;
+        const fileId = Date.now().toString();
+        const fileName = pendingPropertyPhoto.name || `property_${captureType}.jpg`;
+        const fileSource = pendingPropertyPhoto.file || (pendingPropertyPhoto.dataUrl ? dataURLtoFile(pendingPropertyPhoto.dataUrl, fileName) : null);
+
+        if (!fileSource) {
+            toast({
+                title: 'Error',
+                description: 'Unable to process the captured image. Please capture again.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        const newFile: UploadedFile = {
+            id: fileId,
+            name: fileName,
+            type: 'PropertyPhotos',
+            subType: captureType,
+            status: 'Processing',
+            previewUrl: pendingPropertyPhoto.dataUrl,
+            fileType: 'image',
+            ownerType,
+            ownerId,
+            label: displayLabel,
+        };
+
+        setUploadedFiles(prev => {
+            const filtered = prev.filter(file => !(file.type === 'PropertyPhotos' && file.subType === captureType));
+            return [...filtered, newFile];
+        });
+
+        setIsUploadingPropertyPhoto(true);
+        toast({ title: 'Processing', description: `Uploading ${displayLabel}...` });
+
+        const uploadResult = await handleDocumentUpload(fileSource, 'PropertyPhotos', fileId, undefined, {
+            documentLabel: displayLabel,
+            metadata: { property_photo_type: captureType },
+        });
+
+        const isSuccess = uploadResult?.success === true;
+
+        setUploadedFiles(prev =>
+            prev.map(file =>
+                file.id === fileId
+                    ? {
+                          ...file,
+                          status: isSuccess ? 'Success' : 'Failed',
+                          error: isSuccess ? undefined : 'Upload failed - backend validation failed',
+                      }
+                    : file
+            )
+        );
+
+        setIsUploadingPropertyPhoto(false);
+
+        if (isSuccess) {
+            toast({
+                title: 'Success',
+                description: `${option?.label ?? 'Property photo'} uploaded successfully.`,
+                className: 'bg-green-50 border-green-200',
+            });
+            setPendingPropertyPhoto(null);
+            setSelectedPropertyPhotoType('');
+        } else {
+            toast({
+                title: 'Upload Failed',
+                description: 'Failed to upload property photo. Please try again.',
+                variant: 'destructive',
+            });
+        }
+    };
+
+    const handlePropertyPhotoDelete = (photoType: PropertyPhotoType) => {
+        setUploadedFiles(prev => prev.filter(file => !(file.type === 'PropertyPhotos' && file.subType === photoType)));
+        if (pendingPropertyPhoto?.photoType === photoType) {
+            setPendingPropertyPhoto(null);
+        }
+        if (selectedPropertyPhotoType === photoType) {
+            setSelectedPropertyPhotoType('');
+        }
+        const label = PROPERTY_PHOTO_OPTIONS.find(opt => opt.value === photoType)?.label || 'Property photo';
+        toast({
+            title: 'Photo Removed',
+            description: `${label} removed. Capture again if needed.`,
+            className: 'bg-yellow-50 border-yellow-200',
+        });
+    };
+
+    const handlePropertyPhotoReplace = (photoType: PropertyPhotoType) => {
+        setUploadedFiles(prev => prev.filter(file => !(file.type === 'PropertyPhotos' && file.subType === photoType)));
+        if (pendingPropertyPhoto?.photoType === photoType) {
+            setPendingPropertyPhoto(null);
+        }
+        setSelectedPropertyPhotoType(photoType);
+        toast({
+            title: 'Capture New Photo',
+            description: `Please capture the ${PROPERTY_PHOTO_OPTIONS.find(opt => opt.value === photoType)?.label || 'selected'} image again.`,
+        });
     };
 
     // Capture image function - shows crop modal instead of directly processing
@@ -1644,7 +1862,27 @@ export default function Step8Page() {
     };
 
     const getUploadedDocTypes = () => {
-        return new Set(uploadedFiles.filter(file => file.status === 'Success').map(file => file.type));
+        const completed = new Set<string>();
+        const successFiles = uploadedFiles.filter(file => file.status === 'Success');
+
+        successFiles.forEach(file => {
+            if (file.type !== 'PropertyPhotos') {
+                completed.add(file.type);
+            }
+        });
+
+        const propertyCompleteness = new Set<PropertyPhotoType>();
+        successFiles.forEach(file => {
+            if (file.type === 'PropertyPhotos' && file.subType) {
+                propertyCompleteness.add(file.subType as PropertyPhotoType);
+            }
+        });
+
+        if (propertyCompleteness.size === PROPERTY_PHOTO_REQUIRED_COUNT) {
+            completed.add('PropertyPhotos');
+        }
+
+        return completed;
     };
 
     return (
@@ -1810,6 +2048,10 @@ export default function Step8Page() {
                                     setFrontFile(null);
                                     setBackFile(null);
                                     setUploadError('');
+                                    if (value !== 'PropertyPhotos') {
+                                        setSelectedPropertyPhotoType('');
+                                        setPendingPropertyPhoto(null);
+                                    }
                                 }}>
                                     <SelectTrigger id="documentType" className="h-12">
                                         <SelectValue placeholder="Choose document type..." />
@@ -1827,7 +2069,191 @@ export default function Step8Page() {
 
                             {documentType && selectedDocument && (
                                 <>
-                                    {selectedDocument.requiresFrontBack ? (
+                                    {selectedDocument.isPropertyPhotos ? (
+                                        <Card className="border-2 border-blue-200">
+                                            <CardContent className="p-4 space-y-5">
+                                                <div className="flex items-center justify-between">
+                                                    <div>
+                                                        <h3 className="text-sm font-semibold text-gray-900">Property Photos</h3>
+                                                        <p className="text-xs text-gray-500">Capture and upload all required views</p>
+                                                    </div>
+                                                    <div className="text-xs text-gray-600">
+                                                        {propertyPhotoSuccessCount}/{PROPERTY_PHOTO_REQUIRED_COUNT} uploaded
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <Label>Select Photo Type</Label>
+                                                    <Select
+                                                        value={selectedPropertyPhotoType}
+                                                        onValueChange={(value) => {
+                                                            setSelectedPropertyPhotoType(value as PropertyPhotoType);
+                                                            setPendingPropertyPhoto(null);
+                                                        }}
+                                                    >
+                                                        <SelectTrigger className="h-12">
+                                                            <SelectValue placeholder="Choose property photo..." />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {PROPERTY_PHOTO_OPTIONS.map((option) => {
+                                                                const uploaded = propertyPhotoFiles[option.value];
+                                                                const isComplete = uploaded?.status === 'Success';
+                                                                return (
+                                                                    <SelectItem
+                                                                        key={option.value}
+                                                                        value={option.value}
+                                                                        disabled={isComplete}
+                                                                    >
+                                                                        <div className="flex items-center justify-between w-full">
+                                                                            <span>{option.label}</span>
+                                                                            {isComplete && <CheckCircle className="w-4 h-4 text-green-600" />}
+                                                                        </div>
+                                                                    </SelectItem>
+                                                                );
+                                                            })}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+
+                                                {selectedPropertyPhotoType && (
+                                                    (() => {
+                                                        const currentType = selectedPropertyPhotoType as PropertyPhotoType;
+                                                        const activeOption = PROPERTY_PHOTO_OPTIONS.find(opt => opt.value === currentType);
+                                                        const existingFile = propertyPhotoFiles[currentType];
+                                                        const pendingForType = pendingPropertyPhoto?.photoType === currentType ? pendingPropertyPhoto : null;
+
+                                                        if (existingFile && existingFile.status === 'Success') {
+                                                            return (
+                                                                <div className="border rounded-lg p-4 bg-green-50 space-y-3">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <h4 className="text-sm font-semibold text-gray-800">{activeOption?.label}</h4>
+                                                                        <CheckCircle className="w-5 h-5 text-green-600" />
+                                                                    </div>
+                                                                    {existingFile.previewUrl && (
+                                                                        <img
+                                                                            src={existingFile.previewUrl}
+                                                                            alt={existingFile.label}
+                                                                            className="w-full h-48 object-cover rounded-lg border"
+                                                                        />
+                                                                    )}
+                                                                    <div className="flex flex-col sm:flex-row gap-2">
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            className="flex-1"
+                                                                            onClick={() => handlePropertyPhotoReplace(currentType)}
+                                                                        >
+                                                                            Replace
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            className="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                                            onClick={() => handlePropertyPhotoDelete(currentType)}
+                                                                        >
+                                                                            Delete
+                                                                        </Button>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        }
+
+                                                        return (
+                                                            <div className="space-y-4 border rounded-lg p-4 bg-gray-50">
+                                                                <div>
+                                                                    <h4 className="text-sm font-semibold text-gray-800 mb-1">{activeOption?.label}</h4>
+                                                                    <p className="text-xs text-gray-600">Capture using your device camera. Upload option is disabled for this document.</p>
+                                                                </div>
+                                                                <div className="flex items-center gap-3 flex-wrap">
+                                                                    <Button
+                                                                        onClick={startCamera}
+                                                                        variant="outline"
+                                                                        className="flex items-center gap-2 border-2 border-blue-300 hover:bg-blue-50"
+                                                                    >
+                                                                        <Camera className="w-4 h-4 text-blue-600" />
+                                                                        Capture from Camera
+                                                                    </Button>
+                                                                </div>
+                                                                {pendingForType?.dataUrl && (
+                                                                    <div className="space-y-3">
+                                                                        <div className="border rounded-lg overflow-hidden">
+                                                                            <img
+                                                                                src={pendingForType.dataUrl}
+                                                                                alt="Captured preview"
+                                                                                className="w-full h-48 object-cover"
+                                                                            />
+                                                                        </div>
+                                                                        <Button
+                                                                            className="w-full bg-blue-600 hover:bg-blue-700"
+                                                                            onClick={handleUploadPropertyPhoto}
+                                                                            disabled={isUploadingPropertyPhoto}
+                                                                        >
+                                                                            {isUploadingPropertyPhoto ? (
+                                                                                <>
+                                                                                    <Loader className="w-4 h-4 mr-2 animate-spin" />
+                                                                                    Uploading...
+                                                                                </>
+                                                                            ) : (
+                                                                                'Upload Photo'
+                                                                            )}
+                                                                        </Button>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()
+                                                )}
+
+                                                <div>
+                                                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Required Photos</h4>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                        {PROPERTY_PHOTO_OPTIONS.map(option => {
+                                                            const file = propertyPhotoFiles[option.value];
+                                                            return (
+                                                                <div key={option.value} className="border rounded-lg p-3 bg-white space-y-2">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className="text-sm font-medium text-gray-900">{option.label}</span>
+                                                                        {file?.status === 'Success' ? (
+                                                                            <CheckCircle className="w-4 h-4 text-green-600" />
+                                                                        ) : file?.status === 'Processing' ? (
+                                                                            <Loader className="w-4 h-4 text-blue-600 animate-spin" />
+                                                                        ) : (
+                                                                            <span className="text-xs text-gray-500">Pending</span>
+                                                                        )}
+                                                                    </div>
+                                                                    {file?.previewUrl && (
+                                                                        <img
+                                                                            src={file.previewUrl}
+                                                                            alt={file.label}
+                                                                            className="w-full h-24 object-cover rounded-md border"
+                                                                        />
+                                                                    )}
+                                                                    {file && (
+                                                                        <div className="flex gap-2">
+                                                                            <Button
+                                                                                size="sm"
+                                                                                variant="outline"
+                                                                                className="flex-1"
+                                                                                onClick={() => handlePropertyPhotoReplace(option.value as PropertyPhotoType)}
+                                                                            >
+                                                                                Replace
+                                                                            </Button>
+                                                                            <Button
+                                                                                size="sm"
+                                                                                variant="ghost"
+                                                                                className="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                                                onClick={() => handlePropertyPhotoDelete(option.value as PropertyPhotoType)}
+                                                                            >
+                                                                                Delete
+                                                                            </Button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    ) : selectedDocument.requiresFrontBack ? (
                                         /* Front/Back Document Upload Card */
                                         <Card className={cn(
                                             "border-2",
