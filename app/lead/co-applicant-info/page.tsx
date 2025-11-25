@@ -276,103 +276,102 @@ export default function CoApplicantInfoPage() {
     const maritalStatus = personalInfo?.marital_status;
     const status = getBasicDetailsStatusFromApi(personalInfo);
 
-    // Find local co-applicant for navigation
     const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
     const canEditBasic = status !== 'completed' && Boolean(localCoApp);
-    const isEditable = status !== 'completed' && Boolean(localCoApp);
 
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-1">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <UserCheck className="w-5 h-5 text-blue-600" />
+      <div className={tileWrapperClass}>
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+            <UserCheck className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-900">Basic Details</p>
+            {personalInfo ? (
+              <div className="mt-2 space-y-1 text-xs text-gray-600">
+                {fullName && (
+                  <p>
+                    <span className="font-medium">Name:</span> {fullName}
+                    {personalInfo.full_name?.verified && <span className="ml-2 text-xs text-green-600">✓ Verified</span>}
+                  </p>
+                )}
+                {mobileNumber && (
+                  <p>
+                    <span className="font-medium">Mobile:</span> {mobileNumber}
+                    {personalInfo.mobile_number?.verified && (
+                      <span className="ml-2 text-xs text-green-600">✓ Verified</span>
+                    )}
+                  </p>
+                )}
+                {email && (
+                  <p>
+                    <span className="font-medium">Email:</span> {email}
+                  </p>
+                )}
+                {panNumber && (
+                  <p>
+                    <span className="font-medium">PAN Number:</span> {panNumber}
+                    {personalInfo.pan_number?.verified && (
+                      <span className="ml-2 text-xs text-green-600">✓ Verified</span>
+                    )}
+                  </p>
+                )}
+                {dob && (
+                  <p>
+                    <span className="font-medium">Date of Birth:</span>{' '}
+                    {(() => {
+                      try {
+                        const date = new Date(dob);
+                        if (!isNaN(date.getTime())) {
+                          return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                        }
+                      } catch {
+                        /* noop */
+                      }
+                      return dob;
+                    })()}
+                    {personalInfo.date_of_birth?.verified && (
+                      <span className="ml-2 text-xs text-green-600">✓ Verified</span>
+                    )}
+                  </p>
+                )}
+                {gender && (
+                  <p>
+                    <span className="font-medium">Gender:</span> {gender}
+                  </p>
+                )}
+                {maritalStatus && (
+                  <p>
+                    <span className="font-medium">Marital Status:</span> {maritalStatus}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                <p className="text-sm font-semibold text-gray-900">No basic details added yet</p>
+                <p className="text-xs text-gray-500">Upload PAN to auto-fill Name, DOB & PAN Number</p>
+              </div>
+            )}
           </div>
-          {statusBadge(status)}
         </div>
-
-        {personalInfo ? (
-          <div className="space-y-1 text-sm text-gray-700">
-            {fullName && (
-              <p>
-                <span className="font-medium">Name:</span> {fullName}
-                {personalInfo.full_name?.verified && (
-                  <span className="ml-2 text-xs text-green-600">✓ Verified</span>
-                )}
-              </p>
-            )}
-            {mobileNumber && (
-              <p>
-                <span className="font-medium">Mobile:</span> {mobileNumber}
-                {personalInfo.mobile_number?.verified && (
-                  <span className="ml-2 text-xs text-green-600">✓ Verified</span>
-                )}
-              </p>
-            )}
-            {email && (
-              <p>
-                <span className="font-medium">Email:</span> {email}
-              </p>
-            )}
-            {panNumber && (
-              <p>
-                <span className="font-medium">PAN Number:</span> {panNumber}
-                {personalInfo.pan_number?.verified && (
-                  <span className="ml-2 text-xs text-green-600">✓ Verified</span>
-                )}
-              </p>
-            )}
-            {dob && (
-              <p>
-                <span className="font-medium">Date of Birth:</span> {(() => {
-                  try {
-                    const date = new Date(dob);
-                    if (!isNaN(date.getTime())) {
-                      return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                    }
-                  } catch {
-                    // fall through
-                  }
-                  return dob;
-                })()}
-                {personalInfo.date_of_birth?.verified && (
-                  <span className="ml-2 text-xs text-green-600">✓ Verified</span>
-                )}
-              </p>
-            )}
-            {gender && (
-              <p>
-                <span className="font-medium">Gender:</span> {gender}
-              </p>
-            )}
-            {maritalStatus && (
-              <p>
-                <span className="font-medium">Marital Status:</span> {maritalStatus}
-              </p>
-            )}
-          </div>
-        ) : (
-          <p className="text-xs text-gray-500">No basic details added yet</p>
-        )}
-
-        {localCoApp && (
-          <div className="flex flex-wrap gap-3 pt-3">
-            {canEditBasic ? (
+        <div className="flex flex-col items-end gap-2 min-w-[140px]">
+          {statusBadge(status)}
+          {localCoApp &&
+            (canEditBasic ? (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  router.push(`/lead/co-applicant/basic-details?coApplicantId=${localCoApp.id}`);
-                }}
-                className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                onClick={() => router.push(`/lead/co-applicant/basic-details?coApplicantId=${localCoApp.id}`)}
+                className={tileButtonClass}
               >
                 Edit
               </Button>
             ) : (
-              <Badge className="bg-gray-200 text-gray-700 text-xs">Submitted</Badge>
-            )}
-          </div>
-        )}
+              <Badge className="rounded-full bg-white border border-gray-300 text-gray-600 text-[11px] px-3 py-1">
+                Submitted
+              </Badge>
+            ))}
+        </div>
       </div>
     );
   };
@@ -382,85 +381,86 @@ export default function CoApplicantInfoPage() {
     const primaryAddress = addresses.find((addr) => addr.is_primary) ?? addresses[0] ?? null;
     const status = getAddressStatusFromApi(addresses);
 
-    // Find local co-applicant for navigation
     const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
     const canEditAddress = status !== 'completed' && Boolean(localCoApp);
 
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-1">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <MapPin className="w-5 h-5 text-blue-600" />
+      <div className={tileWrapperClass}>
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+            <MapPin className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-900">Address Details</p>
+            {primaryAddress ? (
+              <div className="mt-2 space-y-1 text-xs text-gray-600">
+                {primaryAddress.address_line_1 && (
+                  <p>
+                    <span className="font-medium">Address:</span> {primaryAddress.address_line_1}
+                  </p>
+                )}
+                {primaryAddress.address_line_2 && (
+                  <p>
+                    <span className="font-medium">Area:</span> {primaryAddress.address_line_2}
+                  </p>
+                )}
+                {primaryAddress.address_line_3 && (
+                  <p>
+                    <span className="font-medium">Area 2:</span> {primaryAddress.address_line_3}
+                  </p>
+                )}
+                {primaryAddress.landmark && (
+                  <p>
+                    <span className="font-medium">Landmark:</span> {primaryAddress.landmark}
+                  </p>
+                )}
+                {primaryAddress.city && (
+                  <p>
+                    <span className="font-medium">City:</span> {primaryAddress.city}
+                  </p>
+                )}
+                {primaryAddress.state && (
+                  <p>
+                    <span className="font-medium">State:</span> {primaryAddress.state}
+                  </p>
+                )}
+                {primaryAddress.pincode && (
+                  <p>
+                    <span className="font-medium">Pincode:</span> {primaryAddress.pincode}
+                  </p>
+                )}
+                {primaryAddress.address_type && (
+                  <p>
+                    <span className="font-medium">Type:</span> {primaryAddress.address_type}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                <p className="text-sm font-semibold text-gray-900">No address details added yet</p>
+                <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill Address & Pincode</p>
+              </div>
+            )}
           </div>
-          {statusBadge(status)}
         </div>
-
-        {primaryAddress ? (
-          <div className="space-y-1 text-sm text-gray-700">
-            {primaryAddress.address_line_1 && (
-              <p>
-                <span className="font-medium">Address:</span> {primaryAddress.address_line_1}
-              </p>
-            )}
-            {primaryAddress.address_line_2 && (
-              <p>
-                <span className="font-medium">Area:</span> {primaryAddress.address_line_2}
-              </p>
-            )}
-            {primaryAddress.address_line_3 && (
-              <p>
-                <span className="font-medium">Area 2:</span> {primaryAddress.address_line_3}
-              </p>
-            )}
-            {primaryAddress.landmark && (
-              <p>
-                <span className="font-medium">Landmark:</span> {primaryAddress.landmark}
-              </p>
-            )}
-            {primaryAddress.city && (
-              <p>
-                <span className="font-medium">City:</span> {primaryAddress.city}
-              </p>
-            )}
-            {primaryAddress.state && (
-              <p>
-                <span className="font-medium">State:</span> {primaryAddress.state}
-              </p>
-            )}
-            {primaryAddress.pincode && (
-              <p>
-                <span className="font-medium">Pincode:</span> {primaryAddress.pincode}
-              </p>
-            )}
-            {primaryAddress.address_type && (
-              <p>
-                <span className="font-medium">Type:</span> {primaryAddress.address_type}
-              </p>
-            )}
-          </div>
-        ) : (
-          <p className="text-xs text-gray-500">No address details added yet</p>
-        )}
-
-        {localCoApp && (
-          <div className="mt-3">
-            {canEditAddress ? (
+        <div className="flex flex-col items-end gap-2 min-w-[140px]">
+          {statusBadge(status)}
+          {localCoApp &&
+            (canEditAddress ? (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  router.push(`/lead/co-applicant/address-details?coApplicantId=${localCoApp.id}`);
-                }}
-                className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                onClick={() => router.push(`/lead/co-applicant/address-details?coApplicantId=${localCoApp.id}`)}
+                className={tileButtonClass}
               >
                 Edit
               </Button>
             ) : (
-              <Badge className="bg-gray-200 text-gray-700 text-xs">Submitted</Badge>
-            )}
-          </div>
-        )}
+              <Badge className="rounded-full bg-white border border-gray-300 text-gray-600 text-[11px] px-3 py-1">
+                Submitted
+              </Badge>
+            ))}
+        </div>
       </div>
     );
   };
@@ -473,6 +473,11 @@ export default function CoApplicantInfoPage() {
     const successDocs = docs.filter((doc: any) => doc.status === 'Success');
     return successDocs.length > 0 ? `${successDocs.length} document(s) linked and verified` : 'Documents pending verification';
   };
+
+  const tileWrapperClass =
+    'flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4';
+  const tileButtonClass =
+    'rounded-full border border-[#1D5FE9] text-[#1D5FE9] px-4 h-9 text-sm font-semibold bg-white hover:bg-blue-50';
 
   const totalCompleted = useMemo(() => {
     return apiCoApplicants.filter(
@@ -570,7 +575,6 @@ export default function CoApplicantInfoPage() {
                       {renderBasicDetails(apiCoApp)}
                       {renderAddressDetails(apiCoApp)}
                       
-                      {/* Employment Details Section */}
                       {(() => {
                         const employmentStatus = localCoApp ? getEmploymentStatusForCoApplicant(localCoApp.id) : 'incomplete';
                         const step5 = localCoApp?.data?.step5;
@@ -580,88 +584,94 @@ export default function CoApplicantInfoPage() {
                           'self-employed-professional': 'Self Employed Professional',
                           'others': 'Others'
                         };
-                        
+
                         return (
-                          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-1">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <Briefcase className="w-5 h-5 text-blue-600" />
-                                <p className="text-sm font-semibold text-gray-900">Employment Details</p>
+                          <div className={tileWrapperClass}>
+                            <div className="flex items-start gap-3 flex-1 min-w-0">
+                              <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+                                <Briefcase className="w-5 h-5" />
                               </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-900">Employment Details</p>
+                                {employmentStatus === 'incomplete' ? (
+                                  <div className="space-y-0.5">
+                                    <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
+                                    <p className="text-xs text-gray-500">Upload or enter occupation and employment details manually</p>
+                                  </div>
+                                ) : step5 ? (
+                                  <div className="mt-2 space-y-1 text-xs text-gray-600">
+                                    <p>
+                                      <span className="font-medium">Occupation Type:</span> {occupationTypeLabels[step5.occupationType] || step5.occupationType}
+                                    </p>
+                                    {step5.occupationType === 'salaried' && (
+                                      <>
+                                        {step5.employerName && (
+                                          <p>
+                                            <span className="font-medium">Employer:</span> {step5.employerName}
+                                          </p>
+                                        )}
+                                        {step5.employmentStatus && (
+                                          <p>
+                                            <span className="font-medium">Status:</span> {step5.employmentStatus === 'present' ? 'Present' : 'Past'}
+                                          </p>
+                                        )}
+                                      </>
+                                    )}
+                                    {(step5.occupationType === 'self-employed-non-professional' || step5.occupationType === 'self-employed-professional') &&
+                                      (step5.orgNameSENP || step5.orgNameSEP) && (
+                                        <p>
+                                          <span className="font-medium">Organization:</span> {step5.orgNameSENP || step5.orgNameSEP}
+                                        </p>
+                                      )}
+                                    {step5.occupationType === 'others' && step5.natureOfOccupation && (
+                                      <p>
+                                        <span className="font-medium">Nature:</span> {step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-2 min-w-[140px]">
                               {employmentStatus !== 'incomplete' && (
                                 <Badge className={cn(
-                                  "text-xs",
-                                  employmentStatus === 'completed' ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
+                                  'rounded-full text-[11px] px-3 py-1 border',
+                                  employmentStatus === 'completed'
+                                    ? 'bg-white border-green-200 text-green-700'
+                                    : 'bg-white border-yellow-200 text-yellow-700'
                                 )}>
                                   {employmentStatus === 'completed' ? 'Completed' : 'In Progress'}
                                 </Badge>
                               )}
-                            </div>
-
-                            {employmentStatus === 'incomplete' ? (
-                              <p className="text-xs text-gray-500">No employment details added yet</p>
-                            ) : step5 ? (
-                              <div className="space-y-1 text-sm text-gray-700">
-                                <p>
-                                  <span className="font-medium">Occupation Type:</span> {occupationTypeLabels[step5.occupationType] || step5.occupationType}
-                                </p>
-                                {step5.occupationType === 'salaried' && (
-                                  <>
-                                    {step5.employerName && (
-                                      <p>
-                                        <span className="font-medium">Employer:</span> {step5.employerName}
-                                      </p>
-                                    )}
-                                    {step5.employmentStatus && (
-                                      <p>
-                                        <span className="font-medium">Status:</span> {step5.employmentStatus === 'present' ? 'Present' : 'Past'}
-                                      </p>
-                                    )}
-                                  </>
-                                )}
-                                {(step5.occupationType === 'self-employed-non-professional' || step5.occupationType === 'self-employed-professional') && (
-                                  <>
-                                    {(step5.orgNameSENP || step5.orgNameSEP) && (
-                                      <p>
-                                        <span className="font-medium">Organization:</span> {step5.orgNameSENP || step5.orgNameSEP}
-                                      </p>
-                                    )}
-                                  </>
-                                )}
-                                {step5.occupationType === 'others' && step5.natureOfOccupation && (
-                                  <p>
-                                    <span className="font-medium">Nature:</span> {step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}
-                                  </p>
-                                )}
-                              </div>
-                            ) : null}
-
-                            {localCoApp && (
-                              <div className="mt-3">
+                              {localCoApp && (
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => {
-                                    router.push(`/lead/co-applicant/employment-details?coApplicantId=${localCoApp.id}`);
-                                  }}
-                                  className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                                  onClick={() => router.push(`/lead/co-applicant/employment-details?coApplicantId=${localCoApp.id}`)}
+                                  className={tileButtonClass}
                                 >
                                   Edit
                                 </Button>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </div>
                         );
                       })()}
-                      
-                      {/* Account Aggregator Section */}
-                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                        <div className="flex items-center gap-2">
-                          <Database className="w-5 h-5 text-blue-600" />
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
-                            <p className="text-xs text-gray-500">Coming soon</p>
+
+                      <div className={tileWrapperClass}>
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+                            <Database className="w-5 h-5" />
                           </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
+                            <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
+                          </div>
+                        </div>
+                        <div>
+                          <Button variant="outline" size="sm" className={tileButtonClass} disabled>
+                            Initiate
+                          </Button>
                         </div>
                       </div>
                     </div>

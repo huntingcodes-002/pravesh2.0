@@ -652,6 +652,364 @@ export default function NewLeadInfoPage() {
     isCoApplicantStepCompleted &&
     !isDocumentsCompleted;
 
+  const tileWrapperClass =
+    'flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4';
+  const tileButtonClass =
+    'rounded-full border border-[#1D5FE9] text-[#1D5FE9] px-4 h-9 text-sm font-semibold bg-white hover:bg-blue-50';
+
+  const renderBasicDetailsTile = () => {
+    const hasDetails = step2Status !== 'incomplete' && (primaryParticipant || currentLead);
+
+    return (
+      <div className={tileWrapperClass}>
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+            <UserCheck className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900">Basic Details</p>
+            {hasDetails ? (
+              <div className="mt-2 space-y-1 text-xs text-gray-600">
+                {(() => {
+                  const fullName = primaryParticipant?.personal_info?.full_name;
+                  const nameValue = fullName?.value || (typeof fullName === 'string' ? fullName : null);
+                  const displayName =
+                    nameValue ||
+                    (currentLead?.customerFirstName || currentLead?.customerLastName
+                      ? [currentLead?.customerFirstName, currentLead?.customerLastName].filter(Boolean).join(' ')
+                      : null);
+                  const isVerified = fullName?.verified || currentLead?.formData?.step2?.autoFilledViaPAN;
+
+                  if (!displayName) return null;
+                  return (
+                    <p className="flex items-center gap-1">
+                      {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                      <span>
+                        <span className="font-medium">Full Name:</span> {displayName}
+                      </span>
+                    </p>
+                  );
+                })()}
+                {(() => {
+                  const dob = primaryParticipant?.personal_info?.date_of_birth;
+                  const dobValue = dob?.value || (typeof dob === 'string' ? dob : null) || currentLead?.dob;
+                  const isVerified = dob?.verified || currentLead?.formData?.step2?.autoFilledViaPAN;
+
+                  if (!dobValue) return null;
+                  const dobDate = new Date(dobValue);
+                  const formatted = isNaN(dobDate.getTime())
+                    ? dobValue
+                    : dobDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+                  return (
+                    <p className="flex items-center gap-1">
+                      {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                      <span>
+                        <span className="font-medium">Date of Birth:</span> {formatted}
+                      </span>
+                    </p>
+                  );
+                })()}
+                {(() => {
+                  const pan = primaryParticipant?.personal_info?.pan_number;
+                  const panValue = pan?.value || (typeof pan === 'string' ? pan : null) || currentLead?.panNumber;
+                  const isVerified = pan?.verified || currentLead?.formData?.step2?.autoFilledViaPAN;
+
+                  if (panValue) {
+                    return (
+                      <p className="flex items-center gap-1">
+                        {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                        <span>
+                          <span className="font-medium">PAN Number:</span> {panValue}
+                        </span>
+                      </p>
+                    );
+                  }
+
+                  const step2 = currentLead?.formData?.step2;
+                  if (step2?.hasPan === 'no' && step2?.alternateIdType && step2?.documentNumber) {
+                    return (
+                      <p>
+                        <span className="font-medium">{step2.alternateIdType}:</span> {step2.documentNumber}
+                      </p>
+                    );
+                  }
+                  return null;
+                })()}
+                {(() => {
+                  const mobile = primaryParticipant?.personal_info?.mobile_number;
+                  const mobileValue = mobile?.value || (typeof mobile === 'string' ? mobile : null) || currentLead?.customerMobile;
+                  const isVerified = mobile?.verified;
+
+                  if (!mobileValue) return null;
+                  return (
+                    <p className="flex items-center gap-1">
+                      {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                      <span>
+                        <span className="font-medium">Mobile:</span> {mobileValue}
+                      </span>
+                    </p>
+                  );
+                })()}
+                {(() => {
+                  const gender = primaryParticipant?.personal_info?.gender || currentLead?.gender;
+                  if (!gender) return null;
+                  return (
+                    <p>
+                      <span className="font-medium">Gender:</span> {gender.charAt(0).toUpperCase() + gender.slice(1)}
+                    </p>
+                  );
+                })()}
+                {(currentLead?.formData?.step2?.autoFilledViaPAN || primaryParticipant?.personal_info?.pan_number?.verified) && (
+                  <p className="text-[11px] text-gray-400">Auto-filled and verified via PAN & NSDL workflow.</p>
+                )}
+                <p className="text-[11px] text-gray-400">Submitted by RM</p>
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                <p className="text-sm font-semibold text-gray-900">No basic details added yet</p>
+                <p className="text-xs text-gray-500">Upload PAN to auto-fill Name, DOB & PAN Number</p>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          {step2Status !== 'incomplete' && currentLead?.formData?.step2?.autoFilledViaPAN && (
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
+              Verified via PAN
+            </Badge>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push('/lead/basic-details')}
+            className={tileButtonClass}
+          >
+            Edit
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderAddressDetailsTile = () => {
+    const hasDetails =
+      step3Status !== 'incomplete' &&
+      ((primaryParticipant?.addresses && primaryParticipant.addresses.length > 0) ||
+        (currentLead?.formData?.step3?.addresses && currentLead.formData.step3.addresses.length > 0));
+    const step3 = currentLead?.formData?.step3;
+    const isVerified = Boolean(
+      step3?.autoFilledViaAadhaar || step3?.addresses?.some((addr: any) => addr?.autoFilledViaAadhaar)
+    );
+
+    return (
+      <div className={tileWrapperClass}>
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+            <MapPin className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900">Address Details</p>
+            {hasDetails ? (
+              <div className="mt-2 space-y-1 text-xs text-gray-600">
+                {(() => {
+                  const apiAddresses = primaryParticipant?.addresses || [];
+                  const formAddresses = currentLead?.formData?.step3?.addresses || [];
+                  const addressesToShow =
+                    apiAddresses.length > 0
+                      ? apiAddresses.map((addr) => ({
+                          address_line_1: addr.address_line_1,
+                          city: addr.city,
+                          pincode: addr.pincode,
+                          is_primary: addr.is_primary,
+                        }))
+                      : formAddresses.map((addr: any) => ({
+                          address_line_1: addr.addressLine1,
+                          city: addr.city,
+                          pincode: addr.postalCode,
+                          is_primary: addr.isPrimary,
+                        }));
+
+                  if (addressesToShow.length === 0) return null;
+                  const primaryAddress = addressesToShow.find((addr: any) => addr.is_primary) || addressesToShow[0];
+
+                  return (
+                    <>
+                      {primaryAddress.address_line_1 && (
+                        <p className="flex items-center gap-1">
+                          {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                          <span>
+                            <span className="font-medium">Address:</span> {primaryAddress.address_line_1}
+                          </span>
+                        </p>
+                      )}
+                      {primaryAddress.city && (
+                        <p className="flex items-center gap-1">
+                          {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                          <span>
+                            <span className="font-medium">City:</span> {primaryAddress.city}
+                          </span>
+                        </p>
+                      )}
+                      {primaryAddress.pincode && (
+                        <p className="flex items-center gap-1">
+                          {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                          <span>
+                            <span className="font-medium">Pincode:</span> {primaryAddress.pincode}
+                          </span>
+                        </p>
+                      )}
+                      {isVerified && (
+                        <p className="text-[11px] text-gray-400">Auto-filled and verified via Aadhaar OCR workflow.</p>
+                      )}
+                      <p className="text-[11px] text-gray-400">Submitted by RM</p>
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                <p className="text-sm font-semibold text-gray-900">No address details added yet</p>
+                <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill Address & Pincode</p>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          {hasDetails && (
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
+              Verified via Aadhaar
+            </Badge>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push('/lead/address-details')}
+            className={tileButtonClass}
+          >
+            Edit
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderEmploymentDetailsTile = () => {
+    const employmentStatus = getEmploymentStatus();
+    const hasDetails = employmentStatus !== 'incomplete' && currentLead?.formData?.step5;
+
+    return (
+      <div className={tileWrapperClass}>
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+            <Briefcase className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900">Employment Details</p>
+            {hasDetails ? (
+              <div className="mt-2 space-y-1 text-xs text-gray-600">
+                {(() => {
+                  const step5 = currentLead?.formData?.step5;
+                  if (!step5) return null;
+                  const occupationTypeLabels: Record<string, string> = {
+                    salaried: 'Salaried',
+                    'self-employed-non-professional': 'Self Employed Non Professional',
+                    'self-employed-professional': 'Self Employed Professional',
+                    others: 'Others',
+                  };
+
+                  return (
+                    <>
+                      <p>
+                        <span className="font-medium">Occupation Type:</span>{' '}
+                        {occupationTypeLabels[step5.occupationType] || step5.occupationType}
+                      </p>
+                      {step5.occupationType === 'salaried' && (
+                        <>
+                          {step5.employerName && (
+                            <p>
+                              <span className="font-medium">Employer:</span> {step5.employerName}
+                            </p>
+                          )}
+                          {step5.employmentStatus && (
+                            <p>
+                              <span className="font-medium">Status:</span>{' '}
+                              {step5.employmentStatus === 'present' ? 'Present' : 'Past'}
+                            </p>
+                          )}
+                        </>
+                      )}
+                      {(step5.occupationType === 'self-employed-non-professional' ||
+                        step5.occupationType === 'self-employed-professional') &&
+                        (step5.orgNameSENP || step5.orgNameSEP) && (
+                          <p>
+                            <span className="font-medium">Organization:</span> {step5.orgNameSENP || step5.orgNameSEP}
+                          </p>
+                        )}
+                      {step5.occupationType === 'others' && step5.natureOfOccupation && (
+                        <p>
+                          <span className="font-medium">Nature:</span>{' '}
+                          {step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}
+                        </p>
+                      )}
+                      <p className="text-[11px] text-gray-400">Submitted by RM</p>
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
+                <p className="text-xs text-gray-500">Upload or enter occupation and employment details manually</p>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          {hasDetails && (
+            <Badge
+              className={cn(
+                'rounded-full text-[11px] px-3 py-1 border',
+                employmentStatus === 'completed'
+                  ? 'bg-white border-green-200 text-green-700'
+                  : 'bg-white border-yellow-200 text-yellow-700'
+              )}
+            >
+              {employmentStatus === 'completed' ? 'Completed' : 'In Progress'}
+            </Badge>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push('/lead/employment-details')}
+            className={tileButtonClass}
+          >
+            Edit
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderAccountAggregatorTile = () => (
+    <div className={tileWrapperClass}>
+      <div className="flex items-start gap-3 flex-1 min-w-0">
+        <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+          <Database className="w-5 h-5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
+          <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
+        </div>
+      </div>
+      <div>
+        <Button variant="outline" size="sm" className={tileButtonClass}>
+          Initiate
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
     <DashboardLayout 
       title="New Lead Information" 
@@ -765,340 +1123,11 @@ export default function NewLeadInfoPage() {
                 </div>
               </div>
 
-              {/* Basic Details Section */}
-              <div className="mb-4 pb-4 border-b border-gray-200">
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                      <UserCheck className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">Basic Details</p>
-                      {step2Status === 'incomplete' ? (
-                        <div className="space-y-0.5">
-                          <p className="text-sm font-semibold text-gray-900">No basic details added yet</p>
-                          <p className="text-xs text-gray-500">Upload PAN to auto-fill Name, DOB & PAN Number</p>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {step2Status !== 'incomplete' && currentLead?.formData?.step2?.autoFilledViaPAN && (
-                      <Badge className="bg-green-100 text-green-700 text-xs">Verified via PAN</Badge>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => router.push('/lead/basic-details')}
-                      className="border-blue-600 text-blue-600 hover:bg-blue-50"
-                    >
-                      Edit
-                    </Button>
-                  </div>
-                </div>
-                
-                {step2Status !== 'incomplete' && (primaryParticipant || currentLead) && (
-                  <div className="ml-[52px] space-y-1">
-                    {(() => {
-                      // Prefer API data, fallback to currentLead
-                      const fullName = primaryParticipant?.personal_info?.full_name;
-                      const nameValue = fullName?.value || (typeof fullName === 'string' ? fullName : null);
-                      const displayName = nameValue || 
-                        (currentLead?.customerFirstName || currentLead?.customerLastName 
-                          ? [currentLead.customerFirstName, currentLead.customerLastName].filter(Boolean).join(' ')
-                          : null);
-                      const isVerified = fullName?.verified || currentLead?.formData?.step2?.autoFilledViaPAN;
-                      
-                      if (displayName) {
-                        return (
-                          <p className="text-xs text-gray-600 flex items-center gap-1">
-                            {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                            <span><span className="font-medium">First Name:</span> {displayName}</span>
-                          </p>
-                        );
-                      }
-                      return null;
-                    })()}
-                    {(() => {
-                      const dob = primaryParticipant?.personal_info?.date_of_birth;
-                      const dobValue = dob?.value || (typeof dob === 'string' ? dob : null) || currentLead?.dob;
-                      const isVerified = dob?.verified || currentLead?.formData?.step2?.autoFilledViaPAN;
-                      
-                      if (dobValue) {
-                        const dobDate = new Date(dobValue);
-                        return (
-                          <p className="text-xs text-gray-600 flex items-center gap-1">
-                            {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                            <span><span className="font-medium">Date of Birth:</span> {dobDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
-                          </p>
-                        );
-                      }
-                      return null;
-                    })()}
-                    {(() => {
-                      const pan = primaryParticipant?.personal_info?.pan_number;
-                      const panValue = pan?.value || (typeof pan === 'string' ? pan : null) || currentLead?.panNumber;
-                      const isVerified = pan?.verified || currentLead?.formData?.step2?.autoFilledViaPAN;
-                      
-                      if (panValue) {
-                        return (
-                          <p className="text-xs text-gray-600 flex items-center gap-1">
-                            {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                            <span><span className="font-medium">PAN Number:</span> {panValue}</span>
-                          </p>
-                        );
-                      }
-                      
-                      // Fallback to currentLead formData
-                      const step2 = currentLead?.formData?.step2;
-                      if (step2?.hasPan === 'no' && step2?.alternateIdType && step2?.documentNumber) {
-                        return (
-                          <p className="text-xs text-gray-600">
-                            <span className="font-medium">{step2.alternateIdType}:</span> {step2.documentNumber}
-                          </p>
-                        );
-                      }
-                      return null;
-                    })()}
-                    {(() => {
-                      const mobile = primaryParticipant?.personal_info?.mobile_number;
-                      const mobileValue = mobile?.value || (typeof mobile === 'string' ? mobile : null) || currentLead?.customerMobile;
-                      const isVerified = mobile?.verified;
-                      
-                      if (mobileValue) {
-                        return (
-                          <p className="text-xs text-gray-600 flex items-center gap-1">
-                            {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                            <span><span className="font-medium">Mobile:</span> {mobileValue}</span>
-                          </p>
-                        );
-                      }
-                      return null;
-                    })()}
-                    {(() => {
-                      const gender = primaryParticipant?.personal_info?.gender || currentLead?.gender;
-                      if (gender) {
-                        return (
-                          <p className="text-xs text-gray-600">
-                            <span className="font-medium">Gender:</span> {gender.charAt(0).toUpperCase() + gender.slice(1)}
-                          </p>
-                        );
-                      }
-                      return null;
-                    })()}
-                    {(currentLead?.formData?.step2?.autoFilledViaPAN || primaryParticipant?.personal_info?.pan_number?.verified) && (
-                      <p className="text-xs text-gray-400 mt-2">Auto-filled and verified via PAN & NSDL workflow.</p>
-                    )}
-                    <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Address Details Section */}
-              <div className="mb-4">
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                      <MapPin className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">Address Details</p>
-                      {step3Status === 'incomplete' ? (
-                        <div className="space-y-0.5">
-                          <p className="text-sm font-semibold text-gray-900">No address details added yet</p>
-                          <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill Address & Pincode</p>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {step3Status !== 'incomplete' && (() => {
-                      const step3 = currentLead?.formData?.step3;
-                      if (step3?.autoFilledViaAadhaar || step3?.addresses?.some((addr: any) => addr?.autoFilledViaAadhaar)) {
-                        return <Badge className="bg-green-100 text-green-700 text-xs">Verified via Aadhaar</Badge>;
-                      }
-                      return null;
-                    })()}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => router.push('/lead/address-details')}
-                      className="border-blue-600 text-blue-600 hover:bg-blue-50"
-                    >
-                      Edit
-                    </Button>
-                  </div>
-                </div>
-                
-                {step3Status !== 'incomplete' && ((primaryParticipant?.addresses && primaryParticipant.addresses.length > 0) || (currentLead?.formData?.step3?.addresses && currentLead.formData.step3.addresses.length > 0)) && (
-                  <div className="ml-[52px] space-y-3">
-                    {(() => {
-                      // Prefer API data, fallback to currentLead
-                      const apiAddresses = primaryParticipant?.addresses || [];
-                      const formAddresses = currentLead?.formData?.step3?.addresses || [];
-                      const isVerified = currentLead?.formData?.step3?.autoFilledViaAadhaar || formAddresses.some((addr: any) => addr?.autoFilledViaAadhaar);
-                      
-                      // Use API addresses if available, otherwise use form addresses
-                      const addressesToShow = apiAddresses.length > 0 
-                        ? apiAddresses.map(addr => ({
-                            address_line_1: addr.address_line_1,
-                            address_line_2: addr.address_line_2,
-                            address_line_3: addr.address_line_3,
-                            landmark: addr.landmark,
-                            city: addr.city,
-                            state: addr.state,
-                            pincode: addr.pincode,
-                            address_type: addr.address_type,
-                            is_primary: addr.is_primary
-                          }))
-                        : formAddresses.map((addr: any) => ({
-                            address_line_1: addr.addressLine1,
-                            address_line_2: addr.addressLine2,
-                            address_line_3: addr.addressLine3,
-                            landmark: addr.landmark,
-                            city: addr.city,
-                            state: addr.state,
-                            pincode: addr.postalCode,
-                            address_type: addr.addressType,
-                            is_primary: addr.isPrimary
-                          }));
-                      
-                      if (addressesToShow.length === 0) return null;
-                      
-                      const primaryAddress = addressesToShow.find((addr: any) => addr.is_primary) || addressesToShow[0];
-                      
-                      return (
-                        <>
-                          {primaryAddress.address_line_1 && (
-                            <p className="text-xs text-gray-600 flex items-center gap-1">
-                              {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                              <span><span className="font-medium">Address:</span> {primaryAddress.address_line_1}</span>
-                            </p>
-                          )}
-                          {primaryAddress.city && (
-                            <p className="text-xs text-gray-600 flex items-center gap-1">
-                              {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                              <span><span className="font-medium">City:</span> {primaryAddress.city}</span>
-                            </p>
-                          )}
-                          {primaryAddress.pincode && (
-                            <p className="text-xs text-gray-600 flex items-center gap-1">
-                              {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                              <span><span className="font-medium">Pincode:</span> {primaryAddress.pincode}</span>
-                            </p>
-                          )}
-                          {isVerified && (
-                            <p className="text-xs text-gray-400 mt-2">Auto-filled and verified via Aadhaar OCR workflow.</p>
-                          )}
-                        </>
-                      );
-                    })()}
-                    <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Employment Details Section */}
-              <div className="mb-4 pb-4 border-b border-gray-200">
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                      <Briefcase className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">Employment Details</p>
-                      {getEmploymentStatus() === 'incomplete' ? (
-                        <div className="space-y-0.5">
-                          <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {getEmploymentStatus() !== 'incomplete' && (
-                      <Badge className={cn(
-                        "text-xs",
-                        getEmploymentStatus() === 'completed' ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-                      )}>
-                        {getEmploymentStatus() === 'completed' ? 'Completed' : 'In Progress'}
-                      </Badge>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => router.push('/lead/employment-details')}
-                      className="border-blue-600 text-blue-600 hover:bg-blue-50"
-                    >
-                      Edit
-                    </Button>
-                  </div>
-                </div>
-                
-                {getEmploymentStatus() !== 'incomplete' && currentLead?.formData?.step5 && (
-                  <div className="ml-[52px] space-y-1">
-                    {(() => {
-                      const step5 = currentLead.formData.step5;
-                      const occupationTypeLabels: Record<string, string> = {
-                        'salaried': 'Salaried',
-                        'self-employed-non-professional': 'Self Employed Non Professional',
-                        'self-employed-professional': 'Self Employed Professional',
-                        'others': 'Others'
-                      };
-                      
-                      return (
-                        <>
-                          <p className="text-xs text-gray-600">
-                            <span className="font-medium">Occupation Type:</span> {occupationTypeLabels[step5.occupationType] || step5.occupationType}
-                          </p>
-                          {step5.occupationType === 'salaried' && (
-                            <>
-                              {step5.employerName && (
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">Employer:</span> {step5.employerName}
-                                </p>
-                              )}
-                              {step5.employmentStatus && (
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">Status:</span> {step5.employmentStatus === 'present' ? 'Present' : 'Past'}
-                                </p>
-                              )}
-                            </>
-                          )}
-                          {(step5.occupationType === 'self-employed-non-professional' || step5.occupationType === 'self-employed-professional') && (
-                            <>
-                              {(step5.orgNameSENP || step5.orgNameSEP) && (
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">Organization:</span> {step5.orgNameSENP || step5.orgNameSEP}
-                                </p>
-                              )}
-                            </>
-                          )}
-                          {step5.occupationType === 'others' && step5.natureOfOccupation && (
-                            <p className="text-xs text-gray-600">
-                              <span className="font-medium">Nature:</span> {step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}
-                            </p>
-                          )}
-                        </>
-                      );
-                    })()}
-                    <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Account Aggregator Section */}
-              <div className="mb-4">
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                      <Database className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
-                      <p className="text-xs text-gray-500">Coming soon</p>
-                    </div>
-                  </div>
-                </div>
+              <div className="space-y-3">
+                {renderBasicDetailsTile()}
+                {renderAddressDetailsTile()}
+                {renderEmploymentDetailsTile()}
+                {renderAccountAggregatorTile()}
               </div>
 
               {/* Footer */}

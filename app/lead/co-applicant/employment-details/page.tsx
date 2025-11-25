@@ -596,10 +596,11 @@ function EmploymentDetailsContent() {
 
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
           <div className="flex gap-3 max-w-2xl mx-auto">
-            <Button onClick={handleExit} variant="outline" className="flex-1 h-12 rounded-lg">
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={!canProceed()} className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e]">
+            <Button
+              onClick={handleSave}
+              disabled={!canProceed()}
+              className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white"
+            >
               Save Information
             </Button>
           </div>
