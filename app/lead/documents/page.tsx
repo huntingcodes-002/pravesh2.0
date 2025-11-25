@@ -388,6 +388,7 @@ export default function Step8Page() {
     );
     const [selectedPropertyPhotoType, setSelectedPropertyPhotoType] = useState<PropertyPhotoType | ''>('');
     const [isUploadingPropertyPhoto, setIsUploadingPropertyPhoto] = useState(false);
+    const [pendingPropertyPhoto, setPendingPropertyPhoto] = useState<{ dataUrl: string; photoType: PropertyPhotoType } | null>(null);
     const [manualLocation, setManualLocation] = useState<{ latitude: number; longitude: number } | null>(null);
     const [isRequestingLocation, setIsRequestingLocation] = useState(false);
     const [showPropertyGallery, setShowPropertyGallery] = useState(false);
@@ -1470,7 +1471,11 @@ export default function Step8Page() {
                     });
                     return;
                 }
-                await uploadPropertyPhotoCapture(dataUrl, selectedPropertyPhotoType as PropertyPhotoType);
+                // Store the cropped image for preview and manual upload
+                setPendingPropertyPhoto({
+                    dataUrl: dataUrl,
+                    photoType: selectedPropertyPhotoType as PropertyPhotoType
+                });
                 return;
             }
 
@@ -1644,6 +1649,7 @@ export default function Step8Page() {
                 className: 'bg-green-50 border-green-200',
             });
             setSelectedPropertyPhotoType('');
+            setPendingPropertyPhoto(null);
         } else {
             toast({
                 title: 'Upload Failed',
@@ -2125,6 +2131,7 @@ export default function Step8Page() {
                                     setUploadError('');
                                     if (value !== 'PropertyPhotos') {
                                         setSelectedPropertyPhotoType('');
+                                        setPendingPropertyPhoto(null);
                                     }
                                 }}>
                                     <SelectTrigger id="documentType" className="h-12">
@@ -2148,11 +2155,13 @@ export default function Step8Page() {
                                             <CardContent className="p-4 space-y-5">
                                                 <div className="flex items-center justify-between">
                                                     <div>
-                                                        <h3 className="text-sm font-semibold text-gray-900">Property Photos</h3>
+                                                        <div className="flex items-center gap-2">
+                                                            <h3 className="text-sm font-semibold text-gray-900">Property Photos</h3>
+                                                            <span className="text-xs text-gray-600">
+                                                                ({propertyPhotoSuccessCount}/{PROPERTY_PHOTO_REQUIRED_COUNT} uploaded)
+                                                            </span>
+                                                        </div>
                                                         <p className="text-xs text-gray-500">Capture and upload all required views</p>
-                                                    </div>
-                                                    <div className="text-xs text-gray-600">
-                                                        {propertyPhotoSuccessCount}/{PROPERTY_PHOTO_REQUIRED_COUNT} uploaded
                                                     </div>
                                                 </div>
 
@@ -2162,6 +2171,10 @@ export default function Step8Page() {
                                                         value={selectedPropertyPhotoType}
                                                         onValueChange={(value) => {
                                                             setSelectedPropertyPhotoType(value as PropertyPhotoType);
+                                                            // Clear pending photo if switching to a different type
+                                                            if (pendingPropertyPhoto && pendingPropertyPhoto.photoType !== value) {
+                                                                setPendingPropertyPhoto(null);
+                                                            }
                                                         }}
                                                     >
                                                         <SelectTrigger className="h-12">
@@ -2193,6 +2206,7 @@ export default function Step8Page() {
                                                         const currentType = selectedPropertyPhotoType as PropertyPhotoType;
                                                         const activeOption = PROPERTY_PHOTO_OPTIONS.find(opt => opt.value === currentType);
                                                         const existingFile = propertyPhotoFiles[currentType];
+                                                        const hasPendingForThisType = pendingPropertyPhoto?.photoType === currentType;
 
                                                         return (
                                                             <div className="space-y-4 border rounded-lg p-4 bg-gray-50">
@@ -2200,7 +2214,7 @@ export default function Step8Page() {
                                                                     <div>
                                                                         <h4 className="text-sm font-semibold text-gray-800 mb-1">{activeOption?.label}</h4>
                                                                         <p className="text-xs text-gray-600">
-                                                                            Capture, crop, and confirm to upload automatically.
+                                                                            Capture, crop, and upload your image.
                                                                         </p>
                                                                     </div>
                                                                     {existingFile?.status === 'Success' && (
@@ -2226,18 +2240,36 @@ export default function Step8Page() {
                                                                                 Preview
                                                                             </Button>
                                                                         )}
+                                                                    </div>
+                                                                ) : hasPendingForThisType ? (
+                                                                    <div className="space-y-3">
+                                                                        <div className="border rounded-lg overflow-hidden">
+                                                                            <img
+                                                                                src={pendingPropertyPhoto.dataUrl}
+                                                                                alt="Cropped preview"
+                                                                                className="w-full h-48 object-cover"
+                                                                            />
+                                                                        </div>
                                                                         <Button
-                                                                            variant="outline"
-                                                                            onClick={() => handlePropertyPhotoReplace(currentType)}
+                                                                            className="w-full bg-blue-600 hover:bg-blue-700"
+                                                                            onClick={() => {
+                                                                                if (pendingPropertyPhoto) {
+                                                                                    uploadPropertyPhotoCapture(pendingPropertyPhoto.dataUrl, pendingPropertyPhoto.photoType);
+                                                                                }
+                                                                            }}
+                                                                            disabled={isUploadingPropertyPhoto}
                                                                         >
-                                                                            Replace
-                                                                        </Button>
-                                                                        <Button
-                                                                            variant="ghost"
-                                                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                                                            onClick={() => handlePropertyPhotoDelete(currentType)}
-                                                                        >
-                                                                            Delete
+                                                                            {isUploadingPropertyPhoto ? (
+                                                                                <>
+                                                                                    <Loader className="w-4 h-4 mr-2 animate-spin" />
+                                                                                    Uploading...
+                                                                                </>
+                                                                            ) : (
+                                                                                <>
+                                                                                    <Upload className="w-4 h-4 mr-2" />
+                                                                                    Upload Photo
+                                                                                </>
+                                                                            )}
                                                                         </Button>
                                                                     </div>
                                                                 ) : (
@@ -2260,9 +2292,6 @@ export default function Step8Page() {
                                                                                 </>
                                                                             )}
                                                                         </Button>
-                                                                        <p className="text-xs text-gray-600">
-                                                                            Upload starts automatically after you choose &ldquo;Use Cropped Image&rdquo;.
-                                                                        </p>
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -2302,21 +2331,6 @@ export default function Step8Page() {
                                                                                     Preview
                                                                                 </Button>
                                                                             )}
-                                                                            <Button
-                                                                                size="sm"
-                                                                                variant="outline"
-                                                                                onClick={() => handlePropertyPhotoReplace(option.value as PropertyPhotoType)}
-                                                                            >
-                                                                                Replace
-                                                                            </Button>
-                                                                            <Button
-                                                                                size="sm"
-                                                                                variant="ghost"
-                                                                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                                                                onClick={() => handlePropertyPhotoDelete(option.value as PropertyPhotoType)}
-                                                                            >
-                                                                                Delete
-                                                                            </Button>
                                                                         </div>
                                                                     </div>
                                                                 );

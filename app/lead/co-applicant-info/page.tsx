@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, UserCheck, MapPin, Trash2 } from 'lucide-react';
+import { Users, UserCheck, MapPin, Trash2, Briefcase, Database } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -216,6 +216,35 @@ export default function CoApplicantInfoPage() {
     if (hasAll) return 'completed';
     if (hasAny) return 'in-progress';
     return 'incomplete';
+  };
+
+  const getEmploymentStatusForCoApplicant = (coApplicantId: string): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    
+    const coApplicant = coApplicants.find((ca: any) => ca.id === coApplicantId);
+    if (!coApplicant) return 'incomplete';
+    
+    const step5 = coApplicant?.data?.step5;
+    if (!step5 || !step5.occupationType) return 'incomplete';
+    
+    // Check if required fields are filled based on occupation type
+    switch (step5.occupationType) {
+      case 'others':
+        if (step5.natureOfOccupation) return 'completed';
+        return 'in-progress';
+      case 'salaried':
+        const salariedValid = step5.employerName && step5.natureOfBusiness && step5.industry && step5.employmentStatus && step5.employedFrom;
+        if (step5.employmentStatus === 'past' && !step5.employedTo) return 'in-progress';
+        return salariedValid ? 'completed' : 'in-progress';
+      case 'self-employed-non-professional':
+        const senpValid = step5.orgNameSENP && step5.natureOfBusinessSENP && step5.industrySENP && step5.yearsInProfessionSENP && step5.monthsInProfessionSENP;
+        return senpValid ? 'completed' : 'in-progress';
+      case 'self-employed-professional':
+        const sepValid = step5.orgNameSEP && step5.natureOfProfession && step5.industrySEP && step5.registrationNumber && step5.yearsInProfessionSEP && step5.monthsInProfessionSEP;
+        return sepValid ? 'completed' : 'in-progress';
+      default:
+        return 'incomplete';
+    }
   };
 
   const handleAddCoApplicant = () => {
@@ -540,6 +569,101 @@ export default function CoApplicantInfoPage() {
                     <div className="grid gap-4">
                       {renderBasicDetails(apiCoApp)}
                       {renderAddressDetails(apiCoApp)}
+                      
+                      {/* Employment Details Section */}
+                      {(() => {
+                        const employmentStatus = localCoApp ? getEmploymentStatusForCoApplicant(localCoApp.id) : 'incomplete';
+                        const step5 = localCoApp?.data?.step5;
+                        const occupationTypeLabels: Record<string, string> = {
+                          'salaried': 'Salaried',
+                          'self-employed-non-professional': 'Self Employed Non Professional',
+                          'self-employed-professional': 'Self Employed Professional',
+                          'others': 'Others'
+                        };
+                        
+                        return (
+                          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-1">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <Briefcase className="w-5 h-5 text-blue-600" />
+                                <p className="text-sm font-semibold text-gray-900">Employment Details</p>
+                              </div>
+                              {employmentStatus !== 'incomplete' && (
+                                <Badge className={cn(
+                                  "text-xs",
+                                  employmentStatus === 'completed' ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
+                                )}>
+                                  {employmentStatus === 'completed' ? 'Completed' : 'In Progress'}
+                                </Badge>
+                              )}
+                            </div>
+
+                            {employmentStatus === 'incomplete' ? (
+                              <p className="text-xs text-gray-500">No employment details added yet</p>
+                            ) : step5 ? (
+                              <div className="space-y-1 text-sm text-gray-700">
+                                <p>
+                                  <span className="font-medium">Occupation Type:</span> {occupationTypeLabels[step5.occupationType] || step5.occupationType}
+                                </p>
+                                {step5.occupationType === 'salaried' && (
+                                  <>
+                                    {step5.employerName && (
+                                      <p>
+                                        <span className="font-medium">Employer:</span> {step5.employerName}
+                                      </p>
+                                    )}
+                                    {step5.employmentStatus && (
+                                      <p>
+                                        <span className="font-medium">Status:</span> {step5.employmentStatus === 'present' ? 'Present' : 'Past'}
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+                                {(step5.occupationType === 'self-employed-non-professional' || step5.occupationType === 'self-employed-professional') && (
+                                  <>
+                                    {(step5.orgNameSENP || step5.orgNameSEP) && (
+                                      <p>
+                                        <span className="font-medium">Organization:</span> {step5.orgNameSENP || step5.orgNameSEP}
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+                                {step5.occupationType === 'others' && step5.natureOfOccupation && (
+                                  <p>
+                                    <span className="font-medium">Nature:</span> {step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}
+                                  </p>
+                                )}
+                              </div>
+                            ) : null}
+
+                            {localCoApp && (
+                              <div className="mt-3">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    router.push(`/lead/co-applicant/employment-details?coApplicantId=${localCoApp.id}`);
+                                  }}
+                                  className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                                >
+                                  Edit
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                      
+                      {/* Account Aggregator Section */}
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                        <div className="flex items-center gap-2">
+                          <Database className="w-5 h-5 text-blue-600" />
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
+                            <p className="text-xs text-gray-500">Coming soon</p>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="pt-2 border-t border-gray-100 text-xs text-gray-400">

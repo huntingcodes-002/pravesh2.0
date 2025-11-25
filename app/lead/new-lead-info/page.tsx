@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2 } from 'lucide-react';
+import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -434,6 +434,32 @@ export default function NewLeadInfoPage() {
     if (hasRequiredFields) return 'completed';
     if (step7.loanAmount > 0 || step7.loanPurpose || step7.sourcingChannel || step7.interestRate || step7.tenure) return 'in-progress';
     return 'incomplete';
+  };
+
+  const getEmploymentStatus = (): SectionStatus => {
+    if (!currentLead) return 'incomplete';
+    
+    const step5 = currentLead.formData?.step5;
+    if (!step5 || !step5.occupationType) return 'incomplete';
+    
+    // Check if required fields are filled based on occupation type
+    switch (step5.occupationType) {
+      case 'others':
+        if (step5.natureOfOccupation) return 'completed';
+        return 'in-progress';
+      case 'salaried':
+        const salariedValid = step5.employerName && step5.natureOfBusiness && step5.industry && step5.employmentStatus && step5.employedFrom;
+        if (step5.employmentStatus === 'past' && !step5.employedTo) return 'in-progress';
+        return salariedValid ? 'completed' : 'in-progress';
+      case 'self-employed-non-professional':
+        const senpValid = step5.orgNameSENP && step5.natureOfBusinessSENP && step5.industrySENP && step5.yearsInProfessionSENP && step5.monthsInProfessionSENP;
+        return senpValid ? 'completed' : 'in-progress';
+      case 'self-employed-professional':
+        const sepValid = step5.orgNameSEP && step5.natureOfProfession && step5.industrySEP && step5.registrationNumber && step5.yearsInProfessionSEP && step5.monthsInProfessionSEP;
+        return sepValid ? 'completed' : 'in-progress';
+      default:
+        return 'incomplete';
+    }
   };
 
   const handleSectionClick = (route: string) => {
@@ -942,6 +968,109 @@ export default function NewLeadInfoPage() {
                     <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
                   </div>
                 )}
+              </div>
+
+              {/* Employment Details Section */}
+              <div className="mb-4 pb-4 border-b border-gray-200">
+                <div className="flex items-start justify-between gap-4 mb-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <Briefcase className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">Employment Details</p>
+                      {getEmploymentStatus() === 'incomplete' ? (
+                        <div className="space-y-0.5">
+                          <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {getEmploymentStatus() !== 'incomplete' && (
+                      <Badge className={cn(
+                        "text-xs",
+                        getEmploymentStatus() === 'completed' ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
+                      )}>
+                        {getEmploymentStatus() === 'completed' ? 'Completed' : 'In Progress'}
+                      </Badge>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push('/lead/employment-details')}
+                      className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                </div>
+                
+                {getEmploymentStatus() !== 'incomplete' && currentLead?.formData?.step5 && (
+                  <div className="ml-[52px] space-y-1">
+                    {(() => {
+                      const step5 = currentLead.formData.step5;
+                      const occupationTypeLabels: Record<string, string> = {
+                        'salaried': 'Salaried',
+                        'self-employed-non-professional': 'Self Employed Non Professional',
+                        'self-employed-professional': 'Self Employed Professional',
+                        'others': 'Others'
+                      };
+                      
+                      return (
+                        <>
+                          <p className="text-xs text-gray-600">
+                            <span className="font-medium">Occupation Type:</span> {occupationTypeLabels[step5.occupationType] || step5.occupationType}
+                          </p>
+                          {step5.occupationType === 'salaried' && (
+                            <>
+                              {step5.employerName && (
+                                <p className="text-xs text-gray-600">
+                                  <span className="font-medium">Employer:</span> {step5.employerName}
+                                </p>
+                              )}
+                              {step5.employmentStatus && (
+                                <p className="text-xs text-gray-600">
+                                  <span className="font-medium">Status:</span> {step5.employmentStatus === 'present' ? 'Present' : 'Past'}
+                                </p>
+                              )}
+                            </>
+                          )}
+                          {(step5.occupationType === 'self-employed-non-professional' || step5.occupationType === 'self-employed-professional') && (
+                            <>
+                              {(step5.orgNameSENP || step5.orgNameSEP) && (
+                                <p className="text-xs text-gray-600">
+                                  <span className="font-medium">Organization:</span> {step5.orgNameSENP || step5.orgNameSEP}
+                                </p>
+                              )}
+                            </>
+                          )}
+                          {step5.occupationType === 'others' && step5.natureOfOccupation && (
+                            <p className="text-xs text-gray-600">
+                              <span className="font-medium">Nature:</span> {step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
+                    <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Account Aggregator Section */}
+              <div className="mb-4">
+                <div className="flex items-start justify-between gap-4 mb-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <Database className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
+                      <p className="text-xs text-gray-500">Coming soon</p>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Footer */}
