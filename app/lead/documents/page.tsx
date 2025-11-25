@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Upload, CheckCircle, XCircle, Loader, Trash2, RotateCcw, Camera, AlertTriangle, User, Users, Home, ChevronDown, X, Image as ImageIcon, RefreshCw, Eye, MapPin } from 'lucide-react';
 import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-image-crop';
@@ -375,7 +375,7 @@ const parseDocumentValue = (docValue: string) => {
     return { baseValue, coApplicantId };
 };
 
-export default function Step8Page() {
+function Step8Content() {
     const { currentLead, updateLead, updateCoApplicant } = useLead();
     const router = useRouter();
     const { toast } = useToast();
@@ -2845,5 +2845,13 @@ export default function Step8Page() {
                 </DialogContent>
             </Dialog>
         </DashboardLayout>
+    );
+}
+
+export default function Step8Page() {
+    return (
+        <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader className="w-8 h-8 animate-spin text-blue-600" /></div>}>
+            <Step8Content />
+        </Suspense>
     );
 }
