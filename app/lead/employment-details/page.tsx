@@ -161,9 +161,9 @@ export default function EmploymentDetailsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="housewife">Housewife</SelectItem>
-                      <SelectItem value="others">Others</SelectItem>
                       <SelectItem value="retired">Retired</SelectItem>
                       <SelectItem value="student">Student</SelectItem>
+                      <SelectItem value="others">Others</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

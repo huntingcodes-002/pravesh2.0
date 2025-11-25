@@ -501,12 +501,12 @@ export default function NewLeadInfoPage() {
   };
 
   const getStatusBadge = (status: SectionStatus) => {
-    const baseClasses = "rounded-full border text-[11px] font-medium px-3 py-1";
+    const baseClasses = "rounded-full border text-xs font-medium px-3 py-1";
     switch (status) {
       case 'completed':
-        return <Badge className={cn(baseClasses, "bg-green-50 border-green-200 text-green-700")}>Completed</Badge>;
+        return <Badge className={cn(baseClasses, "bg-green-100 border-green-200 text-green-700")}>Completed</Badge>;
       case 'in-progress':
-        return <Badge className={cn(baseClasses, "bg-yellow-50 border-yellow-200 text-yellow-700")}>In Progress</Badge>;
+        return <Badge className={cn(baseClasses, "bg-yellow-100 border-yellow-200 text-yellow-700")}>In Progress</Badge>;
       default:
         return <Badge className={cn(baseClasses, "bg-gray-50 border-gray-200 text-gray-600")}>No Data</Badge>;
     }
@@ -520,12 +520,29 @@ export default function NewLeadInfoPage() {
 
     switch (paymentStatus) {
       case 'Paid':
-        return <Badge className={cn(baseClasses, "bg-green-100 border-green-200 text-green-700")}>Paid</Badge>;
+        return <Badge className={cn(baseClasses, "bg-green-100 border-green-200 text-green-700")}>Completed</Badge>;
       case 'Failed':
         return <Badge className={cn(baseClasses, "bg-red-100 border-red-200 text-red-600")}>Failed</Badge>;
       default:
         return <Badge className={cn(baseClasses, "bg-yellow-100 border-yellow-200 text-yellow-700")}>Pending</Badge>;
     }
+  };
+
+  const getDocumentDisplayName = (docType: string): string => {
+    const mapping: Record<string, string> = {
+      'PAN': 'Pan',
+      'Adhaar': 'Aadhaar',
+      'Passport': 'Passport',
+      'VoterID': 'Voter ID',
+      'DrivingLicense': 'Driving License',
+      'CollateralPapers': 'Sale Deed',
+      'PropertyPhotos': 'Property Photos',
+    };
+    
+    // Handle co-applicant documents (e.g., "PAN_123" -> "Pan")
+    const baseType = docType.split('_')[0];
+    const displayName = mapping[baseType] || baseType;
+    return `Document ${displayName} Uploaded`;
   };
 
   // Helper function to map loan purpose backend values to display labels
@@ -574,6 +591,9 @@ export default function NewLeadInfoPage() {
     if (hasCoApplicants) {
       steps.push({ id: 'coapplicant', label: 'Co-Applicant', status: coApplicantStatus });
     }
+    // Add 2 more steps to match the new total (x/7 or x/8)
+    steps.push({ id: 'employment', label: 'Employment', status: getEmploymentStatus() });
+    steps.push({ id: 'account-aggregator', label: 'Account Aggregator', status: 'incomplete' });
     return steps;
   }, [currentLead, applicantStatus, paymentStepStatus, documentsStepStatus, collateralStatus, loanStatus, coApplicantStatus, hasCoApplicants]);
 
@@ -650,7 +670,7 @@ export default function NewLeadInfoPage() {
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-700">Progress</span>
               <span className="text-sm font-semibold text-blue-600">
-                {completedStepsCount}/{totalSteps} Steps Completed
+                {completedStepsCount}/{totalSteps} Modules Started
               </span>
             </div>
             <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -675,59 +695,103 @@ export default function NewLeadInfoPage() {
           </div>
 
           {/* Payment Details Card */}
-          <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
+          <Card className={cn(
+            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+            isPaymentCompleted ? "border-l-green-600" : "border-l-blue-600"
+          )}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Payment Details</h3>
                 {renderPaymentStatusBadge()}
               </div>
               
-              {detailedInfo?.payment_result && (
-                <div className="mb-4 space-y-2 p-3 bg-gray-50 rounded-lg">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-medium text-gray-600">Amount:</span>
-                    <span className="text-sm font-semibold text-gray-900">₹{detailedInfo.payment_result.amount.toLocaleString('en-IN')}</span>
+              {isPaymentCompleted ? (
+                <div className="mb-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                      <CheckCircle className="w-6 h-6 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Payment received successfully</p>
+                      <p className="text-xs text-gray-500">Login fee has been confirmed and recorded.</p>
+                    </div>
                   </div>
-                  {detailedInfo.payment_result.order_id && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-medium text-gray-600">Order ID:</span>
-                      <span className="text-xs text-gray-700 font-mono">{detailedInfo.payment_result.order_id}</span>
+                  {detailedInfo?.payment_result && (
+                    <div className="ml-[60px] space-y-2 p-3 bg-gray-50 rounded-lg">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-medium text-gray-600">Amount:</span>
+                        <span className="text-sm font-semibold text-gray-900">₹{detailedInfo.payment_result.amount.toLocaleString('en-IN')}</span>
+                      </div>
+                      {detailedInfo.payment_result.order_id && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-medium text-gray-600">Order ID:</span>
+                          <span className="text-xs text-gray-700 font-mono">{detailedInfo.payment_result.order_id}</span>
+                        </div>
+                      )}
+                      {detailedInfo.payment_result.paid_on && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-medium text-gray-600">Paid On:</span>
+                          <span className="text-xs text-gray-700">
+                            {new Date(detailedInfo.payment_result.paid_on).toLocaleString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                        </div>
+                      )}
+                      {detailedInfo.payment_result.masked_customer_mobile && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-medium text-gray-600">Mobile:</span>
+                          <span className="text-xs text-gray-700">{detailedInfo.payment_result.masked_customer_mobile}</span>
+                        </div>
+                      )}
                     </div>
                   )}
-                  {detailedInfo.payment_result.paid_on && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-medium text-gray-600">Paid On:</span>
-                      <span className="text-xs text-gray-700">
-                        {new Date(detailedInfo.payment_result.paid_on).toLocaleString('en-IN', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
-                    </div>
-                  )}
-                  {detailedInfo.payment_result.masked_customer_mobile && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-medium text-gray-600">Mobile:</span>
-                      <span className="text-xs text-gray-700">{detailedInfo.payment_result.masked_customer_mobile}</span>
-                    </div>
-                  )}
+                  <div className="ml-[60px]">
+                    <Button
+                      onClick={handleGeneratePaymentLink}
+                      variant="outline"
+                      className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                    >
+                      View Details
+                    </Button>
+                  </div>
                 </div>
+              ) : (
+                <>
+                  {detailedInfo?.payment_result && (
+                    <div className="mb-4 space-y-2 p-3 bg-gray-50 rounded-lg">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-medium text-gray-600">Amount:</span>
+                        <span className="text-sm font-semibold text-gray-900">₹{detailedInfo.payment_result.amount.toLocaleString('en-IN')}</span>
+                      </div>
+                      {detailedInfo.payment_result.order_id && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-medium text-gray-600">Order ID:</span>
+                          <span className="text-xs text-gray-700 font-mono">{detailedInfo.payment_result.order_id}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <Button
+                    onClick={handleGeneratePaymentLink}
+                    className="w-full h-12 rounded-xl bg-[#0B63F6] hover:bg-[#0954d4] text-white font-semibold transition-colors"
+                  >
+                    Generate Payment Link
+                  </Button>
+                </>
               )}
-              
-              <Button
-                onClick={handleGeneratePaymentLink}
-                className="w-full h-12 rounded-xl bg-[#0B63F6] hover:bg-[#0954d4] text-white font-semibold transition-colors"
-              >
-                {paymentStatus === 'Paid' ? 'View Payment Details' : 'Generate Payment Link'}
-              </Button>
             </CardContent>
           </Card>
 
           {/* Applicant Details Card */}
-          <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
+          <Card className={cn(
+            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+            applicantStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+          )}>
             <CardContent className="p-5">
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
@@ -779,12 +843,13 @@ export default function NewLeadInfoPage() {
                         (currentLead?.customerFirstName || currentLead?.customerLastName 
                           ? [currentLead.customerFirstName, currentLead.customerLastName].filter(Boolean).join(' ')
                           : null);
+                      const isVerified = fullName?.verified || currentLead?.formData?.step2?.autoFilledViaPAN;
                       
                       if (displayName) {
                         return (
-                          <p className="text-xs text-gray-600">
-                            <span className="font-medium">Full Name:</span> {displayName}
-                            {fullName?.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                          <p className="text-xs text-gray-600 flex items-center gap-1">
+                            {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                            <span><span className="font-medium">First Name:</span> {displayName}</span>
                           </p>
                         );
                       }
@@ -793,13 +858,14 @@ export default function NewLeadInfoPage() {
                     {(() => {
                       const dob = primaryParticipant?.personal_info?.date_of_birth;
                       const dobValue = dob?.value || (typeof dob === 'string' ? dob : null) || currentLead?.dob;
+                      const isVerified = dob?.verified || currentLead?.formData?.step2?.autoFilledViaPAN;
                       
                       if (dobValue) {
                         const dobDate = new Date(dobValue);
                         return (
-                          <p className="text-xs text-gray-600">
-                            <span className="font-medium">Date of Birth:</span> {dobDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                            {dob?.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                          <p className="text-xs text-gray-600 flex items-center gap-1">
+                            {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                            <span><span className="font-medium">Date of Birth:</span> {dobDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
                           </p>
                         );
                       }
@@ -808,12 +874,13 @@ export default function NewLeadInfoPage() {
                     {(() => {
                       const pan = primaryParticipant?.personal_info?.pan_number;
                       const panValue = pan?.value || (typeof pan === 'string' ? pan : null) || currentLead?.panNumber;
+                      const isVerified = pan?.verified || currentLead?.formData?.step2?.autoFilledViaPAN;
                       
                       if (panValue) {
                         return (
-                          <p className="text-xs text-gray-600">
-                            <span className="font-medium">PAN Number:</span> {panValue}
-                            {pan?.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                          <p className="text-xs text-gray-600 flex items-center gap-1">
+                            {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                            <span><span className="font-medium">PAN Number:</span> {panValue}</span>
                           </p>
                         );
                       }
@@ -832,12 +899,13 @@ export default function NewLeadInfoPage() {
                     {(() => {
                       const mobile = primaryParticipant?.personal_info?.mobile_number;
                       const mobileValue = mobile?.value || (typeof mobile === 'string' ? mobile : null) || currentLead?.customerMobile;
+                      const isVerified = mobile?.verified;
                       
                       if (mobileValue) {
                         return (
-                          <p className="text-xs text-gray-600">
-                            <span className="font-medium">Mobile:</span> {mobileValue}
-                            {mobile?.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
+                          <p className="text-xs text-gray-600 flex items-center gap-1">
+                            {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                            <span><span className="font-medium">Mobile:</span> {mobileValue}</span>
                           </p>
                         );
                       }
@@ -854,6 +922,9 @@ export default function NewLeadInfoPage() {
                       }
                       return null;
                     })()}
+                    {(currentLead?.formData?.step2?.autoFilledViaPAN || primaryParticipant?.personal_info?.pan_number?.verified) && (
+                      <p className="text-xs text-gray-400 mt-2">Auto-filled and verified via PAN & NSDL workflow.</p>
+                    )}
                     <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
                   </div>
                 )}
@@ -901,6 +972,7 @@ export default function NewLeadInfoPage() {
                       // Prefer API data, fallback to currentLead
                       const apiAddresses = primaryParticipant?.addresses || [];
                       const formAddresses = currentLead?.formData?.step3?.addresses || [];
+                      const isVerified = currentLead?.formData?.step3?.autoFilledViaAadhaar || formAddresses.some((addr: any) => addr?.autoFilledViaAadhaar);
                       
                       // Use API addresses if available, otherwise use form addresses
                       const addressesToShow = apiAddresses.length > 0 
@@ -929,41 +1001,33 @@ export default function NewLeadInfoPage() {
                       
                       if (addressesToShow.length === 0) return null;
                       
-                      return addressesToShow.map((address: any, idx: number) => (
-                        <div key={idx} className={idx > 0 ? "pt-2 border-t border-gray-100" : ""}>
-                          {addressesToShow.length > 1 && (
-                            <p className="text-xs font-medium text-gray-700 mb-1">
-                              {address.address_type ? address.address_type.charAt(0).toUpperCase() + address.address_type.slice(1) : 'Address'} 
-                              {address.is_primary && <span className="ml-2 text-blue-600 text-[10px]">(Primary)</span>}
+                      const primaryAddress = addressesToShow.find((addr: any) => addr.is_primary) || addressesToShow[0];
+                      
+                      return (
+                        <>
+                          {primaryAddress.address_line_1 && (
+                            <p className="text-xs text-gray-600 flex items-center gap-1">
+                              {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                              <span><span className="font-medium">Address:</span> {primaryAddress.address_line_1}</span>
                             </p>
                           )}
-                          {address.address_line_1 && (
-                            <p className="text-xs text-gray-600">
-                              <span className="font-medium">Address Line 1:</span> {address.address_line_1}
+                          {primaryAddress.city && (
+                            <p className="text-xs text-gray-600 flex items-center gap-1">
+                              {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                              <span><span className="font-medium">City:</span> {primaryAddress.city}</span>
                             </p>
                           )}
-                          {address.address_line_2 && (
-                            <p className="text-xs text-gray-600">
-                              <span className="font-medium">Address Line 2:</span> {address.address_line_2}
+                          {primaryAddress.pincode && (
+                            <p className="text-xs text-gray-600 flex items-center gap-1">
+                              {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                              <span><span className="font-medium">Pincode:</span> {primaryAddress.pincode}</span>
                             </p>
                           )}
-                          {address.address_line_3 && (
-                            <p className="text-xs text-gray-600">
-                              <span className="font-medium">Address Line 3:</span> {address.address_line_3}
-                            </p>
+                          {isVerified && (
+                            <p className="text-xs text-gray-400 mt-2">Auto-filled and verified via Aadhaar OCR workflow.</p>
                           )}
-                          {address.landmark && (
-                            <p className="text-xs text-gray-600">
-                              <span className="font-medium">Landmark:</span> {address.landmark}
-                            </p>
-                          )}
-                          {(address.city || address.state || address.pincode) && (
-                            <p className="text-xs text-gray-600">
-                              <span className="font-medium">Location:</span> {[address.city, address.state, address.pincode].filter(Boolean).join(', ')}
-                            </p>
-                          )}
-                        </div>
-                      ));
+                        </>
+                      );
                     })()}
                     <p className="text-xs text-gray-400 mt-2">Submitted by RM</p>
                   </div>
@@ -1084,7 +1148,10 @@ export default function NewLeadInfoPage() {
           </Card>
 
           {/* Co-Applicants Card */}
-          <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
+          <Card className={cn(
+            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+            hasCoApplicants && coApplicantStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+          )}>
             <CardContent className="p-5 space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900">Co-Applicant(s)</h3>
@@ -1239,7 +1306,10 @@ export default function NewLeadInfoPage() {
           </Card>
 
           {/* Collateral Card */}
-          <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
+          <Card className={cn(
+            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+            collateralStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+          )}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Collateral Details</h3>
@@ -1341,7 +1411,10 @@ export default function NewLeadInfoPage() {
           </Card>
 
           {/* Loan Requirement Card */}
-          <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
+          <Card className={cn(
+            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+            loanStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+          )}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Loan Requirement</h3>
@@ -1428,14 +1501,17 @@ export default function NewLeadInfoPage() {
           </Card>
 
           {/* Documents Added Card */}
-          <Card className="border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600">
+          <Card className={cn(
+            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+            documentsStepStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+          )}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Documents Added</h3>
                 <div className="flex items-center gap-2">
                   <Badge className={cn(
-                    uploadedDocuments.length === 0 ? "bg-gray-100 text-gray-700" : "bg-green-100 text-green-700",
-                    "text-xs"
+                    "rounded-full border text-xs font-medium px-3 py-1",
+                    uploadedDocuments.length === 0 ? "bg-gray-50 border-gray-200 text-gray-600" : "bg-green-100 border-green-200 text-green-700"
                   )}>
                     {uploadedDocuments.length === 0 ? 'No Files' : `${uploadedDocuments.length} File(s)`}
                   </Badge>
@@ -1449,39 +1525,22 @@ export default function NewLeadInfoPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {uploadedDocuments.map((file: any) => (
-                    <div
-                      key={file.id}
-                      className="flex items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg"
-                    >
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <div className="flex-shrink-0">
-                          {file.fileType === 'pdf' ? (
-                            <FileText className="w-5 h-5 text-red-600" />
-                          ) : (
-                            <ImageIcon className="w-5 h-5 text-blue-600" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                          <p className="text-sm font-medium text-gray-900 truncate">
-                            {file.frontName && file.backName
-                              ? `${file.frontName} / ${file.backName}`
-                              : file.name}
-                          </p>
-                          <p className="text-xs text-gray-500 truncate">{file.type}</p>
-                          <p className="text-xs text-gray-400 truncate">{getDocumentOwnerLabel(file)}</p>
-                        </div>
-                      </div>
-                      <Badge
-                        className={cn(
-                          'text-xs font-semibold capitalize border',
-                          getDocumentStatusClasses(file.status)
-                        )}
+                  {(() => {
+                    // Get unique document types that have been successfully uploaded
+                    const successFiles = uploadedDocuments.filter((f: any) => f.status === 'Success');
+                    const uniqueDocTypes = Array.from(new Set(successFiles.map((f: any) => f.type))) as string[];
+                    
+                    return uniqueDocTypes.map((docType: string) => (
+                      <div
+                        key={docType}
+                        className="p-3 border border-gray-200 rounded-lg bg-white"
                       >
-                        {file.status || 'Processing'}
-                      </Badge>
-                    </div>
-                  ))}
+                        <p className="text-sm font-medium text-gray-900">
+                          {getDocumentDisplayName(docType)}
+                        </p>
+                      </div>
+                    ));
+                  })()}
                 </div>
               )}
             </CardContent>
