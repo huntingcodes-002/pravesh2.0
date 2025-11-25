@@ -277,6 +277,8 @@ export default function CoApplicantInfoPage() {
     const status = getBasicDetailsStatusFromApi(personalInfo);
 
     const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
+    const localStep2 = localCoApp?.data?.step2;
+    const showPanVerifiedPill = Boolean(localStep2?.autoFilledViaPAN || personalInfo?.pan_number?.verified);
     const canEditBasic = status !== 'completed' && Boolean(localCoApp);
 
     return (
@@ -286,7 +288,6 @@ export default function CoApplicantInfoPage() {
             <UserCheck className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">Basic Details</p>
             {personalInfo ? (
               <div className="mt-2 space-y-1 text-xs text-gray-600">
                 {fullName && (
@@ -356,6 +357,11 @@ export default function CoApplicantInfoPage() {
         </div>
         <div className="flex flex-col items-end gap-2 min-w-[140px]">
           {statusBadge(status)}
+          {showPanVerifiedPill && (
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
+              Verified via PAN
+            </Badge>
+          )}
           {localCoApp &&
             (canEditBasic ? (
               <Button
@@ -382,6 +388,10 @@ export default function CoApplicantInfoPage() {
     const status = getAddressStatusFromApi(addresses);
 
     const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
+    const localStep3 = localCoApp?.data?.step3;
+    const showAadhaarVerifiedPill = Boolean(
+      localStep3?.autoFilledViaAadhaar || localStep3?.addresses?.some((addr: any) => addr?.autoFilledViaAadhaar)
+    );
     const canEditAddress = status !== 'completed' && Boolean(localCoApp);
 
     return (
@@ -391,7 +401,6 @@ export default function CoApplicantInfoPage() {
             <MapPin className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">Address Details</p>
             {primaryAddress ? (
               <div className="mt-2 space-y-1 text-xs text-gray-600">
                 {primaryAddress.address_line_1 && (
@@ -445,6 +454,11 @@ export default function CoApplicantInfoPage() {
         </div>
         <div className="flex flex-col items-end gap-2 min-w-[140px]">
           {statusBadge(status)}
+          {showAadhaarVerifiedPill && (
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
+              Verified via Aadhaar
+            </Badge>
+          )}
           {localCoApp &&
             (canEditAddress ? (
               <Button
@@ -475,9 +489,9 @@ export default function CoApplicantInfoPage() {
   };
 
   const tileWrapperClass =
-    'flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4';
+    'flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-[#F7F8FB] px-4 py-4';
   const tileButtonClass =
-    'rounded-full border border-[#1D5FE9] text-[#1D5FE9] px-4 h-9 text-sm font-semibold bg-white hover:bg-blue-50';
+    'rounded-lg border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 h-10 text-sm font-semibold bg-white transition';
 
   const totalCompleted = useMemo(() => {
     return apiCoApplicants.filter(
@@ -592,7 +606,6 @@ export default function CoApplicantInfoPage() {
                                 <Briefcase className="w-5 h-5" />
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-gray-900">Employment Details</p>
                                 {employmentStatus === 'incomplete' ? (
                                   <div className="space-y-0.5">
                                     <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
@@ -664,11 +677,11 @@ export default function CoApplicantInfoPage() {
                             <Database className="w-5 h-5" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
+                            <p className="text-sm font-semibold text-gray-900">No account aggregator request initiated</p>
                             <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
                           </div>
                         </div>
-                        <div>
+                        <div className="flex flex-col items-end gap-2 min-w-[140px]">
                           <Button variant="outline" size="sm" className={tileButtonClass} disabled>
                             Initiate
                           </Button>

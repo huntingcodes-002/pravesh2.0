@@ -129,6 +129,37 @@ export default function PaymentsPage() {
     receivedOn,
   ]);
 
+  useEffect(() => {
+    if (!currentLead?.payments || currentLead.payments.length === 0) return;
+    const latestPayment: any = [...currentLead.payments].reverse().find((payment) => payment?.status);
+    if (!latestPayment) return;
+
+    const statusValue = String(latestPayment.status || '').toLowerCase();
+    let nextStatus: PaymentStatus = 'Pending';
+    if (statusValue === 'paid' || statusValue === 'completed') {
+      nextStatus = 'Paid';
+    } else if (statusValue === 'failed' || statusValue === 'expired' || statusValue === 'cancelled') {
+      nextStatus = 'Failed';
+    }
+
+    setPaymentStatus(nextStatus);
+    setHasSentLink(true);
+
+    if (latestPayment.payment_url) {
+      setPaymentUrl(latestPayment.payment_url);
+    }
+    if (latestPayment.order_id) {
+      setPaymentOrderId(latestPayment.order_id);
+    }
+    if (latestPayment.paid_on && nextStatus === 'Paid') {
+      try {
+        setReceivedOn(new Date(latestPayment.paid_on));
+      } catch {
+        setReceivedOn(null);
+      }
+    }
+  }, [currentLead?.payments]);
+
   const handleSendToCustomer = async () => {
     if (isSending) return;
 

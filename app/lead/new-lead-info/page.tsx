@@ -653,12 +653,16 @@ export default function NewLeadInfoPage() {
     !isDocumentsCompleted;
 
   const tileWrapperClass =
-    'flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4';
+    'flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-[#F7F8FB] px-4 py-4';
   const tileButtonClass =
-    'rounded-full border border-[#1D5FE9] text-[#1D5FE9] px-4 h-9 text-sm font-semibold bg-white hover:bg-blue-50';
+    'rounded-lg border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 h-10 text-sm font-semibold bg-white transition';
 
   const renderBasicDetailsTile = () => {
     const hasDetails = step2Status !== 'incomplete' && (primaryParticipant || currentLead);
+    const showPanVerifiedPill =
+      hasDetails &&
+      (currentLead?.formData?.step2?.autoFilledViaPAN ||
+        Boolean(primaryParticipant?.personal_info?.pan_number?.verified));
 
     return (
       <div className={tileWrapperClass}>
@@ -667,7 +671,6 @@ export default function NewLeadInfoPage() {
             <UserCheck className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">Basic Details</p>
             {hasDetails ? (
               <div className="mt-2 space-y-1 text-xs text-gray-600">
                 {(() => {
@@ -773,8 +776,9 @@ export default function NewLeadInfoPage() {
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          {step2Status !== 'incomplete' && currentLead?.formData?.step2?.autoFilledViaPAN && (
+        <div className="flex flex-col items-end gap-2 min-w-[160px]">
+          {getStatusBadge(step2Status)}
+          {showPanVerifiedPill && (
             <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
               Verified via PAN
             </Badge>
@@ -798,7 +802,7 @@ export default function NewLeadInfoPage() {
       ((primaryParticipant?.addresses && primaryParticipant.addresses.length > 0) ||
         (currentLead?.formData?.step3?.addresses && currentLead.formData.step3.addresses.length > 0));
     const step3 = currentLead?.formData?.step3;
-    const isVerified = Boolean(
+    const showAadhaarVerifiedPill = Boolean(
       step3?.autoFilledViaAadhaar || step3?.addresses?.some((addr: any) => addr?.autoFilledViaAadhaar)
     );
 
@@ -809,7 +813,6 @@ export default function NewLeadInfoPage() {
             <MapPin className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">Address Details</p>
             {hasDetails ? (
               <div className="mt-2 space-y-1 text-xs text-gray-600">
                 {(() => {
@@ -837,7 +840,7 @@ export default function NewLeadInfoPage() {
                     <>
                       {primaryAddress.address_line_1 && (
                         <p className="flex items-center gap-1">
-                          {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                          {showAadhaarVerifiedPill && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                           <span>
                             <span className="font-medium">Address:</span> {primaryAddress.address_line_1}
                           </span>
@@ -845,7 +848,7 @@ export default function NewLeadInfoPage() {
                       )}
                       {primaryAddress.city && (
                         <p className="flex items-center gap-1">
-                          {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                          {showAadhaarVerifiedPill && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                           <span>
                             <span className="font-medium">City:</span> {primaryAddress.city}
                           </span>
@@ -853,13 +856,13 @@ export default function NewLeadInfoPage() {
                       )}
                       {primaryAddress.pincode && (
                         <p className="flex items-center gap-1">
-                          {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                          {showAadhaarVerifiedPill && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                           <span>
                             <span className="font-medium">Pincode:</span> {primaryAddress.pincode}
                           </span>
                         </p>
                       )}
-                      {isVerified && (
+                      {showAadhaarVerifiedPill && (
                         <p className="text-[11px] text-gray-400">Auto-filled and verified via Aadhaar OCR workflow.</p>
                       )}
                       <p className="text-[11px] text-gray-400">Submitted by RM</p>
@@ -875,8 +878,8 @@ export default function NewLeadInfoPage() {
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          {hasDetails && (
+        <div className="flex flex-col items-end gap-2 min-w-[160px]">
+          {showAadhaarVerifiedPill && (
             <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
               Verified via Aadhaar
             </Badge>
@@ -905,7 +908,6 @@ export default function NewLeadInfoPage() {
             <Briefcase className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">Employment Details</p>
             {hasDetails ? (
               <div className="mt-2 space-y-1 text-xs text-gray-600">
                 {(() => {
@@ -998,11 +1000,11 @@ export default function NewLeadInfoPage() {
           <Database className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
+          <p className="text-sm font-semibold text-gray-900">No account aggregator request initiated</p>
           <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
         </div>
       </div>
-      <div>
+      <div className="flex flex-col items-end gap-2 min-w-[160px]">
         <Button variant="outline" size="sm" className={tileButtonClass}>
           Initiate
         </Button>
