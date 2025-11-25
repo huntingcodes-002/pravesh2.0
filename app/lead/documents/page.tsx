@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Upload, CheckCircle, XCircle, Loader, Trash2, RotateCcw, Camera, AlertTriangle, User, Users, Home, ChevronDown, X, Image as ImageIcon, RefreshCw, Eye, MapPin } from 'lucide-react';
 import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -191,139 +191,139 @@ const normalizeGenderValue = (value?: string | null): string => {
 
 // Helper function to generate dynamic document list
 interface DocumentDefinition {
-  value: string;
-  label: string;
-  fileTypes: Array<'image' | 'pdf'>;
-  requiresCamera: boolean;
-  applicantType: 'main' | 'coapplicant' | 'collateral';
-  required?: boolean;
-  requiresFrontBack?: boolean;
-  coApplicantId?: string;
-  isPropertyPhotos?: boolean;
+    value: string;
+    label: string;
+    fileTypes: Array<'image' | 'pdf'>;
+    requiresCamera: boolean;
+    applicantType: 'main' | 'coapplicant' | 'collateral';
+    required?: boolean;
+    requiresFrontBack?: boolean;
+    coApplicantId?: string;
+    isPropertyPhotos?: boolean;
 }
 
 const PROPERTY_PHOTO_OPTIONS = [
-  { value: 'front', label: 'Front' },
-  { value: 'side', label: 'Side' },
-  { value: 'approach_road', label: 'Approach Road' },
-  { value: 'surrounding_view', label: 'Surrounding View' },
-  { value: 'inside_living_room', label: 'Inside - Living Room' },
-  { value: 'selfie_with_owner', label: 'Selfie with Owner' },
+    { value: 'front', label: 'Front' },
+    { value: 'side', label: 'Side' },
+    { value: 'approach_road', label: 'Approach Road' },
+    { value: 'surrounding_view', label: 'Surrounding View' },
+    { value: 'inside_living_room', label: 'Inside - Living Room' },
+    { value: 'selfie_with_owner', label: 'Selfie with Owner' },
 ] as const;
 
 type PropertyPhotoType = (typeof PROPERTY_PHOTO_OPTIONS)[number]['value'];
 const PROPERTY_PHOTO_REQUIRED_COUNT = PROPERTY_PHOTO_OPTIONS.length;
 
 const generateDocumentList = (lead: any): DocumentDefinition[] => {
-  const documents: DocumentDefinition[] = [];
+    const documents: DocumentDefinition[] = [];
 
-  const mainApplicantName = getApplicantName(lead?.customerFirstName, lead?.customerLastName);
-  const step2 = lead?.formData?.step2 || {};
+    const mainApplicantName = getApplicantName(lead?.customerFirstName, lead?.customerLastName);
+    const step2 = lead?.formData?.step2 || {};
 
-  if (step2?.hasPan !== 'no') {
-    documents.push({
-      value: 'PAN',
-      label: `PAN - ${mainApplicantName}`,
-      fileTypes: ['image'],
-      requiresCamera: true,
-      applicantType: 'main',
-      required: true,
-      requiresFrontBack: false,
-    });
-  } else if (step2?.alternateIdType) {
-    const altValue = mapAlternateIdTypeToDocumentValue(step2.alternateIdType);
-    const altLabel = getAlternateDocumentLabel(step2.alternateIdType);
-    documents.push({
-      value: altValue,
-      label: `${altLabel} - ${mainApplicantName}`,
-      fileTypes: ['image'],
-      requiresCamera: true,
-      applicantType: 'main',
-      required: true,
-      requiresFrontBack: false,
-    });
-  }
-
-  documents.push({
-    value: 'Adhaar',
-    label: `Aadhaar - ${mainApplicantName}`,
-    fileTypes: ['image'],
-    requiresCamera: true,
-    applicantType: 'main',
-    required: true,
-    requiresFrontBack: true,
-  });
-
-  const coApplicants = lead?.formData?.coApplicants || [];
-  coApplicants.forEach((coApp: any, index: number) => {
-    const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
-    const step2Data = coApp?.data?.step2 ?? {};
-    const name = getApplicantName(
-      basic.firstName ?? step2Data.firstName,
-      basic.lastName ?? step2Data.lastName
-    );
-    const hasPan = step2Data.hasPan ?? 'yes';
-
-    if (hasPan !== 'no') {
-      documents.push({
-        value: `PAN_${coApp.id}`,
-        label: `PAN - ${name}`,
-        fileTypes: ['image'],
-        requiresCamera: true,
-        applicantType: 'coapplicant',
-        coApplicantId: coApp.id,
-        required: true,
-        requiresFrontBack: false,
-      });
-    } else if (step2Data.alternateIdType) {
-      const altValue = mapAlternateIdTypeToDocumentValue(step2Data.alternateIdType);
-      const altLabel = getAlternateDocumentLabel(step2Data.alternateIdType);
-      documents.push({
-        value: `${altValue}_${coApp.id}`,
-        label: `${altLabel} - ${name}`,
-        fileTypes: ['image'],
-        requiresCamera: true,
-        applicantType: 'coapplicant',
-        coApplicantId: coApp.id,
-        required: true,
-        requiresFrontBack: false,
-      });
+    if (step2?.hasPan !== 'no') {
+        documents.push({
+            value: 'PAN',
+            label: `PAN - ${mainApplicantName}`,
+            fileTypes: ['image'],
+            requiresCamera: true,
+            applicantType: 'main',
+            required: true,
+            requiresFrontBack: false,
+        });
+    } else if (step2?.alternateIdType) {
+        const altValue = mapAlternateIdTypeToDocumentValue(step2.alternateIdType);
+        const altLabel = getAlternateDocumentLabel(step2.alternateIdType);
+        documents.push({
+            value: altValue,
+            label: `${altLabel} - ${mainApplicantName}`,
+            fileTypes: ['image'],
+            requiresCamera: true,
+            applicantType: 'main',
+            required: true,
+            requiresFrontBack: false,
+        });
     }
 
     documents.push({
-      value: `Adhaar_${coApp.id}`,
-      label: `Aadhaar - ${name}`,
-      fileTypes: ['image'],
-      requiresCamera: true,
-      applicantType: 'coapplicant',
-      coApplicantId: coApp.id,
-      required: true,
-      requiresFrontBack: true,
+        value: 'Adhaar',
+        label: `Aadhaar - ${mainApplicantName}`,
+        fileTypes: ['image'],
+        requiresCamera: true,
+        applicantType: 'main',
+        required: true,
+        requiresFrontBack: true,
     });
-  });
 
-  documents.push({
-    value: 'CollateralPapers',
-    label: 'Sale Deed',
-    fileTypes: ['pdf'],
-    requiresCamera: false,
-    applicantType: 'collateral',
-    required: true,
-    requiresFrontBack: false,
-  });
+    const coApplicants = lead?.formData?.coApplicants || [];
+    coApplicants.forEach((coApp: any, index: number) => {
+        const basic = coApp?.data?.basicDetails ?? coApp?.data?.step1 ?? {};
+        const step2Data = coApp?.data?.step2 ?? {};
+        const name = getApplicantName(
+            basic.firstName ?? step2Data.firstName,
+            basic.lastName ?? step2Data.lastName
+        );
+        const hasPan = step2Data.hasPan ?? 'yes';
 
-  documents.push({
-    value: 'PropertyPhotos',
-    label: 'Property Photos',
-    fileTypes: ['image'],
-    requiresCamera: true,
-    applicantType: 'collateral',
-    required: true,
-    requiresFrontBack: false,
-    isPropertyPhotos: true,
-  });
+        if (hasPan !== 'no') {
+            documents.push({
+                value: `PAN_${coApp.id}`,
+                label: `PAN - ${name}`,
+                fileTypes: ['image'],
+                requiresCamera: true,
+                applicantType: 'coapplicant',
+                coApplicantId: coApp.id,
+                required: true,
+                requiresFrontBack: false,
+            });
+        } else if (step2Data.alternateIdType) {
+            const altValue = mapAlternateIdTypeToDocumentValue(step2Data.alternateIdType);
+            const altLabel = getAlternateDocumentLabel(step2Data.alternateIdType);
+            documents.push({
+                value: `${altValue}_${coApp.id}`,
+                label: `${altLabel} - ${name}`,
+                fileTypes: ['image'],
+                requiresCamera: true,
+                applicantType: 'coapplicant',
+                coApplicantId: coApp.id,
+                required: true,
+                requiresFrontBack: false,
+            });
+        }
 
-  return documents;
+        documents.push({
+            value: `Adhaar_${coApp.id}`,
+            label: `Aadhaar - ${name}`,
+            fileTypes: ['image'],
+            requiresCamera: true,
+            applicantType: 'coapplicant',
+            coApplicantId: coApp.id,
+            required: true,
+            requiresFrontBack: true,
+        });
+    });
+
+    documents.push({
+        value: 'CollateralPapers',
+        label: 'Sale Deed',
+        fileTypes: ['pdf'],
+        requiresCamera: false,
+        applicantType: 'collateral',
+        required: true,
+        requiresFrontBack: false,
+    });
+
+    documents.push({
+        value: 'PropertyPhotos',
+        label: 'Property Photos',
+        fileTypes: ['image'],
+        requiresCamera: true,
+        applicantType: 'collateral',
+        required: true,
+        requiresFrontBack: false,
+        isPropertyPhotos: true,
+    });
+
+    return documents;
 };
 
 // Helper function to categorize uploaded files
@@ -332,15 +332,15 @@ const categorizeUploadedFiles = (files: UploadedFile[], availableDocuments: any[
     const coApplicantDocsMap: { [key: string]: UploadedFile[] } = {};
     const collateralDocs: UploadedFile[] = [];
     const propertyPhotoDocs: UploadedFile[] = [];
-    
+
     // Initialize co-applicant docs map
     coApplicants.forEach((coApp: any) => {
         coApplicantDocsMap[coApp.id] = [];
     });
-    
+
     files.forEach(file => {
         const docInfo = availableDocuments.find(doc => doc.value === file.type);
-        
+
         if (docInfo) {
             if (docInfo.applicantType === 'main') {
                 applicantDocs.push(file);
@@ -358,7 +358,7 @@ const categorizeUploadedFiles = (files: UploadedFile[], availableDocuments: any[
             }
         }
     });
-    
+
     return { applicantDocs, coApplicantDocsMap, collateralDocs, propertyPhotoDocs };
 };
 
@@ -376,8 +376,8 @@ const parseDocumentValue = (docValue: string) => {
 };
 
 export default function Step8Page() {
-  const { currentLead, updateLead, updateCoApplicant } = useLead();
-  const router = useRouter();
+    const { currentLead, updateLead, updateCoApplicant } = useLead();
+    const router = useRouter();
     const { toast } = useToast();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -406,11 +406,11 @@ export default function Step8Page() {
     const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
     // Default to open for applicant section to prevent auto-collapse
     const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({ applicant: true, collateral: true });
-    
+
     // Camera flip state
     const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
     const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
-    
+
     // Crop state
     const [showCropModal, setShowCropModal] = useState(false);
     const [capturedImageSrc, setCapturedImageSrc] = useState<string>('');
@@ -418,7 +418,7 @@ export default function Step8Page() {
     const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
     const [imageRef, setImageRef] = useState<HTMLImageElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    
+
     // Preview state
     const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null);
     const [showPreview, setShowPreview] = useState(false);
@@ -455,22 +455,22 @@ export default function Step8Page() {
             : geolocation.error?.message || '';
 
     const totalSteps = 10;
-    
+
     // Generate dynamic document list based on current lead data
     const availableDocuments = currentLead ? generateDocumentList(currentLead) : [];
-    
+
     const entityOptions = useMemo((): EntityOption[] => {
         if (!currentLead) return [];
-        
+
         const entities: EntityOption[] = [];
-        
+
         const mainApplicantName = currentLead.customerName || getApplicantName(currentLead.customerFirstName, currentLead.customerLastName);
         entities.push({
             value: 'applicant',
             label: `Applicant - ${mainApplicantName}`,
             type: 'main'
         });
-        
+
         const coApplicants = currentLead?.formData?.coApplicants || [];
         coApplicants.forEach((coApp: any, index: number) => {
             const coApplicantName = getApplicantName(
@@ -484,16 +484,16 @@ export default function Step8Page() {
                 coApplicantId: coApp.id,
             });
         });
-        
+
         entities.push({
             value: 'collateral',
             label: 'Collateral Documents',
             type: 'collateral',
         });
-        
+
         return entities;
     }, [currentLead]);
-    
+
     useEffect(() => {
         if (!entityOptions.length) return;
         if (!entityOptions.some(option => option.value === selectedEntity)) {
@@ -501,12 +501,27 @@ export default function Step8Page() {
             setDocumentType('');
         }
     }, [entityOptions, selectedEntity]);
-    
+
     const selectedEntityOption = useMemo(
         () => entityOptions.find(opt => opt.value === selectedEntity) ?? null,
         [entityOptions, selectedEntity]
     );
-    
+
+    const searchParams = useSearchParams();
+    const preselect = searchParams.get('preselect');
+
+    useEffect(() => {
+        if (preselect && entityOptions.length > 0) {
+            // Default to applicant entity for preselection
+            setSelectedEntity('applicant');
+            if (preselect === 'pan') {
+                setDocumentType('PAN');
+            } else if (preselect === 'aadhaar') {
+                setDocumentType('Adhaar');
+            }
+        }
+    }, [preselect, entityOptions]);
+
     const filteredDocuments = useMemo(() => {
         if (!selectedEntityOption) return [];
         if (selectedEntityOption.type === 'main') {
@@ -522,7 +537,7 @@ export default function Step8Page() {
         }
         return [];
     }, [availableDocuments, selectedEntityOption]);
-    
+
     useEffect(() => {
         if (!filteredDocuments.length) {
             if (documentType) {
@@ -655,21 +670,21 @@ export default function Step8Page() {
         const docInfo = availableDocuments.find(doc => doc.value === documentType);
         const { baseValue: baseDocType, coApplicantId: documentCoApplicantId } = parseDocumentValue(documentType);
         const backendDocType = mapDocumentTypeToBackend(documentType);
-        
+
         // Check if this is a co-applicant PAN/Aadhaar document
-        const isCoApplicantPanOrAadhaar = 
-            docInfo?.applicantType === 'coapplicant' && 
-            docInfo.coApplicantId && 
+        const isCoApplicantPanOrAadhaar =
+            docInfo?.applicantType === 'coapplicant' &&
+            docInfo.coApplicantId &&
             (backendDocType === 'pan_card' || backendDocType === 'aadhaar_card');
-        
+
         let uploadResponse;
-        
+
         try {
             if (isCoApplicantPanOrAadhaar) {
                 // Find the co-applicant to get workflowIndex
                 const coApplicants = currentLead.formData?.coApplicants || [];
                 const coApplicant = coApplicants.find((coApp: any) => coApp.id === docInfo.coApplicantId);
-                
+
                 if (!coApplicant || typeof coApplicant.workflowIndex !== 'number') {
                     toast({
                         title: 'Co-applicant Setup Error',
@@ -678,7 +693,7 @@ export default function Step8Page() {
                     });
                     return { success: false };
                 }
-                
+
                 // Use new co-applicant document upload API
                 uploadResponse = await uploadCoApplicantDocument({
                     application_id: currentLead.appId,
@@ -699,7 +714,7 @@ export default function Step8Page() {
                 if (docInfo?.applicantType === 'collateral') {
                     metadata.document_owner = 'collateral';
                 }
-                
+
                 uploadResponse = await uploadDocument({
                     application_id: currentLead.appId,
                     document_type: backendDocType,
@@ -726,9 +741,9 @@ export default function Step8Page() {
             if (baseDocType === 'PAN' || baseDocType === 'Adhaar') {
                 // Wait a bit for backend to process the document
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                
+
                 const detailedResponse = await getDetailedInfo(currentLead.appId);
-                
+
                 if (!isApiError(detailedResponse)) {
                     const { baseData: rawData = {}, applicationDetails, workflowState } = unwrapDetailedInfoResponse(detailedResponse as ApiSuccess<any>);
                     const parsedData = rawData ?? {};
@@ -875,7 +890,7 @@ export default function Step8Page() {
                             });
                         }
                     }
-                    
+
                     if (baseDocType === 'Adhaar') {
                         let genderValue: string | null = summaryGenderNormalized || null;
                         const extractedGenderRaw = getFieldValue(resolvedWorkflowState?.aadhaar_ocr_data?.extracted_fields?.gender);
@@ -1100,7 +1115,7 @@ export default function Step8Page() {
         }
 
         const file = files[0];
-        
+
         // Basic file extension check only (not document content validation)
         // Actual document validation is done by backend API
         const fileExtension = file.name.split('.').pop()?.toLowerCase();
@@ -1114,7 +1129,7 @@ export default function Step8Page() {
         });
 
         if (!isValidFileType) {
-            const allowedTypes = selectedDocument.fileTypes.map((type: string) => 
+            const allowedTypes = selectedDocument.fileTypes.map((type: string) =>
                 type === 'image' ? 'PNG, JPG, JPEG, HEIC' : 'PDF'
             ).join(' or ');
             toast({
@@ -1136,7 +1151,7 @@ export default function Step8Page() {
         const reader = new FileReader();
         reader.onloadend = async () => {
             const previewUrl = reader.result as string;
-            
+
             const newFile: UploadedFile = {
                 id: fileId,
                 name: file.name,
@@ -1170,40 +1185,40 @@ export default function Step8Page() {
 
             // Upload document via API
             const uploadResult = await handleDocumentUpload(file, documentType, fileId);
-            
+
             // Only mark as success if backend returned 200 OK (success: true)
             const isSuccess = uploadResult?.success === true;
-            
+
             setUploadedFiles((prev) => {
                 const updatedFiles = prev.map((f) =>
                     f.id === fileId
-                        ? { 
-                            ...f, 
-                            status: isSuccess ? 'Success' as const : 'Failed' as const, 
-                            error: isSuccess ? undefined : 'Upload failed - backend validation failed' 
+                        ? {
+                            ...f,
+                            status: isSuccess ? 'Success' as const : 'Failed' as const,
+                            error: isSuccess ? undefined : 'Upload failed - backend validation failed'
                         }
                         : f
                 );
-                
+
                 // Update files in lead data
                 if (currentLead) {
                     updateLead(currentLead.id, {
                         formData: {
                             ...currentLead.formData,
-                            step8: { 
-                                ...currentLead.formData.step8, 
-                                files: updatedFiles 
+                            step8: {
+                                ...currentLead.formData.step8,
+                                files: updatedFiles
                             }
                         }
                     });
                 }
-                
+
                 return updatedFiles;
             });
-            
+
             // Success toasts for PAN/Aadhaar/co-applicant collateral are handled in handleDocumentUpload
         };
-        
+
         if (isPdf) {
             // For PDF, just start upload without preview
             reader.readAsDataURL(file);
@@ -1223,7 +1238,7 @@ export default function Step8Page() {
         if (!files || files.length === 0 || !uploadMode) return;
 
         const file = files[0];
-        
+
         // Create preview URL
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -1232,7 +1247,7 @@ export default function Step8Page() {
                 file: file,
                 dataUrl: reader.result as string
             };
-            
+
             if (uploadMode === 'front') {
                 setFrontFile(tempFile);
             } else {
@@ -1272,13 +1287,13 @@ export default function Step8Page() {
             });
             return;
         }
-        
+
         const doc = selectedDocument;
         if (doc && !doc.requiresCamera) {
-            toast({ 
-                title: 'Camera Not Available', 
-                description: 'This document type only accepts file uploads, not camera capture', 
-                variant: 'destructive' 
+            toast({
+                title: 'Camera Not Available',
+                description: 'This document type only accepts file uploads, not camera capture',
+                variant: 'destructive'
             });
             return;
         }
@@ -1290,14 +1305,14 @@ export default function Step8Page() {
             });
             return;
         }
-        
+
         setCameraPermissionDenied(false);
         try {
             // Request camera access first to get permission
             const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
             setStream(mediaStream);
             setIsCameraOpen(true);
-            
+
             // After getting permission, enumerate cameras
             const cameras = await enumerateCameras();
             if (cameras.length > 0) {
@@ -1315,24 +1330,24 @@ export default function Step8Page() {
     // Flip camera function
     const flipCamera = async () => {
         if (availableCameras.length <= 1) return;
-        
+
         // Stop current stream
         if (stream) {
             stream.getTracks().forEach(track => track.stop());
         }
-        
+
         // Switch to next camera
         const nextIndex = (currentCameraIndex + 1) % availableCameras.length;
         setCurrentCameraIndex(nextIndex);
-        
+
         try {
             const constraints: MediaStreamConstraints = {
                 video: { deviceId: { exact: availableCameras[nextIndex].deviceId } }
             };
-            
+
             const newStream = await navigator.mediaDevices.getUserMedia(constraints);
             setStream(newStream);
-            
+
             if (videoRef.current) {
                 videoRef.current.srcObject = newStream;
             }
@@ -1436,7 +1451,7 @@ export default function Step8Page() {
     // Process captured image after cropping - now uses API validation
     const processCapturedImage = async (dataUrl: string) => {
         const fileId = Date.now().toString();
-        
+
         // For front/back documents
         if (uploadMode) {
             const tempFile: TempFile = {
@@ -1444,7 +1459,7 @@ export default function Step8Page() {
                 file: null,
                 dataUrl: dataUrl
             };
-            
+
             if (uploadMode === 'front') {
                 setFrontFile(tempFile);
             } else {
@@ -1484,10 +1499,10 @@ export default function Step8Page() {
             const ownerType = selectedDocument.applicantType;
             const ownerId = selectedDocument.coApplicantId;
             const documentLabel = selectedDocument.label || fileName;
-            
+
             // Convert dataUrl to File
             const capturedFile = dataURLtoFile(dataUrl, fileName);
-            
+
             // Create preview file entry with 'Processing' status
             const newFile: UploadedFile = {
                 id: fileId,
@@ -1500,7 +1515,7 @@ export default function Step8Page() {
                 ownerId,
                 label: documentLabel
             };
-            
+
             // If PAN or Aadhaar, delete old failed entries of the same type
             if (ownerType === 'main') {
                 setOpenSections((sections) => ({ ...sections, applicant: true }));
@@ -1512,7 +1527,7 @@ export default function Step8Page() {
 
             if (baseDocType === 'PAN' || baseDocType === 'Adhaar') {
                 setUploadedFiles((prev) => {
-                    const filteredFiles = prev.filter((f) => 
+                    const filteredFiles = prev.filter((f) =>
                         !(f.type === documentType && f.status === 'Failed')
                     );
                     return [...filteredFiles, newFile];
@@ -1522,42 +1537,42 @@ export default function Step8Page() {
                     return [...prev, newFile];
                 });
             }
-            
+
             toast({ title: 'Processing', description: `Uploading ${documentLabel}...` });
 
             // Upload document via API (same flow as file upload)
             const uploadResult = await handleDocumentUpload(capturedFile, documentType, fileId);
-            
+
             // Only mark as success if backend returned 200 OK (success: true)
             const isSuccess = uploadResult?.success === true;
-            
+
             setUploadedFiles((prev) => {
                 const updatedFiles = prev.map((f) =>
                     f.id === fileId
-                        ? { 
-                            ...f, 
-                            status: isSuccess ? 'Success' as const : 'Failed' as const, 
-                            error: isSuccess ? undefined : 'Upload failed - backend validation failed' 
+                        ? {
+                            ...f,
+                            status: isSuccess ? 'Success' as const : 'Failed' as const,
+                            error: isSuccess ? undefined : 'Upload failed - backend validation failed'
                         }
                         : f
                 );
-                
+
                 // Update files in lead data
                 if (currentLead) {
                     updateLead(currentLead.id, {
                         formData: {
                             ...currentLead.formData,
-                            step8: { 
-                                ...currentLead.formData.step8, 
-                                files: updatedFiles 
+                            step8: {
+                                ...currentLead.formData.step8,
+                                files: updatedFiles
                             }
                         }
                     });
                 }
-                
+
                 return updatedFiles;
             });
-            
+
             // Success toasts for PAN/Aadhaar are handled in handleDocumentUpload
             // For other documents, show success toast
             if (isSuccess && !(baseDocType === 'PAN' || baseDocType === 'Adhaar')) {
@@ -1574,7 +1589,7 @@ export default function Step8Page() {
                     variant: 'destructive',
                 });
             }
-            
+
             if (documentType !== 'PropertyPhotos') {
                 setDocumentType('');
             }
@@ -1632,10 +1647,10 @@ export default function Step8Page() {
             prev.map(file =>
                 file.id === fileId
                     ? {
-                          ...file,
-                          status: isSuccess ? 'Success' : 'Failed',
-                          error: isSuccess ? undefined : 'Upload failed - backend validation failed',
-                      }
+                        ...file,
+                        status: isSuccess ? 'Success' : 'Failed',
+                        error: isSuccess ? undefined : 'Upload failed - backend validation failed',
+                    }
                     : file
             )
         );
@@ -1691,7 +1706,7 @@ export default function Step8Page() {
             if (context) {
                 context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
                 const dataUrl = canvas.toDataURL('image/jpeg');
-                
+
                 // Show crop modal instead of directly processing
                 setCapturedImageSrc(dataUrl);
                 setShowCropModal(true);
@@ -1786,40 +1801,40 @@ export default function Step8Page() {
         try {
             // Upload document via API with both front and back files
             const uploadResult = await handleDocumentUpload(frontFileObj, documentType, fileId, backFileObj);
-            
+
             // Only mark as success if backend returned 200 OK (success: true)
             const isSuccess = uploadResult?.success === true;
-            
+
             setUploadedFiles((prev) => {
                 const updatedFiles = prev.map((f) =>
                     f.id === fileId
-                        ? { 
-                            ...f, 
+                        ? {
+                            ...f,
                             status: isSuccess ? 'Success' as const : 'Failed' as const,
                             error: isSuccess ? undefined : 'Upload failed - backend validation failed'
                         }
                         : f
                 );
-                
+
                 // Update files in lead data
                 if (currentLead) {
                     updateLead(currentLead.id, {
                         formData: {
                             ...currentLead.formData,
-                            step8: { 
-                                ...currentLead.formData.step8, 
-                                files: updatedFiles 
+                            step8: {
+                                ...currentLead.formData.step8,
+                                files: updatedFiles
                             }
                         }
                     });
                 }
-                
+
                 return updatedFiles;
             });
-            
+
             if (isSuccess) {
-                toast({ 
-                    title: 'Success', 
+                toast({
+                    title: 'Success',
                     description: 'Documents uploaded successfully',
                     className: 'bg-green-50 border-green-200'
                 });
@@ -2061,21 +2076,21 @@ export default function Step8Page() {
                         </DialogHeader>
                         <div className="space-y-3 py-4">
                             {selectedDocument?.requiresCamera && (
-                                <Button 
+                                <Button
                                     onClick={() => {
                                         setShowUploadMethodModal(false);
                                         startCamera();
-                                    }} 
-                                    variant="outline" 
+                                    }}
+                                    variant="outline"
                                     className="w-full flex items-center justify-center h-20 space-y-1 border-2 border-blue-300 hover:bg-blue-50"
                                 >
                                     <Camera className="w-6 h-6 text-blue-600 mr-2" />
                                     <span className="text-sm font-medium">Capture from Camera</span>
                                 </Button>
                             )}
-                            <Button 
-                                onClick={() => fileInputRef.current?.click()} 
-                                variant="outline" 
+                            <Button
+                                onClick={() => fileInputRef.current?.click()}
+                                variant="outline"
                                 className="w-full flex items-center justify-center h-20 space-y-1 border-2 border-blue-300 hover:bg-blue-50"
                             >
                                 <Upload className="w-6 h-6 text-blue-600 mr-2" />
@@ -2084,7 +2099,7 @@ export default function Step8Page() {
                             {selectedDocument?.fileTypes && selectedDocument.fileTypes.length > 0 && (
                                 <div className="text-xs text-gray-600 mt-2">
                                     <p className="font-medium">Accepted file types:</p>
-                                    <p>{selectedDocument.fileTypes.map((type: string) => 
+                                    <p>{selectedDocument.fileTypes.map((type: string) =>
                                         type === 'image' ? 'PNG, JPG, JPEG, HEIC' : 'PDF'
                                     ).join(', ')}</p>
                                 </div>
@@ -2375,9 +2390,9 @@ export default function Step8Page() {
                                                                 {frontFile.dataUrl && (
                                                                     <img src={frontFile.dataUrl} alt="Front preview" className="w-full h-24 object-cover rounded" />
                                                                 )}
-                                                                <Button 
-                                                                    variant="outline" 
-                                                                    size="sm" 
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
                                                                     className="w-full mt-2 h-8 text-xs"
                                                                     onClick={() => handleReplaceFrontBack('front')}
                                                                 >
@@ -2385,8 +2400,8 @@ export default function Step8Page() {
                                                                 </Button>
                                                             </div>
                                                         ) : (
-                                                            <Button 
-                                                                variant="outline" 
+                                                            <Button
+                                                                variant="outline"
                                                                 className="w-full h-24 border-2 border-dashed border-gray-300"
                                                                 onClick={() => handleFrontBackClick('front')}
                                                             >
@@ -2410,9 +2425,9 @@ export default function Step8Page() {
                                                                 {backFile.dataUrl && (
                                                                     <img src={backFile.dataUrl} alt="Back preview" className="w-full h-24 object-cover rounded" />
                                                                 )}
-                                                                <Button 
-                                                                    variant="outline" 
-                                                                    size="sm" 
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
                                                                     className="w-full mt-2 h-8 text-xs"
                                                                     onClick={() => handleReplaceFrontBack('back')}
                                                                 >
@@ -2420,8 +2435,8 @@ export default function Step8Page() {
                                                                 </Button>
                                                             </div>
                                                         ) : (
-                                                            <Button 
-                                                                variant="outline" 
+                                                            <Button
+                                                                variant="outline"
                                                                 className="w-full h-24 border-2 border-dashed border-gray-300"
                                                                 onClick={() => handleFrontBackClick('back')}
                                                             >
@@ -2434,7 +2449,7 @@ export default function Step8Page() {
                                                     </div>
                                                 </div>
 
-                                                <Button 
+                                                <Button
                                                     className="w-full bg-blue-600 hover:bg-blue-700"
                                                     disabled={!frontFile || !backFile || isUploading}
                                                     onClick={handleUploadFrontBackDocument}
@@ -2469,7 +2484,7 @@ export default function Step8Page() {
                                             {selectedDocument.fileTypes.length > 0 && (
                                                 <div className="text-xs text-gray-600 mt-2">
                                                     <p className="font-medium">Accepted file types:</p>
-                                                    <p>{selectedDocument.fileTypes.map((type: string) => 
+                                                    <p>{selectedDocument.fileTypes.map((type: string) =>
                                                         type === 'image' ? 'PNG, JPG, JPEG, HEIC' : 'PDF'
                                                     ).join(', ')}</p>
                                                 </div>
@@ -2479,17 +2494,17 @@ export default function Step8Page() {
                                 </>
                             )}
 
-                            <input 
-                                ref={fileInputRef} 
-                                type="file" 
-                                className="hidden" 
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                className="hidden"
                                 onChange={selectedDocument?.requiresFrontBack ? handleFrontBackFileSelect : handleFileSelect}
-                                accept={selectedDocument ? 
-                                    selectedDocument.fileTypes.map((type: string) => 
+                                accept={selectedDocument ?
+                                    selectedDocument.fileTypes.map((type: string) =>
                                         type === 'image' ? '.jpg,.jpeg,.png,.heic' : '.pdf'
-                                    ).join(',') : 
+                                    ).join(',') :
                                     '.jpg,.jpeg,.png,.pdf'
-                                } 
+                                }
                             />
 
                             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
@@ -2506,7 +2521,7 @@ export default function Step8Page() {
                                         const { applicantDocs, coApplicantDocsMap, collateralDocs, propertyPhotoDocs } = categorizeUploadedFiles(uploadedFiles, availableDocuments, coApplicants);
                                         const shouldShowPropertyGalleryCard = allPropertyPhotosComplete && propertyPhotoDocs.length > 0;
                                         const hasCollateralSection = collateralDocs.length > 0 || shouldShowPropertyGalleryCard;
-                                        
+
                                         const renderDocumentCard = (file: UploadedFile) => (
                                             <Card key={file.id} className={cn(
                                                 "cursor-pointer hover:shadow-md transition-shadow",
@@ -2514,7 +2529,7 @@ export default function Step8Page() {
                                                     file.status === 'Failed' ? 'border-red-200' :
                                                         'border-blue-200'
                                             )}>
-                                                <CardContent 
+                                                <CardContent
                                                     className="p-3 sm:p-4"
                                                     onClick={() => {
                                                         if (file.status === 'Success' && (file.previewUrl || file.frontPreviewUrl || file.fileType === 'pdf')) {
@@ -2602,10 +2617,10 @@ export default function Step8Page() {
                                                 {coApplicants.map((coApp: any, index: number) => {
                                                     const coAppDocs = coApplicantDocsMap[coApp.id] || [];
                                                     if (coAppDocs.length === 0) return null;
-                                                    
+
                                                     const coAppName = getApplicantName(coApp?.data?.step1?.firstName, coApp?.data?.step1?.lastName);
                                                     const sectionKey = `coapplicant-${coApp.id}`;
-                                                    
+
                                                     return (
                                                         <Collapsible
                                                             key={coApp.id}
@@ -2641,39 +2656,39 @@ export default function Step8Page() {
                                                         onOpenChange={(open) => setOpenSections(prev => ({ ...prev, collateral: open }))}
                                                     >
                                                         <Card className="border-purple-200">
-                                                        <CollapsibleTrigger className="w-full">
-                                                            <CardContent className="p-4">
-                                                                <div className="flex items-center justify-between">
-                                                                    <h4 className="text-sm font-semibold text-gray-800 flex items-center">
-                                                                        <Home className="w-4 h-4 mr-2 text-purple-600" />
-                                                                        Collateral Documents ({collateralDocs.length})
-                                                                    </h4>
-                                                                    <ChevronDown className={cn("w-5 h-5 text-gray-500 transition-transform", openSections['collateral'] && "rotate-180")} />
-                                                                </div>
-                                                            </CardContent>
-                                                        </CollapsibleTrigger>
-                                                        <CollapsibleContent>
-                                                            <CardContent className="px-4 pb-4 pt-0 space-y-2">
-                                                                {collateralDocs.map(renderDocumentCard)}
-                                                                {shouldShowPropertyGalleryCard && (
-                                                                    <Card className="border border-purple-100 bg-purple-50/50">
-                                                                        <CardContent className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                                                            <div>
-                                                                                <p className="text-sm font-semibold text-gray-900">Property Images</p>
-                                                                                <p className="text-xs text-gray-600">{PROPERTY_PHOTO_REQUIRED_COUNT} photos uploaded</p>
-                                                                            </div>
-                                                                            <Button
-                                                                                variant="outline"
-                                                                                size="sm"
-                                                                                onClick={() => setShowPropertyGallery(true)}
-                                                                            >
-                                                                                Preview
-                                                                            </Button>
-                                                                        </CardContent>
-                                                                    </Card>
-                                                                )}
-                                                            </CardContent>
-                                                        </CollapsibleContent>
+                                                            <CollapsibleTrigger className="w-full">
+                                                                <CardContent className="p-4">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <h4 className="text-sm font-semibold text-gray-800 flex items-center">
+                                                                            <Home className="w-4 h-4 mr-2 text-purple-600" />
+                                                                            Collateral Documents ({collateralDocs.length})
+                                                                        </h4>
+                                                                        <ChevronDown className={cn("w-5 h-5 text-gray-500 transition-transform", openSections['collateral'] && "rotate-180")} />
+                                                                    </div>
+                                                                </CardContent>
+                                                            </CollapsibleTrigger>
+                                                            <CollapsibleContent>
+                                                                <CardContent className="px-4 pb-4 pt-0 space-y-2">
+                                                                    {collateralDocs.map(renderDocumentCard)}
+                                                                    {shouldShowPropertyGalleryCard && (
+                                                                        <Card className="border border-purple-100 bg-purple-50/50">
+                                                                            <CardContent className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                                                                <div>
+                                                                                    <p className="text-sm font-semibold text-gray-900">Property Images</p>
+                                                                                    <p className="text-xs text-gray-600">{PROPERTY_PHOTO_REQUIRED_COUNT} photos uploaded</p>
+                                                                                </div>
+                                                                                <Button
+                                                                                    variant="outline"
+                                                                                    size="sm"
+                                                                                    onClick={() => setShowPropertyGallery(true)}
+                                                                                >
+                                                                                    Preview
+                                                                                </Button>
+                                                                            </CardContent>
+                                                                        </Card>
+                                                                    )}
+                                                                </CardContent>
+                                                            </CollapsibleContent>
                                                         </Card>
                                                     </Collapsible>
                                                 )}
@@ -2687,18 +2702,18 @@ export default function Step8Page() {
                     </div>
                 </div>
 
-                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
-                        <div className="flex gap-3 max-w-2xl mx-auto">
-                            <Button
-                                onClick={handleSave}
-                                className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white"
-                            >
-                                Save Information
-                            </Button>
-                        </div>
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
+                    <div className="flex gap-3 max-w-2xl mx-auto">
+                        <Button
+                            onClick={handleSave}
+                            className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white"
+                        >
+                            Save Information
+                        </Button>
                     </div>
-
                 </div>
+
+            </div>
 
             {/* Preview Modal */}
             <Dialog open={showPreview} onOpenChange={setShowPreview}>
@@ -2714,8 +2729,8 @@ export default function Step8Page() {
                                 {/* Single Image Preview */}
                                 {previewFile.previewUrl && !previewFile.frontPreviewUrl && (
                                     <div className="flex justify-center">
-                                        <img 
-                                            src={previewFile.previewUrl} 
+                                        <img
+                                            src={previewFile.previewUrl}
                                             alt={previewFile.name}
                                             className="max-w-full h-auto rounded-lg border"
                                         />
@@ -2728,8 +2743,8 @@ export default function Step8Page() {
                                         <div>
                                             <h3 className="font-medium text-gray-900 mb-2">Front Side</h3>
                                             <div className="flex justify-center">
-                                                <img 
-                                                    src={previewFile.frontPreviewUrl} 
+                                                <img
+                                                    src={previewFile.frontPreviewUrl}
                                                     alt="Front side"
                                                     className="max-w-full h-auto rounded-lg border"
                                                 />
@@ -2741,8 +2756,8 @@ export default function Step8Page() {
                                         <div>
                                             <h3 className="font-medium text-gray-900 mb-2">Back Side</h3>
                                             <div className="flex justify-center">
-                                                <img 
-                                                    src={previewFile.backPreviewUrl} 
+                                                <img
+                                                    src={previewFile.backPreviewUrl}
                                                     alt="Back side"
                                                     className="max-w-full h-auto rounded-lg border"
                                                 />

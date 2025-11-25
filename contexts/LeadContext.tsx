@@ -33,13 +33,13 @@ export interface PaymentSession {
 }
 
 export interface CoApplicant {
-    id: string;
-    relationship: string;
-    currentStep: 0 | 1 | 2 | 3 | 4;
-    isComplete: boolean;
-    workflowId?: string;
-    workflowIndex?: number;
-    data: any;
+  id: string;
+  relationship: string;
+  currentStep: 0 | 1 | 2 | 3 | 4;
+  isComplete: boolean;
+  workflowId?: string;
+  workflowIndex?: number;
+  data: any;
 }
 
 export interface Lead {
@@ -103,7 +103,7 @@ interface LeadContextType {
   deletePaymentFromLead: (leadId: string, paymentId: string) => void;
   refreshLeads: () => Promise<void>;
   fetchLeadDetails: (applicationId: string, options?: { force?: boolean }) => Promise<Lead | null>;
-  
+
   // Co-Applicant specific functions
   updateCoApplicant: (leadId: string, coApplicantId: string, data: Partial<CoApplicant>) => void;
   deleteCoApplicant: (leadId: string, coApplicantId: string) => void;
@@ -286,10 +286,33 @@ function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Le
       };
     }) ?? baseLead.formData.step3?.addresses;
 
-  const coApplicants =
+  let coApplicants =
     Array.isArray(coApplicantsData?.coApplicants) && coApplicantsData?.coApplicants.length > 0
       ? coApplicantsData.coApplicants
       : baseLead.formData.coApplicants ?? [];
+
+  // Sync co-applicant verification status from participants array
+  if (detail.application_details?.participants) {
+    coApplicants = coApplicants.map((coApp: any) => {
+      const matchingParticipant = detail.application_details?.participants?.find(
+        (p: any) => p.participant_type === 'co-applicant' && p.co_applicant_index === coApp.workflowIndex
+      );
+
+      if (matchingParticipant) {
+        const isVerified = matchingParticipant.personal_info?.mobile_number?.verified;
+        // Update isMobileVerified in data.basicDetails or data.step1
+        const newData = { ...coApp.data };
+        if (newData.basicDetails) {
+          newData.basicDetails = { ...newData.basicDetails, isMobileVerified: isVerified };
+        } else {
+          // Fallback or default structure
+          newData.step1 = { ...newData.step1, isMobileVerified: isVerified };
+        }
+        return { ...coApp, data: newData };
+      }
+      return coApp;
+    });
+  }
 
   const dob = personalInfo?.date_of_birth ?? baseLead.dob;
   const age = calculateAge(dob);
@@ -332,60 +355,64 @@ function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Le
         productType: newLeadData?.product_type ?? baseLead.formData.step1?.productType,
         applicationType: newLeadData?.application_type ?? baseLead.formData.step1?.applicationType,
         mobile: mobileNumber ?? baseLead.formData.step1?.mobile,
-        isMobileVerified: completedSteps.consent_mobile ?? baseLead.formData.step1?.isMobileVerified,
+        isMobileVerified:
+          detail.application_details?.participants?.find(p => p.participant_type === 'primary_participant')?.personal_info?.mobile_number?.verified ??
+          completedSteps.consent_mobile ??
+          newLeadData?.mobile_verified ??
+          baseLead.formData.step1?.isMobileVerified,
         firstName,
         lastName,
         createdAt: newLeadData?.created_at ?? baseLead.formData.step1?.createdAt,
       },
       step2: personalInfo
         ? {
-            ...baseLead.formData.step2,
-            hasPan: personalInfo.pan_number ? 'yes' : baseLead.formData.step2?.hasPan ?? 'no',
-            autoFilledViaPAN: personalInfo.pan_number ? true : baseLead.formData.step2?.autoFilledViaPAN,
-            panNumber: personalInfo.pan_number ?? baseLead.formData.step2?.panNumber,
-            date_of_birth: personalInfo.date_of_birth ?? baseLead.formData.step2?.date_of_birth,
-            dob: personalInfo.date_of_birth ?? baseLead.formData.step2?.dob,
-            gender: personalInfo.gender ?? baseLead.formData.step2?.gender,
-            alternateIdType: personalInfoAny?.alternate_id_type ?? baseLead.formData.step2?.alternateIdType,
-            documentNumber: personalInfoAny?.alternate_id_number ?? baseLead.formData.step2?.documentNumber,
-          }
+          ...baseLead.formData.step2,
+          hasPan: personalInfo.pan_number ? 'yes' : baseLead.formData.step2?.hasPan ?? 'no',
+          autoFilledViaPAN: personalInfo.pan_number ? true : baseLead.formData.step2?.autoFilledViaPAN,
+          panNumber: personalInfo.pan_number ?? baseLead.formData.step2?.panNumber,
+          date_of_birth: personalInfo.date_of_birth ?? baseLead.formData.step2?.date_of_birth,
+          dob: personalInfo.date_of_birth ?? baseLead.formData.step2?.dob,
+          gender: personalInfo.gender ?? baseLead.formData.step2?.gender,
+          alternateIdType: personalInfoAny?.alternate_id_type ?? baseLead.formData.step2?.alternateIdType,
+          documentNumber: personalInfoAny?.alternate_id_number ?? baseLead.formData.step2?.documentNumber,
+        }
         : baseLead.formData.step2,
       step3: addresses
         ? {
-            ...baseLead.formData.step3,
-            addresses,
-          }
+          ...baseLead.formData.step3,
+          addresses,
+        }
         : baseLead.formData.step3,
       step6:
         collateralDetails && Object.keys(collateralDetails).length > 0
           ? {
-              ...baseLead.formData.step6,
-              collateralType: collateralDetails.collateral_type ?? baseLead.formData.step6?.collateralType,
-              collateralSubType: collateralDetails.collateral_sub_type ?? baseLead.formData.step6?.collateralSubType,
-              ownershipType: collateralDetails.ownership_type ?? baseLead.formData.step6?.ownershipType,
-              propertyValue: collateralDetails.property_value ?? baseLead.formData.step6?.propertyValue,
-              location: collateralDetails.location ?? baseLead.formData.step6?.location,
-              description: collateralDetails.description ?? baseLead.formData.step6?.description,
-            }
+            ...baseLead.formData.step6,
+            collateralType: collateralDetails.collateral_type ?? baseLead.formData.step6?.collateralType,
+            collateralSubType: collateralDetails.collateral_sub_type ?? baseLead.formData.step6?.collateralSubType,
+            ownershipType: collateralDetails.ownership_type ?? baseLead.formData.step6?.ownershipType,
+            propertyValue: collateralDetails.property_value ?? baseLead.formData.step6?.propertyValue,
+            location: collateralDetails.location ?? baseLead.formData.step6?.location,
+            description: collateralDetails.description ?? baseLead.formData.step6?.description,
+          }
           : baseLead.formData.step6,
       step7:
         loanDetails && Object.keys(loanDetails).length > 0
           ? {
-              ...baseLead.formData.step7,
-              loanAmount: loanDetails.loan_amount ? Number(loanDetails.loan_amount) : baseLead.formData.step7?.loanAmount,
-              loanPurpose: loanDetails.loan_purpose ?? baseLead.formData.step7?.loanPurpose,
-              purposeDescription: loanDetails.purpose_description ?? baseLead.formData.step7?.purposeDescription,
-              interestRate: loanDetails.interest_rate ?? baseLead.formData.step7?.interestRate,
-              tenure: loanDetails.tenure ?? baseLead.formData.step7?.tenure,
-              sourcingChannel: loanDetails.sourcing_channel ?? baseLead.formData.step7?.sourcingChannel,
-            }
+            ...baseLead.formData.step7,
+            loanAmount: loanDetails.loan_amount ? Number(loanDetails.loan_amount) : baseLead.formData.step7?.loanAmount,
+            loanPurpose: loanDetails.loan_purpose ?? baseLead.formData.step7?.loanPurpose,
+            purposeDescription: loanDetails.purpose_description ?? baseLead.formData.step7?.purposeDescription,
+            interestRate: loanDetails.interest_rate ?? baseLead.formData.step7?.interestRate,
+            tenure: loanDetails.tenure ?? baseLead.formData.step7?.tenure,
+            sourcingChannel: loanDetails.sourcing_channel ?? baseLead.formData.step7?.sourcingChannel,
+          }
           : baseLead.formData.step7,
       step8:
         documentsData && documentsData.files
           ? {
-              ...baseLead.formData.step8,
-              files: documentsData.files,
-            }
+            ...baseLead.formData.step8,
+            files: documentsData.files,
+          }
           : baseLead.formData.step8,
     },
   };
@@ -605,9 +632,9 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
   const deleteLead = useCallback(
     (leadId: string) => {
       setLeads(prevLeads => prevLeads.filter(lead => lead.id !== leadId));
-    if (currentLead?.id === leadId) {
-      setCurrentLead(null);
-    }
+      if (currentLead?.id === leadId) {
+        setCurrentLead(null);
+      }
     },
     [currentLead]
   );
@@ -761,9 +788,9 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
     setCurrentLead(prev => {
       if (!prev || prev.id !== leadId) return prev;
       const coApplicants = filterer(prev.formData.coApplicants ?? []);
-              return {
+      return {
         ...prev,
-                  formData: {
+        formData: {
           ...prev.formData,
           coApplicants,
         },

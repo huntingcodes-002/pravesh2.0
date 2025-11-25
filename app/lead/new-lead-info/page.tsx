@@ -94,10 +94,10 @@ export default function NewLeadInfoPage() {
         // Extract application_details from response
         const successResponse = response as ApiSuccess<any>;
         const applicationDetails = successResponse.data?.application_details || successResponse.application_details;
-        
+
         if (applicationDetails) {
           setDetailedInfo(applicationDetails);
-          
+
           // Update payment status from payment_result
           if (applicationDetails.payment_result) {
             const paymentState = applicationDetails.payment_result.state?.toLowerCase();
@@ -109,7 +109,7 @@ export default function NewLeadInfoPage() {
             }
             setPaymentStatus(nextStatus);
           }
-          
+
           // Extract co-applicants from participants
           const participants = applicationDetails.participants || [];
           const coApplicants = participants
@@ -117,14 +117,14 @@ export default function NewLeadInfoPage() {
             .map((participant: Participant) => {
               const fullName = participant?.personal_info?.full_name;
               const name = fullName?.value || (typeof fullName === 'string' ? fullName : 'Unnamed Co-applicant');
-              const index = typeof participant?.co_applicant_index === 'number' 
-                ? participant.co_applicant_index 
+              const index = typeof participant?.co_applicant_index === 'number'
+                ? participant.co_applicant_index
                 : -1;
               return { index, name };
             })
             .filter((coApp: { index: number; name: string }) => coApp.index >= 0)
             .sort((a: { index: number; name: string }, b: { index: number; name: string }) => a.index - b.index);
-          
+
           setApiCoApplicants(coApplicants);
         }
       } catch (error) {
@@ -276,33 +276,38 @@ export default function NewLeadInfoPage() {
   // Check if all required documents are uploaded
   const areAllDocumentsUploaded = useMemo(() => {
     if (!currentLead) return false;
-    
+
     const uploadedFiles = currentLead.formData?.step8?.files || [];
     if (!uploadedFiles || uploadedFiles.length === 0) return false;
-    
+
     const successFiles = uploadedFiles.filter((f: any) => f.status === 'Success');
     const uploadedDocTypes = new Set(successFiles.map((f: any) => f.type));
-    
+
     const requiredDocs = generateRequiredDocumentList(currentLead);
     const allUploaded = requiredDocs.every(docType => uploadedDocTypes.has(docType));
-    
+
     return allUploaded;
   }, [currentLead]);
 
   // Calculate Step 2 status (Basic Details) - based on completion flag
   const getStep2Status = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
-    
+
     // If we have primary participant data from API, consider it completed
     if (primaryParticipant?.personal_info) {
       const personalInfo = primaryParticipant.personal_info;
-      if (personalInfo.full_name?.value || personalInfo.pan_number?.value || personalInfo.mobile_number?.value) {
+      // Require Name AND Mobile AND (PAN OR DOB) for completion
+      if (personalInfo.full_name?.value && personalInfo.mobile_number?.value && (personalInfo.pan_number?.value || personalInfo.date_of_birth?.value)) {
         return 'completed';
       }
+      // If we have some data but not all, return in-progress
+      if (personalInfo.full_name?.value || personalInfo.mobile_number?.value || personalInfo.pan_number?.value) {
+        return 'in-progress';
+      }
     }
-    
+
     if (currentLead.step2Completed === true) return 'completed';
-    
+
     const step2 = currentLead.formData?.step2;
     if (!step2) return 'incomplete';
 
@@ -318,34 +323,35 @@ export default function NewLeadInfoPage() {
 
     const hasAllData = step2.hasPan === 'yes'
       ? Boolean(
-          (currentLead.panNumber && currentLead.panNumber.length === 10) ||
-          (step2.pan && step2.pan.length === 10)
-        ) && Boolean(gender && dob)
+        (currentLead.panNumber && currentLead.panNumber.length === 10) ||
+        (step2.pan && step2.pan.length === 10)
+      ) && Boolean(gender && dob)
       : Boolean(
-          dob &&
-          gender &&
-          maritalStatus &&
-          step2.alternateIdType &&
-          step2.documentNumber &&
-          step2.panUnavailabilityReason
-        );
-    
+        dob &&
+        gender &&
+        maritalStatus &&
+        step2.alternateIdType &&
+        step2.documentNumber &&
+        step2.panUnavailabilityReason
+      );
+
     if (hasAllData || hasAnyData) return 'in-progress';
     return 'incomplete';
   };
 
+
   // Calculate Step 3 status (Address Details) - based on completion flag
   const getStep3Status = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
-    
+
     // If we have addresses from API, consider it completed
     if (primaryParticipant?.addresses && primaryParticipant.addresses.length > 0) {
       return 'completed';
     }
-    
+
     // Check completion flag first (from successful API submission)
     if (currentLead.step3Completed === true) return 'completed';
-    
+
     const step3 = currentLead.formData?.step3;
     const addresses = step3?.addresses || [];
     const hasAnyData = addresses.length > 0 && addresses.some((addr: any) =>
@@ -362,7 +368,7 @@ export default function NewLeadInfoPage() {
       addr.postalCode &&
       addr.postalCode.length === 6
     );
-    
+
     if (hasRequiredData || hasAnyData) return 'in-progress';
     return 'incomplete';
   };
@@ -371,16 +377,16 @@ export default function NewLeadInfoPage() {
   // Both sections must be completed (via API) for this to be marked as completed
   const getApplicantDetailsStatus = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
-    
+
     // Check completion flags - both must be true
     if (currentLead.step2Completed === true && currentLead.step3Completed === true) {
       return 'completed';
     }
-    
+
     // Check if either section has been submitted
     const step2Status = getStep2Status();
     const step3Status = getStep3Status();
-    
+
     if (step2Status === 'incomplete' && step3Status === 'incomplete') return 'incomplete';
     return 'in-progress';
   };
@@ -395,68 +401,102 @@ export default function NewLeadInfoPage() {
 
   const getCollateralStatus = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
-    
-    // If we have collateral details from API, consider it completed
+
+    // If we have collateral details from API
     if (detailedInfo?.collateral_details) {
-      return 'completed';
+      const { estimated_property_value, collateral_type, ownership_type } = detailedInfo.collateral_details;
+
+      // If we have a value > 0, consider it completed (as it implies successful submission)
+      if (estimated_property_value && Number(estimated_property_value) > 0) {
+        return 'completed';
+      }
+
+      // If we have some data but value is 0, it's in progress
+      if (collateral_type || ownership_type) {
+        return 'in-progress';
+      }
+
+      // If object exists but empty, fall through to local check
     }
-    
+
     const step6 = currentLead.formData?.step6;
     if (!step6) return 'incomplete';
-    
-    const hasRequiredFields = step6.collateralType && 
+
+    const hasRequiredFields = step6.collateralType &&
       (step6.collateralType !== 'property' || step6.collateralSubType) &&
-      step6.ownershipType && 
+      step6.ownershipType &&
       step6.propertyValue;
-    
-    if (hasRequiredFields) return 'completed';
+
+    if (hasRequiredFields) return 'in-progress';
     if (step6.collateralType || step6.ownershipType || step6.propertyValue) return 'in-progress';
     return 'incomplete';
   };
 
   const getLoanRequirementStatus = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
-    
-    // If we have loan details from API, consider it completed
+
+    // If we have loan details from API
     if (detailedInfo?.loan_details) {
-      return 'completed';
+      const { loan_amount_requested, loan_purpose } = detailedInfo.loan_details;
+
+      // If we have amount > 0, consider it completed
+      if (loan_amount_requested && Number(loan_amount_requested) > 0) {
+        return 'completed';
+      }
+
+      // If we have purpose but 0 amount, it's in progress
+      if (loan_purpose) {
+        return 'in-progress';
+      }
+
+      // If object exists but empty, fall through to local check
     }
-    
+
     const step7 = currentLead.formData?.step7;
     if (!step7) return 'incomplete';
-    
-    const hasRequiredFields = step7.loanAmount > 0 && 
-      step7.loanPurpose && 
-      step7.sourcingChannel && 
-      step7.interestRate && 
+
+    const hasRequiredFields = step7.loanAmount > 0 &&
+      step7.loanPurpose &&
+      step7.sourcingChannel &&
+      step7.interestRate &&
       step7.tenure;
-    
-    if (hasRequiredFields) return 'completed';
+
+    if (hasRequiredFields) return 'in-progress';
     if (step7.loanAmount > 0 || step7.loanPurpose || step7.sourcingChannel || step7.interestRate || step7.tenure) return 'in-progress';
     return 'incomplete';
   };
 
   const getEmploymentStatus = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
-    
+
+    // If we have employment details from API, consider it completed
+    // @ts-ignore - employment_details might not be in the strict type definition yet
+    if (primaryParticipant?.employment_details) {
+      // @ts-ignore
+      const { occupation_type } = primaryParticipant.employment_details;
+      if (occupation_type) {
+        return 'completed';
+      }
+    }
+
     const step5 = currentLead.formData?.step5;
     if (!step5 || !step5.occupationType) return 'incomplete';
-    
+
     // Check if required fields are filled based on occupation type
     switch (step5.occupationType) {
       case 'others':
-        if (step5.natureOfOccupation) return 'completed';
+        if (step5.natureOfOccupation) return 'in-progress';
         return 'in-progress';
       case 'salaried':
         const salariedValid = step5.employerName && step5.natureOfBusiness && step5.industry && step5.employmentStatus && step5.employedFrom;
         if (step5.employmentStatus === 'past' && !step5.employedTo) return 'in-progress';
-        return salariedValid ? 'completed' : 'in-progress';
+        return salariedValid ? 'in-progress' : 'in-progress';
       case 'self-employed-non-professional':
         const senpValid = step5.orgNameSENP && step5.natureOfBusinessSENP && step5.industrySENP && step5.yearsInProfessionSENP && step5.monthsInProfessionSENP;
-        return senpValid ? 'completed' : 'in-progress';
+        return senpValid ? 'in-progress' : 'in-progress';
       case 'self-employed-professional':
         const sepValid = step5.orgNameSEP && step5.natureOfProfession && step5.industrySEP && step5.registrationNumber && step5.yearsInProfessionSEP && step5.monthsInProfessionSEP;
-        return sepValid ? 'completed' : 'in-progress';
+        return sepValid ? 'in-progress' : 'in-progress';
       default:
         return 'incomplete';
     }
@@ -476,7 +516,7 @@ export default function NewLeadInfoPage() {
 
   const handleSubmit = () => {
     if (!currentLead) return;
-    
+
     if (!canSubmitApplication) {
       toast({
         title: 'Cannot Submit',
@@ -485,14 +525,14 @@ export default function NewLeadInfoPage() {
       });
       return;
     }
-    
+
     submitLead(currentLead.id);
     toast({
       title: 'Application Submitted',
       description: 'Your application has been submitted successfully.',
       className: 'bg-green-50 border-green-200'
     });
-    
+
     router.push('/leads');
   };
 
@@ -538,7 +578,7 @@ export default function NewLeadInfoPage() {
       'CollateralPapers': 'Sale Deed',
       'PropertyPhotos': 'Property Photos',
     };
-    
+
     // Handle co-applicant documents (e.g., "PAN_123" -> "Pan")
     const baseType = docType.split('_')[0];
     const displayName = mapping[baseType] || baseType;
@@ -619,8 +659,8 @@ export default function NewLeadInfoPage() {
   // Show loading state while fetching detailed info
   if (isLoadingDetailedInfo && !detailedInfo) {
     return (
-      <DashboardLayout 
-        title="New Lead Information" 
+      <DashboardLayout
+        title="New Lead Information"
         showNotifications={false}
         showExitButton={true}
         onExit={handleExit}
@@ -653,9 +693,21 @@ export default function NewLeadInfoPage() {
     !isDocumentsCompleted;
 
   const tileWrapperClass =
-    'flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-[#F7F8FB] px-4 py-4';
+    'flex flex-row items-start justify-between gap-4 border-b border-gray-100 pb-4 mb-4 last:border-0 last:mb-0';
   const tileButtonClass =
-    'rounded-lg border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 h-10 text-sm font-semibold bg-white transition';
+    'border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent';
+
+  const renderSectionStatusPill = (status: SectionStatus) => {
+    const base = 'rounded-full text-xs font-semibold px-4 py-1 border';
+    switch (status) {
+      case 'completed':
+        return <Badge className={`${base} bg-green-100 border-green-200 text-green-700`}>Completed</Badge>;
+      case 'in-progress':
+        return <Badge className={`${base} bg-yellow-100 border-yellow-200 text-yellow-700`}>In Progress</Badge>;
+      default:
+        return <Badge className={`${base} bg-gray-100 border-gray-200 text-gray-600`}>No Data</Badge>;
+    }
+  };
 
   const renderBasicDetailsTile = () => {
     const hasDetails = step2Status !== 'incomplete' && (primaryParticipant || currentLead);
@@ -667,12 +719,12 @@ export default function NewLeadInfoPage() {
     return (
       <div className={tileWrapperClass}>
         <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+          <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
             <UserCheck className="w-5 h-5" />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 text-sm text-gray-900">
             {hasDetails ? (
-              <div className="mt-2 space-y-1 text-xs text-gray-600">
+              <div className="space-y-1">
                 {(() => {
                   const fullName = primaryParticipant?.personal_info?.full_name;
                   const nameValue = fullName?.value || (typeof fullName === 'string' ? fullName : null);
@@ -685,10 +737,10 @@ export default function NewLeadInfoPage() {
 
                   if (!displayName) return null;
                   return (
-                    <p className="flex items-center gap-1">
+                    <p className="flex items-center gap-2">
                       {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                       <span>
-                        <span className="font-medium">Full Name:</span> {displayName}
+                        <span className="font-semibold">Full Name:</span> {displayName}
                       </span>
                     </p>
                   );
@@ -705,10 +757,10 @@ export default function NewLeadInfoPage() {
                     : dobDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
                   return (
-                    <p className="flex items-center gap-1">
+                    <p className="flex items-center gap-2">
                       {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                       <span>
-                        <span className="font-medium">Date of Birth:</span> {formatted}
+                        <span className="font-semibold">Date of Birth:</span> {formatted}
                       </span>
                     </p>
                   );
@@ -720,10 +772,10 @@ export default function NewLeadInfoPage() {
 
                   if (panValue) {
                     return (
-                      <p className="flex items-center gap-1">
+                      <p className="flex items-center gap-2">
                         {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                         <span>
-                          <span className="font-medium">PAN Number:</span> {panValue}
+                          <span className="font-semibold">PAN Number:</span> {panValue}
                         </span>
                       </p>
                     );
@@ -733,7 +785,7 @@ export default function NewLeadInfoPage() {
                   if (step2?.hasPan === 'no' && step2?.alternateIdType && step2?.documentNumber) {
                     return (
                       <p>
-                        <span className="font-medium">{step2.alternateIdType}:</span> {step2.documentNumber}
+                        <span className="font-semibold">{step2.alternateIdType}:</span> {step2.documentNumber}
                       </p>
                     );
                   }
@@ -746,10 +798,10 @@ export default function NewLeadInfoPage() {
 
                   if (!mobileValue) return null;
                   return (
-                    <p className="flex items-center gap-1">
+                    <p className="flex items-center gap-2">
                       {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                       <span>
-                        <span className="font-medium">Mobile:</span> {mobileValue}
+                        <span className="font-semibold">Mobile:</span> {mobileValue}
                       </span>
                     </p>
                   );
@@ -759,25 +811,25 @@ export default function NewLeadInfoPage() {
                   if (!gender) return null;
                   return (
                     <p>
-                      <span className="font-medium">Gender:</span> {gender.charAt(0).toUpperCase() + gender.slice(1)}
+                      <span className="font-semibold">Gender:</span> {gender.charAt(0).toUpperCase() + gender.slice(1)}
                     </p>
                   );
                 })()}
                 {(currentLead?.formData?.step2?.autoFilledViaPAN || primaryParticipant?.personal_info?.pan_number?.verified) && (
-                  <p className="text-[11px] text-gray-400">Auto-filled and verified via PAN & NSDL workflow.</p>
+                  <p className="text-xs text-gray-500">Auto-filled and verified via PAN & NSDL workflow.</p>
                 )}
-                <p className="text-[11px] text-gray-400">Submitted by RM</p>
+                <p className="text-xs text-gray-500">Submitted by RM</p>
               </div>
             ) : (
-              <div className="space-y-0.5">
-                <p className="text-sm font-semibold text-gray-900">No basic details added yet</p>
+              <div className="space-y-0.5 text-sm">
+                <p className="font-semibold text-gray-900">No basic details added yet</p>
                 <p className="text-xs text-gray-500">Upload PAN to auto-fill Name, DOB & PAN Number</p>
               </div>
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2 min-w-[160px]">
-          {getStatusBadge(step2Status)}
+        <div className="flex flex-col items-end gap-2 min-w-[140px]">
+          {renderSectionStatusPill(step2Status)}
           {showPanVerifiedPill && (
             <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
               Verified via PAN
@@ -801,37 +853,38 @@ export default function NewLeadInfoPage() {
       step3Status !== 'incomplete' &&
       ((primaryParticipant?.addresses && primaryParticipant.addresses.length > 0) ||
         (currentLead?.formData?.step3?.addresses && currentLead.formData.step3.addresses.length > 0));
-    const step3 = currentLead?.formData?.step3;
+    const apiAddresses = primaryParticipant?.addresses || [];
+    const formAddresses = currentLead?.formData?.step3?.addresses || [];
     const showAadhaarVerifiedPill = Boolean(
-      step3?.autoFilledViaAadhaar || step3?.addresses?.some((addr: any) => addr?.autoFilledViaAadhaar)
+      currentLead?.formData?.step3?.autoFilledViaAadhaar ||
+      formAddresses.some((addr: any) => addr?.autoFilledViaAadhaar) ||
+      apiAddresses.some((addr: any) => addr?.autoFilledViaAadhaar || addr?.auto_filled_via_aadhaar)
     );
 
     return (
       <div className={tileWrapperClass}>
         <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+          <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
             <MapPin className="w-5 h-5" />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 text-sm text-gray-900">
             {hasDetails ? (
-              <div className="mt-2 space-y-1 text-xs text-gray-600">
+              <div className="space-y-1">
                 {(() => {
-                  const apiAddresses = primaryParticipant?.addresses || [];
-                  const formAddresses = currentLead?.formData?.step3?.addresses || [];
                   const addressesToShow =
                     apiAddresses.length > 0
                       ? apiAddresses.map((addr) => ({
-                          address_line_1: addr.address_line_1,
-                          city: addr.city,
-                          pincode: addr.pincode,
-                          is_primary: addr.is_primary,
-                        }))
+                        address_line_1: addr.address_line_1,
+                        city: addr.city,
+                        pincode: addr.pincode,
+                        is_primary: addr.is_primary,
+                      }))
                       : formAddresses.map((addr: any) => ({
-                          address_line_1: addr.addressLine1,
-                          city: addr.city,
-                          pincode: addr.postalCode,
-                          is_primary: addr.isPrimary,
-                        }));
+                        address_line_1: addr.addressLine1,
+                        city: addr.city,
+                        pincode: addr.postalCode,
+                        is_primary: addr.isPrimary,
+                      }));
 
                   if (addressesToShow.length === 0) return null;
                   const primaryAddress = addressesToShow.find((addr: any) => addr.is_primary) || addressesToShow[0];
@@ -839,46 +892,46 @@ export default function NewLeadInfoPage() {
                   return (
                     <>
                       {primaryAddress.address_line_1 && (
-                        <p className="flex items-center gap-1">
+                        <p className="flex items-center gap-2">
                           {showAadhaarVerifiedPill && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                           <span>
-                            <span className="font-medium">Address:</span> {primaryAddress.address_line_1}
+                            <span className="font-semibold">Address:</span> {primaryAddress.address_line_1}
                           </span>
                         </p>
                       )}
                       {primaryAddress.city && (
-                        <p className="flex items-center gap-1">
+                        <p className="flex items-center gap-2">
                           {showAadhaarVerifiedPill && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                           <span>
-                            <span className="font-medium">City:</span> {primaryAddress.city}
+                            <span className="font-semibold">City:</span> {primaryAddress.city}
                           </span>
                         </p>
                       )}
                       {primaryAddress.pincode && (
-                        <p className="flex items-center gap-1">
+                        <p className="flex items-center gap-2">
                           {showAadhaarVerifiedPill && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
                           <span>
-                            <span className="font-medium">Pincode:</span> {primaryAddress.pincode}
+                            <span className="font-semibold">Pincode:</span> {primaryAddress.pincode}
                           </span>
                         </p>
                       )}
                       {showAadhaarVerifiedPill && (
-                        <p className="text-[11px] text-gray-400">Auto-filled and verified via Aadhaar OCR workflow.</p>
+                        <p className="text-xs text-gray-500">Auto-filled and verified via Aadhaar OCR workflow.</p>
                       )}
-                      <p className="text-[11px] text-gray-400">Submitted by RM</p>
                     </>
                   );
                 })()}
               </div>
             ) : (
-              <div className="space-y-0.5">
-                <p className="text-sm font-semibold text-gray-900">No address details added yet</p>
+              <div className="space-y-0.5 text-sm">
+                <p className="font-semibold text-gray-900">No address details added yet</p>
                 <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill Address & Pincode</p>
               </div>
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2 min-w-[160px]">
+        <div className="flex flex-col items-end gap-2 min-w-[140px]">
+          {renderSectionStatusPill(step3Status)}
           {showAadhaarVerifiedPill && (
             <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
               Verified via Aadhaar
@@ -904,7 +957,7 @@ export default function NewLeadInfoPage() {
     return (
       <div className={tileWrapperClass}>
         <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+          <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
             <Briefcase className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
@@ -967,19 +1020,8 @@ export default function NewLeadInfoPage() {
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          {hasDetails && (
-            <Badge
-              className={cn(
-                'rounded-full text-[11px] px-3 py-1 border',
-                employmentStatus === 'completed'
-                  ? 'bg-white border-green-200 text-green-700'
-                  : 'bg-white border-yellow-200 text-yellow-700'
-              )}
-            >
-              {employmentStatus === 'completed' ? 'Completed' : 'In Progress'}
-            </Badge>
-          )}
+        <div className="flex flex-col items-end gap-2 min-w-[140px]">
+          {renderSectionStatusPill(employmentStatus)}
           <Button
             variant="outline"
             size="sm"
@@ -996,7 +1038,7 @@ export default function NewLeadInfoPage() {
   const renderAccountAggregatorTile = () => (
     <div className={tileWrapperClass}>
       <div className="flex items-start gap-3 flex-1 min-w-0">
-        <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+        <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
           <Database className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
@@ -1004,7 +1046,7 @@ export default function NewLeadInfoPage() {
           <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
         </div>
       </div>
-      <div className="flex flex-col items-end gap-2 min-w-[160px]">
+      <div className="flex flex-col items-end gap-2 min-w-[140px]">
         <Button variant="outline" size="sm" className={tileButtonClass}>
           Initiate
         </Button>
@@ -1012,9 +1054,33 @@ export default function NewLeadInfoPage() {
     </div>
   );
 
+  const [showKycModal, setShowKycModal] = useState(false);
+
+  useEffect(() => {
+    // Show KYC modal if payment is completed and no documents are uploaded
+    if (isPaymentCompleted && currentLead) {
+      const hasDocuments = currentLead.formData?.step8?.files && currentLead.formData.step8.files.length > 0;
+      if (!hasDocuments) {
+        // Small delay to ensure smooth transition after payment or page load
+        const timer = setTimeout(() => setShowKycModal(true), 1000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isPaymentCompleted, currentLead]);
+
+  const handleKycModalAction = (action: 'aadhaar' | 'pan' | 'skip') => {
+    if (action === 'skip') {
+      setShowKycModal(false);
+    } else if (action === 'aadhaar') {
+      router.push('/lead/documents?preselect=aadhaar');
+    } else if (action === 'pan') {
+      router.push('/lead/documents?preselect=pan');
+    }
+  };
+
   return (
-    <DashboardLayout 
-      title="New Lead Information" 
+    <DashboardLayout
+      title="New Lead Information"
       showNotifications={false}
       showExitButton={true}
       onExit={handleExit}
@@ -1041,13 +1107,26 @@ export default function NewLeadInfoPage() {
             </div>
           </div>
 
-          
+
+          {/* Notification Banner for Pending Payment */}
+          {!isPaymentCompleted && (
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-semibold text-yellow-800">Complete Payment to Proceed</h4>
+                <p className="text-xs text-yellow-700 mt-1">
+                  Please complete the Login / IMD Fee payment to unlock the rest of the application process.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Upload Documents Button */}
           <div className="mb-6">
-            <Button 
+            <Button
               onClick={handleUploadDocuments}
-              className="w-full h-14 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl"
+              className="w-full h-14 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!isPaymentCompleted}
             >
               <Upload className="w-5 h-5 mr-2" />
               Add a Document
@@ -1064,7 +1143,7 @@ export default function NewLeadInfoPage() {
                 <h3 className="text-lg font-semibold text-gray-900">Payment Details</h3>
                 {renderPaymentStatusBadge()}
               </div>
-              
+
               {isPaymentCompleted ? (
                 <div className="mb-4 space-y-3">
                   <div className="flex items-center gap-3">
@@ -1188,7 +1267,8 @@ export default function NewLeadInfoPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => router.push('/lead/co-applicant-info')}
-                    className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
+                    className={tileButtonClass}
+                    disabled={!isPaymentCompleted}
                   >
                     Manage
                   </Button>
@@ -1213,7 +1293,8 @@ export default function NewLeadInfoPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => router.push('/lead/co-applicant-info')}
-                      className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
+                      className={tileButtonClass}
+                      disabled={!isPaymentCompleted}
                     >
                       Manage
                     </Button>
@@ -1228,7 +1309,7 @@ export default function NewLeadInfoPage() {
                         const pan = participant?.personal_info?.pan_number;
                         const mobile = participant?.personal_info?.mobile_number;
                         const dob = participant?.personal_info?.date_of_birth;
-                        
+
                         return (
                           <div
                             key={`co-applicant-${index}`}
@@ -1324,19 +1405,19 @@ export default function NewLeadInfoPage() {
                         {(() => {
                           const collateral = detailedInfo?.collateral_details;
                           const step6 = currentLead?.formData?.step6;
-                          
+
                           const collateralType = collateral?.collateral_type || step6?.collateralType || '';
                           const typeLabel = collateralType === 'ready-property' ? 'Apartment' :
-                                          collateralType === 'builder-property-under-construction' ? 'Builder Property' :
-                                          collateralType === 'construction-on-land' ? 'Construction on Land' :
-                                          collateralType === 'plot-self-construction' ? 'Plot + Self Construction' :
-                                          collateralType === 'purchase-plot' ? 'Plot' :
-                                          collateralType || 'Property';
+                            collateralType === 'builder-property-under-construction' ? 'Builder Property' :
+                              collateralType === 'construction-on-land' ? 'Construction on Land' :
+                                collateralType === 'plot-self-construction' ? 'Plot + Self Construction' :
+                                  collateralType === 'purchase-plot' ? 'Plot' :
+                                    collateralType || 'Property';
                           const value = collateral?.estimated_property_value || step6?.propertyValue || 0;
-                          const formattedValue = typeof value === 'string' 
+                          const formattedValue = typeof value === 'string'
                             ? parseFloat(value).toLocaleString('en-IN')
                             : value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-                          
+
                           return (
                             <p className="text-sm font-semibold text-gray-900">
                               {typeLabel} ₹{formattedValue}
@@ -1347,8 +1428,8 @@ export default function NewLeadInfoPage() {
                           <p className="text-xs text-gray-600">
                             <span className="font-medium">Ownership:</span> {
                               detailedInfo.collateral_details.ownership_type === 'self_ownership' ? 'Self Ownership' :
-                              detailedInfo.collateral_details.ownership_type === 'joint_ownership' ? 'Joint Ownership' :
-                              detailedInfo.collateral_details.ownership_type
+                                detailedInfo.collateral_details.ownership_type === 'joint_ownership' ? 'Joint Ownership' :
+                                  detailedInfo.collateral_details.ownership_type
                             }
                           </p>
                         )}
@@ -1429,19 +1510,19 @@ export default function NewLeadInfoPage() {
                         {(() => {
                           const loanDetails = detailedInfo?.loan_details;
                           const step7 = currentLead?.formData?.step7;
-                          
+
                           const amount = loanDetails?.loan_amount_requested || step7?.loanAmount || currentLead?.loanAmount || 0;
-                          const formattedAmount = typeof amount === 'string' 
+                          const formattedAmount = typeof amount === 'string'
                             ? parseFloat(amount).toLocaleString('en-IN')
                             : amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-                          
+
                           const tenureMonths = loanDetails?.tenure_months || step7?.tenure || 0;
                           const tenureYears = Math.floor(Number(tenureMonths) / 12);
                           const tenureMonthsRemainder = Number(tenureMonths) % 12;
-                          
+
                           const purpose = loanDetails?.loan_purpose || step7?.loanPurpose || currentLead?.loanPurpose || '';
                           const purposeLabel = getLoanPurposeLabel(purpose);
-                          
+
                           return (
                             <>
                               <p className="text-sm font-semibold text-gray-900">
@@ -1524,7 +1605,7 @@ export default function NewLeadInfoPage() {
                     // Get unique document types that have been successfully uploaded
                     const successFiles = uploadedDocuments.filter((f: any) => f.status === 'Success');
                     const uniqueDocTypes = Array.from(new Set(successFiles.map((f: any) => f.type))) as string[];
-                    
+
                     return uniqueDocTypes.map((docType: string) => (
                       <div
                         key={docType}
@@ -1558,7 +1639,7 @@ export default function NewLeadInfoPage() {
               className={cn(
                 "flex-1 h-12 rounded-lg font-medium text-white",
                 canSubmitApplication
-                  ? "bg-[#0072CE] hover:bg-[#005a9e]" 
+                  ? "bg-[#0072CE] hover:bg-[#005a9e]"
                   : "bg-gray-300 text-gray-600 cursor-not-allowed"
               )}
             >

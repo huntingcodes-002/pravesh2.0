@@ -58,7 +58,7 @@ export default function CoApplicantInfoPage() {
   const { toast } = useToast();
 
   const coApplicants = currentLead?.formData?.coApplicants ?? [];
-  
+
   // Interface for co-applicant data from detailed-info API
   interface CoApplicantFromDetailedInfo {
     co_applicant_index: number;
@@ -97,6 +97,7 @@ export default function CoApplicantInfoPage() {
       latitude?: string;
       longitude?: string;
     }>;
+    employment_details?: any;
   }
 
   const [apiCoApplicants, setApiCoApplicants] = useState<CoApplicantFromDetailedInfo[]>([]);
@@ -138,14 +139,15 @@ export default function CoApplicantInfoPage() {
         const coApplicantsData = participants
           .filter((participant: any) => participant?.participant_type === 'co-applicant')
           .map((participant: any) => ({
-            co_applicant_index: typeof participant?.co_applicant_index === 'number' 
-              ? participant.co_applicant_index 
+            co_applicant_index: typeof participant?.co_applicant_index === 'number'
+              ? participant.co_applicant_index
               : -1,
             personal_info: participant?.personal_info,
             addresses: participant?.addresses ?? [],
+            employment_details: participant?.employment_details,
           }))
           .filter((coApp: CoApplicantFromDetailedInfo) => coApp.co_applicant_index >= 0)
-          .sort((a: CoApplicantFromDetailedInfo, b: CoApplicantFromDetailedInfo) => 
+          .sort((a: CoApplicantFromDetailedInfo, b: CoApplicantFromDetailedInfo) =>
             a.co_applicant_index - b.co_applicant_index
           );
 
@@ -182,16 +184,16 @@ export default function CoApplicantInfoPage() {
   // Helper to get status from API data
   const getBasicDetailsStatusFromApi = (personalInfo: CoApplicantFromDetailedInfo['personal_info']): SectionStatus => {
     if (!personalInfo) return 'incomplete';
-    
+
     const hasName = Boolean(personalInfo.full_name?.value);
     const hasMobile = Boolean(personalInfo.mobile_number?.value);
     const hasPan = Boolean(personalInfo.pan_number?.value);
     const hasDob = Boolean(personalInfo.date_of_birth?.value);
     const hasGender = Boolean(personalInfo.gender);
-    
+
     const hasAll = hasName && hasMobile && (hasPan || hasDob) && hasGender;
     const hasAny = hasName || hasMobile || hasPan || hasDob || hasGender;
-    
+
     if (hasAll) return 'completed';
     if (hasAny) return 'in-progress';
     return 'incomplete';
@@ -220,28 +222,34 @@ export default function CoApplicantInfoPage() {
 
   const getEmploymentStatusForCoApplicant = (coApplicantId: string): SectionStatus => {
     if (!currentLead) return 'incomplete';
-    
+
     const coApplicant = coApplicants.find((ca: any) => ca.id === coApplicantId);
     if (!coApplicant) return 'incomplete';
-    
+
+    // Check if we have API data for this co-applicant
+    const apiCoApp = apiCoApplicants.find(api => api.co_applicant_index === coApplicant.workflowIndex);
+    if (apiCoApp?.employment_details?.occupation_type) {
+      return 'completed';
+    }
+
     const step5 = coApplicant?.data?.step5;
     if (!step5 || !step5.occupationType) return 'incomplete';
-    
+
     // Check if required fields are filled based on occupation type
     switch (step5.occupationType) {
       case 'others':
-        if (step5.natureOfOccupation) return 'completed';
+        if (step5.natureOfOccupation) return 'in-progress';
         return 'in-progress';
       case 'salaried':
         const salariedValid = step5.employerName && step5.natureOfBusiness && step5.industry && step5.employmentStatus && step5.employedFrom;
         if (step5.employmentStatus === 'past' && !step5.employedTo) return 'in-progress';
-        return salariedValid ? 'completed' : 'in-progress';
+        return salariedValid ? 'in-progress' : 'in-progress';
       case 'self-employed-non-professional':
         const senpValid = step5.orgNameSENP && step5.natureOfBusinessSENP && step5.industrySENP && step5.yearsInProfessionSENP && step5.monthsInProfessionSENP;
-        return senpValid ? 'completed' : 'in-progress';
+        return senpValid ? 'in-progress' : 'in-progress';
       case 'self-employed-professional':
         const sepValid = step5.orgNameSEP && step5.natureOfProfession && step5.industrySEP && step5.registrationNumber && step5.yearsInProfessionSEP && step5.monthsInProfessionSEP;
-        return sepValid ? 'completed' : 'in-progress';
+        return sepValid ? 'in-progress' : 'in-progress';
       default:
         return 'incomplete';
     }
@@ -489,7 +497,7 @@ export default function CoApplicantInfoPage() {
   };
 
   const tileWrapperClass =
-    'flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-[#F7F8FB] px-4 py-4';
+    'flex flex-row items-start justify-between gap-4 border-b border-gray-100 pb-4 mb-4 last:border-0 last:mb-0';
   const tileButtonClass =
     'rounded-lg border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 h-10 text-sm font-semibold bg-white transition';
 
@@ -588,7 +596,7 @@ export default function CoApplicantInfoPage() {
                     <div className="grid gap-4">
                       {renderBasicDetails(apiCoApp)}
                       {renderAddressDetails(apiCoApp)}
-                      
+
                       {(() => {
                         const employmentStatus = localCoApp ? getEmploymentStatusForCoApplicant(localCoApp.id) : 'incomplete';
                         const step5 = localCoApp?.data?.step5;

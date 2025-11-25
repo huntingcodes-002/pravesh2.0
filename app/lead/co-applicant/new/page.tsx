@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { startCoApplicantWorkflow, submitCoApplicantConsentMobile, isApiError, getAccessToken } from '@/lib/api';
+import { startCoApplicantWorkflow, submitCoApplicantConsentMobile, verifyCoApplicantMobileOTP, isApiError, getAccessToken } from '@/lib/api';
 import { CheckCircle, Edit, Loader, Send } from 'lucide-react';
 
 const RELATIONSHIPS = [
@@ -123,6 +123,13 @@ function CoApplicantNewPageContent() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [resendTimer, setResendTimer] = useState(30);
   const [isResendingOtp, setIsResendingOtp] = useState(false);
+
+  useEffect(() => {
+    const openOtp = searchParams.get('openOtp');
+    if (openOtp === 'true' && !isMobileVerified) {
+      setIsOtpModalOpen(true);
+    }
+  }, [searchParams, isMobileVerified]);
 
   useEffect(() => {
     if (isEditingExisting && coApplicant) {
@@ -393,20 +400,57 @@ function CoApplicantNewPageContent() {
     }
   };
 
-  const handleVerifyOtp = () => {
+  const handleVerifyOtp = async () => {
     if (otp.length !== 4) {
       toast({ title: 'Verification Failed', description: 'Please enter a 4-digit OTP.', variant: 'destructive' });
       return;
     }
 
-    setIsMobileVerified(true);
-    setIsOtpModalOpen(false);
-    setOtp('');
-    toast({
-      title: 'Verification Successful',
-      description: 'Co-applicant mobile verified.',
-      className: 'bg-green-100 border-green-200',
-    });
+    if (!currentLead?.appId || typeof coApplicant?.workflowIndex !== 'number') {
+      toast({
+        title: 'Verification Failed',
+        description: 'Missing application details. Please try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsVerifying(true);
+
+    try {
+      const response = await verifyCoApplicantMobileOTP({
+        application_id: currentLead.appId,
+        co_applicant_index: coApplicant.workflowIndex,
+        otp,
+      });
+
+      if (isApiError(response)) {
+        toast({
+          title: 'Verification Failed',
+          description: response.error || 'Failed to verify OTP. Please try again.',
+          variant: 'destructive',
+        });
+        setOtp('');
+        return;
+      }
+
+      setIsMobileVerified(true);
+      setIsOtpModalOpen(false);
+      setOtp('');
+      toast({
+        title: 'Verification Successful',
+        description: 'Co-applicant mobile verified.',
+        className: 'bg-green-100 border-green-200',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Verification Failed',
+        description: error?.message || 'Failed to verify OTP. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   const persistForm = (targetId: string, base?: CoApplicant, extra?: Partial<CoApplicant>) => {

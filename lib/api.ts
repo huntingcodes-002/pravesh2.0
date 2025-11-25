@@ -105,7 +105,7 @@ export function handleApiError(error: any): ApiError {
   if (error.response?.data) {
     return error.response.data as ApiError;
   }
-  
+
   if (error.message) {
     return {
       success: false,
@@ -114,7 +114,7 @@ export function handleApiError(error: any): ApiError {
       details: { original_error: String(error) }
     };
   }
-  
+
   return {
     success: false,
     error: 'An unexpected error occurred',
@@ -133,7 +133,7 @@ async function apiFetch<T = any>(
   try {
     // Get access token if available
     const accessToken = getAccessToken();
-    
+
     // Build fetch options ensuring method from options takes precedence
     const fetchOptions: RequestInit = {
       ...options, // Spread options first (includes method if specified)
@@ -175,13 +175,13 @@ async function apiFetchFormData<T = any>(
   try {
     // Get access token if available
     const accessToken = getAccessToken();
-    
+
     const headers: HeadersInit = {};
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }
     // Don't set Content-Type header - browser will set it with boundary
-    
+
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',
       headers,
@@ -214,7 +214,7 @@ async function apiFetchAuth<T = any>(
   try {
     // Get access token if needed
     const accessToken = includeAuth ? getAccessToken() : null;
-    
+
     // Build fetch options ensuring method from options takes precedence
     const fetchOptions: RequestInit = {
       ...options, // Spread options first (includes method if specified)
@@ -269,7 +269,7 @@ export async function loginPravesh(data: LoginPraveshRequest): Promise<ApiRespon
   const formData = new URLSearchParams();
   formData.append('username', data.username);
   formData.append('password', data.password);
-  
+
   return apiFetchAuth<LoginPraveshResponse>('login-pravesh/', {
     method: 'POST',
     body: formData.toString(),
@@ -315,7 +315,7 @@ export async function verifyPraveshOTP(data: VerifyPraveshOTPRequest): Promise<A
   const formData = new URLSearchParams();
   formData.append('otp', data.otp);
   formData.append('verification_code', data.verification_code);
-  
+
   return apiFetchAuth<VerifyOTPResponseData>('verify-otp/', {
     method: 'POST',
     body: formData.toString(),
@@ -334,7 +334,7 @@ export async function resendPraveshOTP(data: ResendPraveshOTPRequest): Promise<A
   // Convert to URL-encoded format as per API spec
   const formData = new URLSearchParams();
   formData.append('verification_code', data.verification_code);
-  
+
   return apiFetchAuth<LoginPraveshResponse>('resend-otp/', {
     method: 'POST',
     body: formData.toString(),
@@ -697,6 +697,33 @@ export async function submitCoApplicantConsentMobile(
   );
 }
 
+export interface CoApplicantVerifyMobileRequest {
+  application_id: string;
+  co_applicant_index: number;
+  otp: string;
+}
+
+export interface CoApplicantVerifyMobileResponse {
+  success: boolean;
+  message?: string;
+  application_id: string;
+  co_applicant_index: number;
+  mobile_verified: boolean;
+}
+
+export async function verifyCoApplicantMobileOTP(
+  data: CoApplicantVerifyMobileRequest
+): Promise<ApiResponse<CoApplicantVerifyMobileResponse>> {
+  const { application_id, co_applicant_index, otp } = data;
+  return apiFetch<CoApplicantVerifyMobileResponse>(
+    `applications/${application_id}/co-applicant-verify-mobile-otp/${co_applicant_index}/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ otp }),
+    }
+  );
+}
+
 /**
  * Endpoint: Submit Co-Applicant Personal Info
  * POST /api/lead-collection/applications/{application_id}/co-applicant-personal-info/{index}/
@@ -820,19 +847,19 @@ export interface DocumentUploadResponse {
 
 export async function uploadDocument(data: DocumentUploadRequest): Promise<ApiResponse<DocumentUploadResponse>> {
   const formData = new FormData();
-  
+
   formData.append('application_id', data.application_id);
   formData.append('document_type', data.document_type);
   formData.append('front_file', data.front_file);
-  
+
   if (data.back_file) {
     formData.append('back_file', data.back_file);
   }
-  
+
   if (data.document_name) {
     formData.append('document_name', data.document_name);
   }
-  
+
   if (data.metadata) {
     formData.append('metadata', JSON.stringify(data.metadata));
   }
@@ -876,30 +903,30 @@ export async function uploadCoApplicantDocument(
 ): Promise<ApiResponse<CoApplicantDocumentUploadResponse>> {
   try {
     const accessToken = getAccessToken();
-    
+
     const formData = new FormData();
     formData.append('document_type', data.document_type);
     formData.append('front_file', data.front_file);
-    
+
     if (data.back_file) {
       formData.append('back_file', data.back_file);
     } else {
       formData.append('back_file', '');
     }
-    
+
     if (data.document_name) {
       formData.append('document_name', data.document_name);
     }
-    
+
     formData.append('metadata', JSON.stringify({}));
     formData.append('latitude', data.latitude);
     formData.append('longitude', data.longitude);
-    
+
     const headers: HeadersInit = {};
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }
-    
+
     const response = await fetch(
       `${API_BASE_URL}applications/${encodeURIComponent(data.application_id)}/document-upload/${data.co_applicant_index}/`,
       {

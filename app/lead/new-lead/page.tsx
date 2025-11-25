@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, type Lead } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import { createNewLead, verifyMobileOTP, resendMobileOTP, isApiError, type ApiSu
 function Step1PageContent() {
   const { currentLead, updateLead, addLeadToArray } = useLead();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast(); // Initialize useToast
 
   const initialFirstName = currentLead?.customerFirstName || currentLead?.formData?.step1?.firstName || '';
@@ -37,6 +38,13 @@ function Step1PageContent() {
   const [isCreatingLead, setIsCreatingLead] = useState(false);
   const [applicationId, setApplicationId] = useState<string | null>(currentLead?.appId || null);
   const [isResendingOtp, setIsResendingOtp] = useState(false);
+
+  useEffect(() => {
+    const openOtp = searchParams.get('openOtp');
+    if (openOtp === 'true' && !isMobileVerified && applicationId) {
+      setIsOtpModalOpen(true);
+    }
+  }, [searchParams, isMobileVerified, applicationId]);
 
   const deriveNameParts = (fullName: string) => {
     const normalized = fullName.replace(/[^a-zA-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -61,9 +69,9 @@ function Step1PageContent() {
         customerLastName: lastName,
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData, isMobileVerified, nameParts.firstName, nameParts.lastName]);
-  
+
   useEffect(() => {
     let timerId: NodeJS.Timeout;
     if (isOtpModalOpen && resendTimer > 0) {
@@ -79,7 +87,7 @@ function Step1PageContent() {
       toast({ title: 'Error', description: 'Please enter a 10-digit mobile number.', variant: 'destructive' });
       return;
     }
-    
+
     if (!formData.productType || !formData.applicationType || !nameParts.firstName || !nameParts.lastName) {
       toast({ title: 'Error', description: 'Please fill all required fields.', variant: 'destructive' });
       return;
@@ -125,10 +133,10 @@ function Step1PageContent() {
       // Backend response structure: { success: true, application_id, workflow_id, next_step, data: {...} }
       // Note: Application ID will be set after OTP verification, not here
       const successResponse = response as ApiSuccess<NewLeadResponse>;
-      
+
       // Store application_id temporarily for OTP verification step
       const tempApplicationId = successResponse.application_id;
-      
+
       if (tempApplicationId) {
         setApplicationId(tempApplicationId);
         // Update formData but NOT appId - appId will be set after OTP verification
@@ -160,7 +168,7 @@ function Step1PageContent() {
       setIsVerifying(false);
     }
   };
-  
+
   const handleResendOtp = async () => {
     if (!applicationId) {
       toast({
@@ -240,16 +248,16 @@ function Step1PageContent() {
       // OTP verified successfully - extract application_id from response
       const successResponse = response as ApiSuccess<VerifyMobileResponse>;
       const verifiedApplicationId = successResponse.application_id;
-      
+
       setIsMobileVerified(true);
       setIsOtpModalOpen(false);
       setOtp('');
-      
+
       // Update lead state with application_id from backend response
       if (currentLead && verifiedApplicationId) {
         // Update both appId and local state
         setApplicationId(verifiedApplicationId);
-        
+
         // Create the updated lead object with all changes
         const updatedLead: Lead = {
           ...currentLead,
@@ -270,7 +278,7 @@ function Step1PageContent() {
           },
           updatedAt: new Date().toISOString(),
         };
-        
+
         // Update the currentLead state
         updateLead(currentLead.id, {
           appId: verifiedApplicationId,
@@ -288,7 +296,7 @@ function Step1PageContent() {
             },
           },
         });
-        
+
         // Add lead to leads array only after successful OTP verification
         addLeadToArray(updatedLead);
       }
@@ -327,11 +335,11 @@ function Step1PageContent() {
   const handleNext = () => {
     if (!currentLead) return;
 
-    // Save and proceed to New Lead Information page
+    // Save and proceed to Payments page
     updateLead(currentLead.id, {
       currentStep: 2,
     });
-    router.push('/lead/new-lead-info');
+    router.push('/payments');
   };
 
   const canSendOtp = Boolean(
@@ -342,7 +350,7 @@ function Step1PageContent() {
     nameParts.lastName
   );
   const canProceed = isMobileVerified;
-  
+
   // Co-applicant flow elements should not appear here
   const handleExit = () => {
     router.push('/leads');
@@ -359,10 +367,10 @@ function Step1PageContent() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
           <h2 className="text-xl font-semibold text-[#003366] mb-6">Lead Information</h2>
           <div className="space-y-6">
-            
+
             <div>
               <Label htmlFor="product-type" className="text-sm font-medium text-[#003366] mb-2 block">Product Type <span className="text-[#DC2626]">*</span></Label>
-              <Select value={formData.productType} onValueChange={(value:string) => setFormData({ ...formData, productType: value })}>
+              <Select value={formData.productType} onValueChange={(value: string) => setFormData({ ...formData, productType: value })}>
                 <SelectTrigger id="product-type" className="h-12 rounded-lg"><SelectValue placeholder="Select Product Type" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="secured">Secured</SelectItem>
@@ -370,10 +378,10 @@ function Step1PageContent() {
                 </SelectContent>
               </Select>
             </div>
-            
+
             <div>
               <Label htmlFor="application-type" className="text-sm font-medium text-[#003366] mb-2 block">Application Type <span className="text-[#DC2626]">*</span></Label>
-              <Select value={formData.applicationType} onValueChange={(value:string) => setFormData({ ...formData, applicationType: value })}>
+              <Select value={formData.applicationType} onValueChange={(value: string) => setFormData({ ...formData, applicationType: value })}>
                 <SelectTrigger id="application-type" className="h-12 rounded-lg"><SelectValue placeholder="Select Application Type" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="new">New Application</SelectItem>
@@ -384,49 +392,49 @@ function Step1PageContent() {
                 </SelectContent>
               </Select>
               {formData.applicationType && appTypeDescriptions[formData.applicationType] && (
-                 <div className="mt-2 p-3 bg-[#E6F0FA] border-l-4 border-[#0072CE] rounded-r-lg">
-                    <p className="text-sm text-[#003366]">{appTypeDescriptions[formData.applicationType]}</p>
+                <div className="mt-2 p-3 bg-[#E6F0FA] border-l-4 border-[#0072CE] rounded-r-lg">
+                  <p className="text-sm text-[#003366]">{appTypeDescriptions[formData.applicationType]}</p>
                 </div>
-               )}
+              )}
             </div>
 
             <div>
-                <Label htmlFor="full-name" className="text-sm font-medium text-[#003366] mb-2 block">Customer Name <span className="text-[#DC2626]">*</span></Label>
-                <Input
-                  id="full-name"
-                  value={formData.fullName}
-                  onChange={handleFullNameChange}
-                  placeholder="Enter full name as per PAN"
-                  className="h-12 rounded-lg"
-                  maxLength={150}
-                />
+              <Label htmlFor="full-name" className="text-sm font-medium text-[#003366] mb-2 block">Customer Name <span className="text-[#DC2626]">*</span></Label>
+              <Input
+                id="full-name"
+                value={formData.fullName}
+                onChange={handleFullNameChange}
+                placeholder="Enter full name as per PAN"
+                className="h-12 rounded-lg"
+                maxLength={150}
+              />
             </div>
-            
+
             <div>
               <Label htmlFor="mobile-number" className="text-sm font-medium text-[#003366] mb-2 block">Customer Mobile Number <span className="text-[#DC2626]">*</span></Label>
               <div className="flex">
-                  <div className="flex items-center px-3 h-12 bg-[#F3F4F6] border border-r-0 border-gray-300 rounded-l-lg">
-                      <span className="text-[#003366] font-medium">+91</span>
-                  </div>
-                  <div className="relative flex-1">
-                      <Input type="tel" id="mobile-number" placeholder="Enter 10-digit mobile number" maxLength={10} value={formData.mobile} onChange={(e) => setFormData({ ...formData, mobile: e.target.value.replace(/[^0-9]/g, '') })} className="w-full h-12 pr-10 rounded-l-none rounded-r-lg" disabled={isMobileVerified} />
-                      {isMobileVerified && <CheckCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#16A34A]" />}
-                  </div>
+                <div className="flex items-center px-3 h-12 bg-[#F3F4F6] border border-r-0 border-gray-300 rounded-l-lg">
+                  <span className="text-[#003366] font-medium">+91</span>
+                </div>
+                <div className="relative flex-1">
+                  <Input type="tel" id="mobile-number" placeholder="Enter 10-digit mobile number" maxLength={10} value={formData.mobile} onChange={(e) => setFormData({ ...formData, mobile: e.target.value.replace(/[^0-9]/g, '') })} className="w-full h-12 pr-10 rounded-l-none rounded-r-lg" disabled={isMobileVerified} />
+                  {isMobileVerified && <CheckCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#16A34A]" />}
+                </div>
               </div>
             </div>
 
-            
-            
+
+
             <div className="pt-2">
               {!isMobileVerified ? (
-                 <Button onClick={handleSendOtp} disabled={!canSendOtp || isVerifying || isCreatingLead} className="w-full h-12 bg-[#0072CE] hover:bg-[#005a9e] font-medium transition-colors rounded-lg">
-                    {(isVerifying || isCreatingLead) ? <Loader className="w-5 h-5 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
-                    {(isVerifying || isCreatingLead) ? 'Creating Lead...' : 'Send Consent OTP'}
+                <Button onClick={handleSendOtp} disabled={!canSendOtp || isVerifying || isCreatingLead} className="w-full h-12 bg-[#0072CE] hover:bg-[#005a9e] font-medium transition-colors rounded-lg">
+                  {(isVerifying || isCreatingLead) ? <Loader className="w-5 h-5 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                  {(isVerifying || isCreatingLead) ? 'Creating Lead...' : 'Send Consent OTP'}
                 </Button>
               ) : (
                 <div className="p-4 bg-green-100/50 border border-green-200 rounded-2xl flex items-center justify-center gap-3">
-                    <CheckCircle className="text-[#16A34A] text-xl w-6 h-6"/>
-                    <p className="text-sm text-[#16A34A] font-medium">Consent verified successfully!</p>
+                  <CheckCircle className="text-[#16A34A] text-xl w-6 h-6" />
+                  <p className="text-sm text-[#16A34A] font-medium">Consent verified successfully!</p>
                 </div>
               )}
             </div>
@@ -435,13 +443,13 @@ function Step1PageContent() {
         </div>
 
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
-            <div className="flex gap-3 max-w-2xl mx-auto">
-                <Button variant="outline" className="flex-1 h-12 rounded-lg" disabled>Previous</Button>
-                <Button onClick={handleNext} disabled={!canProceed} className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e]">Next</Button>
-            </div>
+          <div className="flex gap-3 max-w-2xl mx-auto">
+            <Button variant="outline" className="flex-1 h-12 rounded-lg" disabled>Previous</Button>
+            <Button onClick={handleNext} disabled={!canProceed} className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e]">Next</Button>
+          </div>
         </div>
       </div>
-      
+
       {/* OTP Modal */}
       <Dialog open={isOtpModalOpen} onOpenChange={setIsOtpModalOpen}>
         <DialogContent className="sm:max-w-md p-6">
@@ -452,13 +460,13 @@ function Step1PageContent() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
-             <div className="flex justify-center">
-              <InputOTP 
+            <div className="flex justify-center">
+              <InputOTP
                 maxLength={4}
                 value={otp}
                 onChange={(value) => {
-                    const numbers = value.replace(/[^0-9]/g, '');
-                    setOtp(numbers);
+                  const numbers = value.replace(/[^0-9]/g, '');
+                  setOtp(numbers);
                 }}
               >
                 <InputOTPGroup className="gap-2">
@@ -469,40 +477,40 @@ function Step1PageContent() {
                 </InputOTPGroup>
               </InputOTP>
             </div>
-             <div className="text-center">
-                <p id="countdown-text" className="text-sm text-neutral">
-                  {resendTimer > 0 ? (
-                    <>Resend OTP in <span className="font-medium text-primary">{`00:${resendTimer.toString().padStart(2, '0')}`}</span></>
-                  ) : "Didn't receive OTP?"}
-                </p>
-                <Button 
-                  type="button" 
-                  variant="link" 
-                  onClick={handleResendOtp} 
-                  disabled={resendTimer > 0 || isResendingOtp}
-                  className={cn(
-                    'p-0 h-auto text-[#0072CE] hover:text-[#005a9e]',
-                    (resendTimer > 0 || isResendingOtp) && 'cursor-not-allowed text-gray-400'
-                  )}
-                >
-                  {isResendingOtp ? (
-                    <span className="inline-flex items-center gap-2">
-                      <Loader className="w-4 h-4 animate-spin" />
-                      Resending...
-                    </span>
-                  ) : (
-                    'Resend OTP'
-                  )}
-                </Button>
+            <div className="text-center">
+              <p id="countdown-text" className="text-sm text-neutral">
+                {resendTimer > 0 ? (
+                  <>Resend OTP in <span className="font-medium text-primary">{`00:${resendTimer.toString().padStart(2, '0')}`}</span></>
+                ) : "Didn't receive OTP?"}
+              </p>
+              <Button
+                type="button"
+                variant="link"
+                onClick={handleResendOtp}
+                disabled={resendTimer > 0 || isResendingOtp}
+                className={cn(
+                  'p-0 h-auto text-[#0072CE] hover:text-[#005a9e]',
+                  (resendTimer > 0 || isResendingOtp) && 'cursor-not-allowed text-gray-400'
+                )}
+              >
+                {isResendingOtp ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Resending...
+                  </span>
+                ) : (
+                  'Resend OTP'
+                )}
+              </Button>
             </div>
             <div className="space-y-3">
-                <Button onClick={handleVerifyOtp} disabled={otp.length !== 4 || isVerifying} className="w-full h-12 bg-[#0072CE] text-white rounded-xl font-semibold text-lg hover:bg-[#005a9e] transition-colors">
-                    {isVerifying ? <><Loader className="w-5 h-5 animate-spin mr-2" /> Verifying...</> : 'Verify & Continue'}
-                </Button>
-                 <Button type="button" variant="link" onClick={() => setIsOtpModalOpen(false)} className="w-full text-sm text-[#0072CE] hover:text-[#005a9e] font-medium transition-colors">
-                    <Edit className="w-4 h-4 mr-2" />
-                    Edit Mobile Number
-                </Button>
+              <Button onClick={handleVerifyOtp} disabled={otp.length !== 4 || isVerifying} className="w-full h-12 bg-[#0072CE] text-white rounded-xl font-semibold text-lg hover:bg-[#005a9e] transition-colors">
+                {isVerifying ? <><Loader className="w-5 h-5 animate-spin mr-2" /> Verifying...</> : 'Verify & Continue'}
+              </Button>
+              <Button type="button" variant="link" onClick={() => setIsOtpModalOpen(false)} className="w-full text-sm text-[#0072CE] hover:text-[#005a9e] font-medium transition-colors">
+                <Edit className="w-4 h-4 mr-2" />
+                Edit Mobile Number
+              </Button>
             </div>
           </div>
         </DialogContent>
