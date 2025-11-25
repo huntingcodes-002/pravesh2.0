@@ -454,7 +454,7 @@ export default function PaymentsPage() {
             </CardContent>
           </Card>
 
-          {!hasSentLink && (
+          {!hasSentLink && !isPaymentCompleted && (
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
               <div className="p-6 space-y-6">
                 <p className="text-sm text-gray-600 text-center">
@@ -524,7 +524,7 @@ export default function PaymentsPage() {
           )}
         </div>
 
-        {hasSentLink && (
+        {(hasSentLink || isPaymentCompleted) && (
           <Card className="border border-gray-200">
             <CardContent className="p-6 space-y-4">
               <div className="flex items-center justify-between">

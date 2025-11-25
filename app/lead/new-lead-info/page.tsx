@@ -716,49 +716,13 @@ export default function NewLeadInfoPage() {
                       <p className="text-xs text-gray-500">Login fee has been confirmed and recorded.</p>
                     </div>
                   </div>
-                  {detailedInfo?.payment_result && (
-                    <div className="ml-[60px] space-y-2 p-3 bg-gray-50 rounded-lg">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-medium text-gray-600">Amount:</span>
-                        <span className="text-sm font-semibold text-gray-900">₹{detailedInfo.payment_result.amount.toLocaleString('en-IN')}</span>
-                      </div>
-                      {detailedInfo.payment_result.order_id && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-medium text-gray-600">Order ID:</span>
-                          <span className="text-xs text-gray-700 font-mono">{detailedInfo.payment_result.order_id}</span>
-                        </div>
-                      )}
-                      {detailedInfo.payment_result.paid_on && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-medium text-gray-600">Paid On:</span>
-                          <span className="text-xs text-gray-700">
-                            {new Date(detailedInfo.payment_result.paid_on).toLocaleString('en-IN', {
-                              day: '2-digit',
-                              month: 'short',
-                              year: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </span>
-                        </div>
-                      )}
-                      {detailedInfo.payment_result.masked_customer_mobile && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-medium text-gray-600">Mobile:</span>
-                          <span className="text-xs text-gray-700">{detailedInfo.payment_result.masked_customer_mobile}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <div className="ml-[60px]">
-                    <Button
-                      onClick={handleGeneratePaymentLink}
-                      variant="outline"
-                      className="border-blue-600 text-blue-600 hover:bg-blue-50"
-                    >
-                      View Details
-                    </Button>
-                  </div>
+                  <Button
+                    onClick={handleGeneratePaymentLink}
+                    variant="outline"
+                    className="w-full border-blue-600 text-blue-600 hover:bg-blue-50"
+                  >
+                    View Details
+                  </Button>
                 </div>
               ) : (
                 <>
@@ -1138,12 +1102,12 @@ export default function NewLeadInfoPage() {
               </div>
 
               {/* Footer */}
-              <div className="mt-4 pt-4 border-t border-gray-100">
+              {/* <div className="mt-4 pt-4 border-t border-gray-100">
                 <p className="text-xs text-gray-400">
                   {uploadedDocuments.length === 0 ? 'No documents linked yet' : 
                    'Documents linked and verified'}
                 </p>
-              </div>
+              </div> */}
             </CardContent>
           </Card>
 
