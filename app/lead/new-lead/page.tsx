@@ -13,7 +13,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { useToast } from '@/hooks/use-toast'; // Import useToast
 import { cn } from '@/lib/utils';
 import { Send, CheckCircle, Loader, Edit } from 'lucide-react';
-import { createNewLead, verifyMobileOTP, resendMobileOTP, isApiError, type ApiSuccess, type NewLeadResponse, type ResendMobileOtpData, type VerifyMobileResponse } from '@/lib/api';
+import { createNewLead, verifyMobileOTP, resendMobileOTP, getDetailedInfo, isApiError, type ApiSuccess, type NewLeadResponse, type ResendMobileOtpData, type VerifyMobileResponse } from '@/lib/api';
 
 function Step1PageContent() {
   const { currentLead, updateLead, addLeadToArray } = useLead();
@@ -39,15 +39,81 @@ function Step1PageContent() {
   const [applicationId, setApplicationId] = useState<string | null>(currentLead?.appId || null);
   const [isResendingOtp, setIsResendingOtp] = useState(false);
 
-  useEffect(() => {
-    const openOtp = searchParams.get('openOtp');
-    // Check verification status from currentLead directly to be sure
-    const isVerified = currentLead?.formData?.step1?.isMobileVerified || isMobileVerified;
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
 
-    if (openOtp === 'true' && !isVerified && applicationId) {
-      setIsOtpModalOpen(true);
-    }
-  }, [searchParams, isMobileVerified, applicationId, currentLead]);
+  useEffect(() => {
+    const checkVerificationStatus = async () => {
+      const openOtp = searchParams.get('openOtp');
+
+      // Only proceed if we have an intent to open OTP and an application ID
+      if (openOtp === 'true' && applicationId) {
+        setIsCheckingStatus(true);
+        try {
+          // Fetch fresh details from API
+          const response = await getDetailedInfo(applicationId);
+
+          if (isApiError(response)) {
+            console.error('Failed to fetch lead details for verification check');
+            // Fallback: if API fails, trust the URL param and open modal? 
+            // Or maybe better to NOT open it to avoid getting stuck.
+            // Let's assume if we can't verify, we shouldn't block the user, 
+            // but for safety, if we can't verify, we might need to prompt.
+            // However, the user's complaint is about FALSE POSITIVE prompts.
+            // So if error, maybe just let them proceed or stay on page?
+            // Let's open modal only if we are sure it's NOT verified.
+            setIsOtpModalOpen(true);
+          } else {
+            const data = response.data;
+            const primaryParticipant = data?.application_details?.participants?.find(
+              (p: any) => p.participant_type === 'primary_participant'
+            );
+
+            const isApiVerified = primaryParticipant?.personal_info?.mobile_number?.verified === true;
+
+            if (isApiVerified) {
+              // It IS verified. Do NOT open modal. Redirect.
+              setIsMobileVerified(true);
+              setIsOtpModalOpen(false);
+
+              // Update context if possible
+              if (currentLead) {
+                updateLead(currentLead.id, {
+                  formData: {
+                    ...currentLead.formData,
+                    step1: {
+                      ...currentLead.formData.step1,
+                      isMobileVerified: true
+                    }
+                  }
+                });
+              }
+
+              toast({
+                title: 'Verified',
+                description: 'Mobile number is already verified. Redirecting...',
+                className: 'bg-green-100 border-green-200',
+              });
+
+              router.replace('/lead/new-lead-info');
+            } else {
+              // Not verified. Open modal.
+              setIsMobileVerified(false);
+              setIsOtpModalOpen(true);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking verification status:', error);
+          setIsOtpModalOpen(true); // Fallback
+        } finally {
+          setIsCheckingStatus(false);
+        }
+      }
+    };
+
+    checkVerificationStatus();
+    // We only want to run this when openOtp or applicationId changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, applicationId]);
 
   const deriveNameParts = (fullName: string) => {
     const normalized = fullName.replace(/[^a-zA-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -518,6 +584,15 @@ function Step1PageContent() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {isCheckingStatus && (
+        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <Loader className="w-8 h-8 animate-spin text-blue-600" />
+            <p className="text-sm font-medium text-gray-600">Verifying status...</p>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }
