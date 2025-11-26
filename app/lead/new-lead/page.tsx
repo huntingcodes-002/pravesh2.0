@@ -63,8 +63,12 @@ function Step1PageContent() {
             // Let's open modal only if we are sure it's NOT verified.
             setIsOtpModalOpen(true);
           } else {
-            const data = response.data;
-            const primaryParticipant = data?.application_details?.participants?.find(
+            // Handle both wrapped (response.data) and unwrapped (response root) structures
+            // The API might return { success: true, application_details: ... } without a data wrapper
+            const responseData = response.data || (response as any);
+            const appDetails = responseData.application_details || (response as any).application_details;
+
+            const primaryParticipant = appDetails?.participants?.find(
               (p: any) => p.participant_type === 'primary_participant'
             );
 

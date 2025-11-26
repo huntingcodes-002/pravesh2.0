@@ -522,7 +522,12 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
         }
 
         const base = existing ?? createLeadSkeleton(identifier);
-        if (!response.data) {
+
+        // Handle both wrapped (response.data) and unwrapped (response root) structures
+        const responseData = response.data || (response as any);
+        const hasData = responseData.application_details || (response as any).application_details;
+
+        if (!hasData) {
           setLeads(prevLeads => {
             const index = prevLeads.findIndex(lead => (lead.appId || lead.id) === base.appId);
             if (index >= 0) {
@@ -540,7 +545,11 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
           return base;
         }
 
-        const detailedLead = mapDetailedInfoToLead(base, response.data);
+        // Use responseData (which might be the root response) if it has application_details
+        // Or use response directly if responseData was just response.data which was undefined
+        const dataToMap = responseData.application_details ? responseData : (response as any);
+
+        const detailedLead = mapDetailedInfoToLead(base, dataToMap);
 
         setLeads(prevLeads => {
           const index = prevLeads.findIndex(lead => (lead.appId || lead.id) === detailedLead.appId);
