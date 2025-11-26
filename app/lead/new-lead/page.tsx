@@ -41,10 +41,13 @@ function Step1PageContent() {
 
   useEffect(() => {
     const openOtp = searchParams.get('openOtp');
-    if (openOtp === 'true' && !isMobileVerified && applicationId) {
+    // Check verification status from currentLead directly to be sure
+    const isVerified = currentLead?.formData?.step1?.isMobileVerified || isMobileVerified;
+
+    if (openOtp === 'true' && !isVerified && applicationId) {
       setIsOtpModalOpen(true);
     }
-  }, [searchParams, isMobileVerified, applicationId]);
+  }, [searchParams, isMobileVerified, applicationId, currentLead]);
 
   const deriveNameParts = (fullName: string) => {
     const normalized = fullName.replace(/[^a-zA-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();

@@ -180,14 +180,16 @@ export default function LeadsDashboardPage() {
       }
 
       if (action === 'edit') {
-        // Check for Main Applicant Mobile Verification
+        // 1. Check for Main Applicant Mobile Verification (from fresh API data)
         const isMainApplicantVerified = fullLead.formData?.step1?.isMobileVerified;
+
         if (!isMainApplicantVerified) {
+          // If not verified, force OTP flow
           router.push('/lead/new-lead?openOtp=true');
           return;
         }
 
-        // Check for Co-Applicant Mobile Verification
+        // 2. Check for Co-Applicant Mobile Verification
         const coApplicants = fullLead.formData?.coApplicants || [];
         const unverifiedCoApplicant = coApplicants.find((coApp: any) => {
           const basic = coApp.data?.basicDetails ?? coApp.data?.step1;
@@ -199,11 +201,19 @@ export default function LeadsDashboardPage() {
           return;
         }
 
-        if (fullLead.status === 'Draft') {
-          router.push('/lead/new-lead-info');
-        } else {
-          router.push('/lead/new-lead-info');
-        }
+        // 3. Check Payment Status
+        // We can check the payment status from the fullLead object if available
+        // or default to new-lead-info which handles payment checks too.
+        // However, for better UX, we can redirect directly if needed.
+        // For now, let's stick to the standard flow:
+        // If verified, go to new-lead-info (which will show payment card if needed)
+        // OR if we want to enforce payment page first:
+
+        // Let's check if we can determine payment status from fullLead
+        // The fetchLeadDetails might not fully populate payment status if it's not in the standard response
+        // But assuming new-lead-info handles it, we can just go there.
+
+        router.push('/lead/new-lead-info');
       }
     } catch (err: any) {
       setDetailError(err?.message || 'Unable to load application details.');

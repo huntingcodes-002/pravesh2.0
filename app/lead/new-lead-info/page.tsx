@@ -8,6 +8,7 @@ import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult } from '@/lib/api';
@@ -31,6 +32,7 @@ export default function NewLeadInfoPage() {
   const [isCoApplicantsLoading, setIsCoApplicantsLoading] = useState(false);
   const [detailedInfo, setDetailedInfo] = useState<ApplicationDetails | null>(null);
   const [isLoadingDetailedInfo, setIsLoadingDetailedInfo] = useState(false);
+  const [showKycModal, setShowKycModal] = useState(false);
 
   // Redirect if no current lead
   useEffect(() => {
@@ -185,6 +187,28 @@ export default function NewLeadInfoPage() {
       isMounted = false;
     };
   }, [currentLead?.appId, detailedInfo?.payment_result]);
+
+  useEffect(() => {
+    // Show KYC modal if payment is completed and no documents are uploaded
+    if (paymentStatus === 'Paid' && currentLead) {
+      const hasDocuments = currentLead.formData?.step8?.files && currentLead.formData.step8.files.length > 0;
+      if (!hasDocuments) {
+        // Small delay to ensure smooth transition after payment or page load
+        const timer = setTimeout(() => setShowKycModal(true), 1000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [paymentStatus, currentLead]);
+
+  const handleKycModalAction = (action: 'aadhaar' | 'pan' | 'skip') => {
+    if (action === 'skip') {
+      setShowKycModal(false);
+    } else if (action === 'aadhaar') {
+      router.push('/lead/documents?preselect=aadhaar');
+    } else if (action === 'pan') {
+      router.push('/lead/documents?preselect=pan');
+    }
+  };
 
   // Get primary participant from detailed info
   const primaryParticipant = useMemo(() => {
@@ -1054,29 +1078,7 @@ export default function NewLeadInfoPage() {
     </div>
   );
 
-  const [showKycModal, setShowKycModal] = useState(false);
 
-  useEffect(() => {
-    // Show KYC modal if payment is completed and no documents are uploaded
-    if (isPaymentCompleted && currentLead) {
-      const hasDocuments = currentLead.formData?.step8?.files && currentLead.formData.step8.files.length > 0;
-      if (!hasDocuments) {
-        // Small delay to ensure smooth transition after payment or page load
-        const timer = setTimeout(() => setShowKycModal(true), 1000);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [isPaymentCompleted, currentLead]);
-
-  const handleKycModalAction = (action: 'aadhaar' | 'pan' | 'skip') => {
-    if (action === 'skip') {
-      setShowKycModal(false);
-    } else if (action === 'aadhaar') {
-      router.push('/lead/documents?preselect=aadhaar');
-    } else if (action === 'pan') {
-      router.push('/lead/documents?preselect=pan');
-    }
-  };
 
   return (
     <DashboardLayout
