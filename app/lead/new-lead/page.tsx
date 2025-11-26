@@ -25,7 +25,6 @@ function Step1PageContent() {
   const initialLastName = currentLead?.customerLastName || currentLead?.formData?.step1?.lastName || '';
   const [formData, setFormData] = useState({
     productType: currentLead?.formData?.step1?.productType || '',
-    applicationType: currentLead?.formData?.step1?.applicationType || 'new',
     mobile: currentLead?.customerMobile || '',
     fullName: currentLead?.formData?.step1?.fullName || `${initialFirstName} ${initialLastName}`.trim(),
   });
@@ -161,7 +160,7 @@ function Step1PageContent() {
       return;
     }
 
-    if (!formData.productType || !formData.applicationType || !nameParts.firstName || !nameParts.lastName) {
+    if (!formData.productType || !nameParts.firstName || !nameParts.lastName) {
       toast({ title: 'Error', description: 'Please fill all required fields.', variant: 'destructive' });
       return;
     }
@@ -170,20 +169,12 @@ function Step1PageContent() {
     setIsVerifying(true);
 
     try {
-      // Map application type from frontend to backend format
-      const applicationTypeMap: Record<string, string> = {
-        'new': 'NewApplication',
-        'additional-disbursal': 'AdditionalDisbursal',
-        'multiple-assets': 'MultipleAssets',
-        'topup-without-closure': 'TopupWithoutClosure',
-        'bt-topup': 'Balance Transfer With Topup',
-      };
-
-      const backendApplicationType = applicationTypeMap[formData.applicationType] || 'NewApplication';
+      // Hardcoded application type as per requirement
+      const backendApplicationType = 'NewApplication';
 
       // Endpoint 1: Create new lead
       const response = await createNewLead({
-        product_type: formData.productType as 'secured' | 'unsecured',
+        product_type: formData.productType,
         application_type: backendApplicationType,
         mobile_number: formData.mobile,
         first_name: nameParts.firstName,
@@ -398,13 +389,6 @@ function Step1PageContent() {
     setFormData({ ...formData, fullName: normalizedValue });
   };
 
-  const appTypeDescriptions: { [key: string]: string } = {
-    'new': 'Fresh loan application for first-time customers or new loan requirements.',
-    'balance-transfer': 'Transfer existing loan from another lender to Saarathi Finance with better terms.',
-    'bt-topup': 'Additional loan amount on top of existing loan with balance transfer.',
-    'renewal': 'Renew an existing loan facility.'
-  };
-
   const handleNext = () => {
     if (!currentLead) return;
 
@@ -417,7 +401,6 @@ function Step1PageContent() {
 
   const canSendOtp = Boolean(
     formData.productType &&
-    formData.applicationType &&
     formData.mobile.length === 10 &&
     nameParts.firstName &&
     nameParts.lastName
@@ -446,29 +429,11 @@ function Step1PageContent() {
               <Select value={formData.productType} onValueChange={(value: string) => setFormData({ ...formData, productType: value })}>
                 <SelectTrigger id="product-type" className="h-12 rounded-lg"><SelectValue placeholder="Select Product Type" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="secured">Secured</SelectItem>
-                  <SelectItem value="unsecured">Unsecured</SelectItem>
+                  <SelectItem value="Secured-Business">Secured-Business</SelectItem>
+                  <SelectItem value="Secured-Morgage">Secured-Morgage</SelectItem>
+                  <SelectItem value="Unsecure">Unsecure</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="application-type" className="text-sm font-medium text-[#003366] mb-2 block">Application Type <span className="text-[#DC2626]">*</span></Label>
-              <Select value={formData.applicationType} onValueChange={(value: string) => setFormData({ ...formData, applicationType: value })}>
-                <SelectTrigger id="application-type" className="h-12 rounded-lg"><SelectValue placeholder="Select Application Type" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="new">New Application</SelectItem>
-                  <SelectItem value="additional-disbursal">Additional Disbursal</SelectItem>
-                  <SelectItem value="multiple-assets">Multiple Assets</SelectItem>
-                  <SelectItem value="topup-without-closure">Topup Without Closure</SelectItem>
-                  <SelectItem value="bt-topup">Balance Transfer With Topup</SelectItem>
-                </SelectContent>
-              </Select>
-              {formData.applicationType && appTypeDescriptions[formData.applicationType] && (
-                <div className="mt-2 p-3 bg-[#E6F0FA] border-l-4 border-[#0072CE] rounded-r-lg">
-                  <p className="text-sm text-[#003366]">{appTypeDescriptions[formData.applicationType]}</p>
-                </div>
-              )}
             </div>
 
             <div>

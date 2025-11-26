@@ -29,9 +29,10 @@ function EmploymentDetailsContent() {
 
   const [formData, setFormData] = useState({
     occupationType: coApplicant?.data?.step5?.occupationType || '',
+    monthlyIncome: coApplicant?.data?.step5?.monthlyIncome || '',
     // Others
     natureOfOccupation: coApplicant?.data?.step5?.natureOfOccupation || '',
-    // Salaried
+    // Salaried & Shared for SENP/SEP
     employerName: coApplicant?.data?.step5?.employerName || '',
     natureOfBusiness: coApplicant?.data?.step5?.natureOfBusiness || '',
     industry: coApplicant?.data?.step5?.industry || '',
@@ -43,16 +44,12 @@ function EmploymentDetailsContent() {
     orgNameSENP: coApplicant?.data?.step5?.orgNameSENP || '',
     natureOfBusinessSENP: coApplicant?.data?.step5?.natureOfBusinessSENP || '',
     industrySENP: coApplicant?.data?.step5?.industrySENP || '',
-    yearsInProfessionSENP: coApplicant?.data?.step5?.yearsInProfessionSENP || '',
-    monthsInProfessionSENP: coApplicant?.data?.step5?.monthsInProfessionSENP || '',
     officialEmailSENP: coApplicant?.data?.step5?.officialEmailSENP || '',
     // Self Employed Professional
     orgNameSEP: coApplicant?.data?.step5?.orgNameSEP || '',
     natureOfProfession: coApplicant?.data?.step5?.natureOfProfession || '',
     industrySEP: coApplicant?.data?.step5?.industrySEP || '',
     registrationNumber: coApplicant?.data?.step5?.registrationNumber || '',
-    yearsInProfessionSEP: coApplicant?.data?.step5?.yearsInProfessionSEP || '',
-    monthsInProfessionSEP: coApplicant?.data?.step5?.monthsInProfessionSEP || '',
     officialEmailSEP: coApplicant?.data?.step5?.officialEmailSEP || '',
   });
 
@@ -107,28 +104,118 @@ function EmploymentDetailsContent() {
   };
 
   const canProceed = () => {
-    if (!formData.occupationType) return false;
-    
+    if (!formData.occupationType || !formData.monthlyIncome) return false;
+
+    const checkDateLogic = () => {
+      const baseValid = formData.employmentStatus && formData.employedFrom;
+      if (formData.employmentStatus === 'past') {
+        if (!formData.employedTo) return false;
+        const fromDate = parse(formData.employedFrom, 'dd-MM-yyyy', new Date());
+        const toDate = parse(formData.employedTo, 'dd-MM-yyyy', new Date());
+        return baseValid && toDate > fromDate;
+      }
+      return baseValid;
+    };
+
     switch (formData.occupationType) {
       case 'others':
         return formData.natureOfOccupation !== '';
       case 'salaried':
-        const baseValid = formData.employerName && formData.natureOfBusiness && formData.industry && formData.employmentStatus && formData.employedFrom;
-        if (formData.employmentStatus === 'past') {
-          if (!formData.employedTo) return false;
-          const fromDate = parse(formData.employedFrom, 'dd-MM-yyyy', new Date());
-          const toDate = parse(formData.employedTo, 'dd-MM-yyyy', new Date());
-          return baseValid && toDate > fromDate;
-        }
-        return baseValid;
+        return formData.employerName && formData.natureOfBusiness && formData.industry && checkDateLogic();
       case 'self-employed-non-professional':
-        return formData.orgNameSENP && formData.natureOfBusinessSENP && formData.industrySENP && formData.yearsInProfessionSENP && formData.monthsInProfessionSENP;
+        return formData.orgNameSENP && formData.natureOfBusinessSENP && formData.industrySENP && checkDateLogic();
       case 'self-employed-professional':
-        return formData.orgNameSEP && formData.natureOfProfession && formData.industrySEP && formData.registrationNumber && formData.yearsInProfessionSEP && formData.monthsInProfessionSEP;
+        return formData.orgNameSEP && formData.natureOfProfession && formData.industrySEP && formData.registrationNumber && checkDateLogic();
       default:
         return false;
     }
   };
+
+  const renderDateFields = () => (
+    <>
+      <div>
+        <Label htmlFor="employmentStatus">
+          Status <span className="text-red-500">*</span>
+        </Label>
+        <Select
+          value={formData.employmentStatus}
+          onValueChange={(value: string) => setField('employmentStatus', value)}
+        >
+          <SelectTrigger id="employmentStatus" className="h-12">
+            <SelectValue placeholder="Select Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="past">Past</SelectItem>
+            <SelectItem value="present">Present</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label htmlFor="employedFrom">
+          From <span className="text-red-500">*</span>
+        </Label>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className={cn(
+                "w-full h-12 justify-start text-left font-normal",
+                !formData.employedFrom && "text-muted-foreground"
+              )}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {formData.employedFrom || <span>Select date</span>}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0">
+            <Calendar
+              mode="single"
+              selected={formData.employedFrom ? parse(formData.employedFrom, 'dd-MM-yyyy', new Date()) : undefined}
+              onSelect={(date) => {
+                if (date) {
+                  setField('employedFrom', format(date, 'dd-MM-yyyy'));
+                }
+              }}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+      </div>
+      {formData.employmentStatus === 'past' && (
+        <div>
+          <Label htmlFor="employedTo">
+            To <span className="text-red-500">*</span>
+          </Label>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn(
+                  "w-full h-12 justify-start text-left font-normal",
+                  !formData.employedTo && "text-muted-foreground"
+                )}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {formData.employedTo || <span>Select date</span>}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0">
+              <Calendar
+                mode="single"
+                selected={formData.employedTo ? parse(formData.employedTo, 'dd-MM-yyyy', new Date()) : undefined}
+                onSelect={(date) => {
+                  if (date) {
+                    setField('employedTo', format(date, 'dd-MM-yyyy'));
+                  }
+                }}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
+    </>
+  );
 
   if (!coApplicant) {
     return (
@@ -270,87 +357,7 @@ function EmploymentDetailsContent() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label htmlFor="employmentStatus">
-                    Employment Status <span className="text-red-500">*</span>
-                  </Label>
-                  <Select
-                    value={formData.employmentStatus}
-                    onValueChange={(value: string) => setField('employmentStatus', value)}
-                  >
-                    <SelectTrigger id="employmentStatus" className="h-12">
-                      <SelectValue placeholder="Select Employment Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="past">Past</SelectItem>
-                      <SelectItem value="present">Present</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="employedFrom">
-                    Employed From <span className="text-red-500">*</span>
-                  </Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full h-12 justify-start text-left font-normal",
-                          !formData.employedFrom && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {formData.employedFrom || <span>Select date</span>}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar
-                        mode="single"
-                        selected={formData.employedFrom ? parse(formData.employedFrom, 'dd-MM-yyyy', new Date()) : undefined}
-                        onSelect={(date) => {
-                          if (date) {
-                            setField('employedFrom', format(date, 'dd-MM-yyyy'));
-                          }
-                        }}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                {formData.employmentStatus === 'past' && (
-                  <div>
-                    <Label htmlFor="employedTo">
-                      Employed To <span className="text-red-500">*</span>
-                    </Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            "w-full h-12 justify-start text-left font-normal",
-                            !formData.employedTo && "text-muted-foreground"
-                          )}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {formData.employedTo || <span>Select date</span>}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <Calendar
-                          mode="single"
-                          selected={formData.employedTo ? parse(formData.employedTo, 'dd-MM-yyyy', new Date()) : undefined}
-                          onSelect={(date) => {
-                            if (date) {
-                              setField('employedTo', format(date, 'dd-MM-yyyy'));
-                            }
-                          }}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                )}
+                {renderDateFields()}
                 <div>
                   <Label htmlFor="officialEmail">
                     Official Email ID (Optional)
@@ -366,7 +373,7 @@ function EmploymentDetailsContent() {
                 </div>
               </div>
             )}
-            
+
             {formData.occupationType === 'self-employed-non-professional' && (
               <div className="space-y-4">
                 <div>
@@ -385,7 +392,7 @@ function EmploymentDetailsContent() {
                   <Label htmlFor="natureOfBusinessSENP">
                     Nature of Business <span className="text-red-500">*</span>
                   </Label>
-                   <Select
+                  <Select
                     value={formData.natureOfBusinessSENP}
                     onValueChange={(value: string) => setField('natureOfBusinessSENP', value)}
                   >
@@ -401,7 +408,7 @@ function EmploymentDetailsContent() {
                     </SelectContent>
                   </Select>
                 </div>
-                 <div>
+                <div>
                   <Label htmlFor="industrySENP">
                     Industry <span className="text-red-500">*</span>
                   </Label>
@@ -430,32 +437,7 @@ function EmploymentDetailsContent() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label htmlFor="yearsInProfessionSENP">
-                    Years in Profession <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="yearsInProfessionSENP"
-                    type="number"
-                    value={formData.yearsInProfessionSENP}
-                    onChange={(e) => setField('yearsInProfessionSENP', e.target.value.replace(/[^0-9]/g, ''))}
-                    placeholder="Enter years"
-                    className="h-12"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="monthsInProfessionSENP">
-                    Months in Profession <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="monthsInProfessionSENP"
-                    type="number"
-                    value={formData.monthsInProfessionSENP}
-                    onChange={(e) => setField('monthsInProfessionSENP', e.target.value.replace(/[^0-9]/g, ''))}
-                    placeholder="Enter months"
-                    className="h-12"
-                  />
-                </div>
+                {renderDateFields()}
                 <div>
                   <Label htmlFor="officialEmailSENP">
                     Official Email ID (Optional)
@@ -474,19 +456,19 @@ function EmploymentDetailsContent() {
 
             {formData.occupationType === 'self-employed-professional' && (
               <div className="space-y-4">
-                 <div>
+                <div>
                   <Label htmlFor="orgNameSEP">
                     Organization Name <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="orgNameSEP"
-                     value={formData.orgNameSEP}
+                    value={formData.orgNameSEP}
                     onChange={(e) => setField('orgNameSEP', e.target.value)}
                     placeholder="Enter organization name"
                     className="h-12"
                   />
                 </div>
-                 <div>
+                <div>
                   <Label htmlFor="natureOfProfession">
                     Nature of Profession <span className="text-red-500">*</span>
                   </Label>
@@ -508,7 +490,7 @@ function EmploymentDetailsContent() {
                     </SelectContent>
                   </Select>
                 </div>
-                 <div>
+                <div>
                   <Label htmlFor="industrySEP">
                     Industry <span className="text-red-500">*</span>
                   </Label>
@@ -549,32 +531,7 @@ function EmploymentDetailsContent() {
                     className="h-12"
                   />
                 </div>
-                <div>
-                  <Label htmlFor="yearsInProfessionSEP">
-                    Years in Profession <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="yearsInProfessionSEP"
-                    type="number"
-                    value={formData.yearsInProfessionSEP}
-                    onChange={(e) => setField('yearsInProfessionSEP', e.target.value.replace(/[^0-9]/g, ''))}
-                    placeholder="Enter years"
-                    className="h-12"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="monthsInProfessionSEP">
-                    Months in Profession <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="monthsInProfessionSEP"
-                    type="number"
-                    value={formData.monthsInProfessionSEP}
-                    onChange={(e) => setField('monthsInProfessionSEP', e.target.value.replace(/[^0-9]/g, ''))}
-                    placeholder="Enter months"
-                    className="h-12"
-                  />
-                </div>
+                {renderDateFields()}
                 <div>
                   <Label htmlFor="officialEmailSEP">
                     Official Email ID (Optional)
@@ -586,6 +543,26 @@ function EmploymentDetailsContent() {
                     onChange={(e) => setField('officialEmailSEP', e.target.value)}
                     placeholder="Enter official email"
                     className="h-12"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Monthly Income Field - Always Visible if Occupation Type is Selected */}
+            {formData.occupationType && (
+              <div>
+                <Label htmlFor="monthlyIncome">
+                  Monthly Income <span className="text-red-500">*</span>
+                </Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                  <Input
+                    id="monthlyIncome"
+                    type="number"
+                    value={formData.monthlyIncome}
+                    onChange={(e) => setField('monthlyIncome', e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="Enter monthly income"
+                    className="h-12 pl-8"
                   />
                 </div>
               </div>
@@ -617,7 +594,7 @@ export default function CoApplicantEmploymentDetailsPage() {
         title="Employment Details"
         showNotifications={false}
         showExitButton={true}
-        onExit={() => {}}
+        onExit={() => { }}
       >
         <div className="max-w-2xl mx-auto pb-24">
           <div className="bg-white rounded-xl shadow-sm p-6">

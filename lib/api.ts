@@ -374,7 +374,7 @@ export async function getUserProfile(): Promise<ApiResponse<UserProfileResponse>
  * POST /api/lead-collection/applications/new-lead/
  */
 export interface NewLeadRequest {
-  product_type: 'secured' | 'unsecured';
+  product_type: string;
   application_type: string;
   mobile_number: string;
   first_name: string;
