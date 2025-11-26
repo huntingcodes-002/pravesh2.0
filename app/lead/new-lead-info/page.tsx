@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database } from 'lucide-react';
+import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -102,7 +102,7 @@ export default function NewLeadInfoPage() {
 
           // Update payment status from payment_result
           if (applicationDetails.payment_result) {
-            const paymentState = applicationDetails.payment_result.state?.toLowerCase();
+            const paymentState = String(applicationDetails.payment_result.state || '').toLowerCase();
             let nextStatus: PaymentStatus = 'Pending';
             if (paymentState === 'completed') {
               nextStatus = 'Paid';
@@ -110,6 +110,12 @@ export default function NewLeadInfoPage() {
               nextStatus = 'Failed';
             }
             setPaymentStatus(nextStatus);
+            // Ensure we stop showing "Checking..." since we have the status
+            setIsPaymentStatusLoading(false);
+          } else {
+            // If no payment result in detailed info, we might still be pending
+            // But we should stop loading indicator if we have the full details
+            setIsPaymentStatusLoading(false);
           }
 
           // Extract co-applicants from participants
@@ -134,6 +140,7 @@ export default function NewLeadInfoPage() {
       } finally {
         if (isMounted) {
           setIsLoadingDetailedInfo(false);
+          setIsPaymentStatusLoading(false);
         }
       }
     };
@@ -189,10 +196,15 @@ export default function NewLeadInfoPage() {
   }, [currentLead?.appId, detailedInfo?.payment_result]);
 
   useEffect(() => {
-    // Show KYC modal if payment is completed and no documents are uploaded
+    // Show KYC modal if payment is completed and required documents (PAN & Aadhaar) are missing
     if (paymentStatus === 'Paid' && currentLead) {
-      const hasDocuments = currentLead.formData?.step8?.files && currentLead.formData.step8.files.length > 0;
-      if (!hasDocuments) {
+      const uploadedFiles = currentLead.formData?.step8?.files || [];
+      const successFiles = uploadedFiles.filter((f: any) => f.status === 'Success');
+
+      const hasPan = successFiles.some((f: any) => f.type === 'PAN');
+      const hasAadhaar = successFiles.some((f: any) => f.type === 'Adhaar');
+
+      if (!hasPan || !hasAadhaar) {
         // Small delay to ensure smooth transition after payment or page load
         const timer = setTimeout(() => setShowKycModal(true), 1000);
         return () => clearTimeout(timer);
@@ -1650,6 +1662,48 @@ export default function NewLeadInfoPage() {
           </div>
         </div>
       </div>
+
+      {/* KYC Modal */}
+      <Dialog open={showKycModal} onOpenChange={setShowKycModal}>
+        <DialogContent className="sm:max-w-md p-6 gap-0">
+          <DialogHeader className="hidden">
+            <DialogTitle>Start Applicant KYC</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <Button
+              onClick={() => handleKycModalAction('aadhaar')}
+              className="w-full h-12 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-sm"
+            >
+              <CreditCard className="w-5 h-5" />
+              Upload Aadhaar
+            </Button>
+
+            <Button
+              onClick={() => handleKycModalAction('pan')}
+              variant="secondary"
+              className="w-full h-12 bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold rounded-xl flex items-center justify-center gap-2 border border-gray-200"
+            >
+              <FileText className="w-5 h-5" />
+              Upload PAN
+            </Button>
+
+            <div className="pt-4 text-center">
+              <button
+                onClick={() => handleKycModalAction('skip')}
+                className="text-sm font-semibold text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                Skip to Manual Entry
+              </button>
+            </div>
+          </div>
+          <div className="text-center pt-6">
+            <p className="text-[11px] text-gray-400">
+              You can update these details later from Applicant Details.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
