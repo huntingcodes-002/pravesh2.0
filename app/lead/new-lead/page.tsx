@@ -431,7 +431,7 @@ function Step1PageContent() {
                 <SelectContent>
                   <SelectItem value="Secured-Business">Secured-Business</SelectItem>
                   <SelectItem value="Secured-Morgage">Secured-Morgage</SelectItem>
-                  <SelectItem value="Unsecure">Unsecure</SelectItem>
+                  <SelectItem value="unsecured">Unsecured</SelectItem>
                 </SelectContent>
               </Select>
             </div>

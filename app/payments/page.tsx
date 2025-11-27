@@ -9,9 +9,10 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { RefreshCw, CheckCircle, ChevronDown, Trash2, Send } from 'lucide-react';
+import { RefreshCw, CheckCircle, ChevronDown, Trash2, Send, Wallet } from 'lucide-react';
 import { useLead } from '@/contexts/LeadContext';
 import { getAccessToken } from '@/lib/api';
 
@@ -31,7 +32,10 @@ export default function PaymentsPage() {
     : 'https://pay.saarathi.com/login-fee';
 
   const [remarks, setRemarks] = useState('');
+  const [isWaveOffModalOpen, setIsWaveOffModalOpen] = useState(false);
+  const [waveOffRemarks, setWaveOffRemarks] = useState('');
   const [hasSentLink, setHasSentLink] = useState(false);
+  const [showSendLinkCard, setShowSendLinkCard] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('Pending');
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -84,6 +88,7 @@ export default function PaymentsPage() {
       if (raw) {
         const parsed = JSON.parse(raw);
         setHasSentLink(Boolean(parsed.hasSentLink));
+        setShowSendLinkCard(Boolean(parsed.showSendLinkCard));
         setPaymentStatus(parsed.paymentStatus as PaymentStatus ?? 'Pending');
         setPaymentUrl(parsed.paymentUrl ?? null);
         setPaymentOrderId(parsed.paymentOrderId ?? null);
@@ -106,6 +111,7 @@ export default function PaymentsPage() {
     }
     const payload = {
       hasSentLink,
+      showSendLinkCard,
       paymentStatus,
       paymentUrl,
       paymentOrderId,
@@ -121,6 +127,7 @@ export default function PaymentsPage() {
   }, [
     storageKey,
     hasSentLink,
+    showSendLinkCard,
     paymentStatus,
     paymentUrl,
     paymentOrderId,
@@ -159,6 +166,22 @@ export default function PaymentsPage() {
       }
     }
   }, [currentLead?.payments]);
+
+  const handleWaveOffSubmit = async () => {
+    if (!waveOffRemarks.trim()) return;
+
+    // TODO: Implement actual API call for wave off request
+    // For now, we'll simulate a successful request and redirect
+
+    toast({
+      title: 'Request Submitted',
+      description: 'Fee wave off request has been submitted successfully.',
+    });
+
+    setIsWaveOffModalOpen(false);
+    setWaveOffRemarks('');
+    router.push('/lead/new-lead-info');
+  };
 
   const handleSendToCustomer = async () => {
     if (isSending) return;
@@ -328,7 +351,7 @@ export default function PaymentsPage() {
         headers: {
           Accept: '*/*',
           'Content-Type': 'application/json',
-            Authorization: authorization,
+          Authorization: authorization,
         },
         body: JSON.stringify({
           application_id: applicationId,
@@ -360,6 +383,7 @@ export default function PaymentsPage() {
 
   const resetPaymentState = () => {
     setHasSentLink(false);
+    setShowSendLinkCard(false);
     setPaymentStatus('Pending');
     setRemarks('');
     setReceivedOn(null);
@@ -397,7 +421,7 @@ export default function PaymentsPage() {
         headers: {
           Accept: '*/*',
           'Content-Type': 'application/json',
-            Authorization: authorization,
+          Authorization: authorization,
         },
         body: JSON.stringify({
           application_id: applicationId,
@@ -476,7 +500,7 @@ export default function PaymentsPage() {
     >
       <div className="max-w-2xl mx-auto pb-24 space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
-          
+
 
           <Card className="w-full border-l-4 border-blue-600 shadow-md">
             <CardContent className="p-4">
@@ -485,7 +509,24 @@ export default function PaymentsPage() {
             </CardContent>
           </Card>
 
-          {!hasSentLink && !isPaymentCompleted && (
+          {!hasSentLink && !isPaymentCompleted && !showSendLinkCard && (
+            <Card className="border border-gray-200 shadow-sm">
+              <CardContent className="flex flex-col items-center justify-center py-12 space-y-6">
+                <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center border border-blue-100">
+                  <Wallet className="w-10 h-10 text-[#0072CE]" />
+                </div>
+                <h3 className="text-xl font-bold text-[#003366]">No payment created yet.</h3>
+                <Button
+                  onClick={() => setShowSendLinkCard(true)}
+                  className="w-full max-w-sm h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold text-base"
+                >
+                  Create Payment Link
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {!hasSentLink && !isPaymentCompleted && showSendLinkCard && (
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
               <div className="p-6 space-y-6">
                 <p className="text-sm text-gray-600 text-center">
@@ -549,6 +590,20 @@ export default function PaymentsPage() {
                       Send to Customer
                     </>
                   )}
+                </Button>
+
+                <div className="relative flex py-2 items-center">
+                  <div className="flex-grow border-t border-gray-300"></div>
+                  <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">Or</span>
+                  <div className="flex-grow border-t border-gray-300"></div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  onClick={() => setIsWaveOffModalOpen(true)}
+                  className="w-full h-12 rounded-lg border-2 border-[#0072CE] text-[#0072CE] hover:bg-blue-50 font-semibold"
+                >
+                  Request Wave Off
                 </Button>
               </div>
             </div>
@@ -617,12 +672,6 @@ export default function PaymentsPage() {
                     <p className="text-xs text-gray-500 mb-1">Payment Link</p>
                     <p className="text-xs text-blue-600 break-all">{displayedPaymentLink}</p>
                   </div>
-                  {remarks && (
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Remarks</p>
-                      <p className="text-sm text-gray-700">{remarks}</p>
-                    </div>
-                  )}
                 </CollapsibleContent>
               </Collapsible>
 
@@ -711,6 +760,39 @@ export default function PaymentsPage() {
           </Button>
         </div>
       </div>
+
+      <Dialog open={isWaveOffModalOpen} onOpenChange={setIsWaveOffModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[#003366]">Request Fee Wave Off</DialogTitle>
+            <DialogDescription>
+              Please provide a reason for requesting the fee wave off.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="wave-off-remarks" className="text-sm font-medium text-gray-700">
+                Remarks <span className="text-red-500">*</span>
+              </Label>
+              <Textarea
+                id="wave-off-remarks"
+                value={waveOffRemarks}
+                onChange={(e) => setWaveOffRemarks(e.target.value)}
+                placeholder="Enter reason for wave off..."
+                rows={4}
+                className="resize-none"
+              />
+            </div>
+            <Button
+              onClick={handleWaveOffSubmit}
+              disabled={!waveOffRemarks.trim()}
+              className="w-full bg-[#0072CE] hover:bg-[#005a9e]"
+            >
+              Submit Request
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
