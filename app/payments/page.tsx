@@ -551,27 +551,6 @@ export default function PaymentsPage() {
                     <p className="text-xs text-gray-500 mt-2">Standard Login / IMD Fee including GST.</p>
                   </div>
 
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="remarks" className="text-sm font-medium text-gray-700">
-                        Remarks
-                      </Label>
-                      <span className="text-xs text-gray-500">Optional</span>
-                    </div>
-                    <Textarea
-                      id="remarks"
-                      value={remarks}
-                      onChange={(e) => setRemarks(e.target.value)}
-                      placeholder="Optional note for internal reference."
-                      maxLength={100}
-                      rows={3}
-                      className="rounded-lg"
-                    />
-                    <p className="text-xs text-gray-500 mt-1 text-right">
-                      {remarks.length}
-                      /100
-                    </p>
-                  </div>
                 </div>
 
                 <Button

@@ -429,9 +429,9 @@ function Step1PageContent() {
               <Select value={formData.productType} onValueChange={(value: string) => setFormData({ ...formData, productType: value })}>
                 <SelectTrigger id="product-type" className="h-12 rounded-lg"><SelectValue placeholder="Select Product Type" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Secured-Business">Secured-Business</SelectItem>
-                  <SelectItem value="Secured-Morgage">Secured-Morgage</SelectItem>
-                  <SelectItem value="unsecured">Unsecured</SelectItem>
+                  <SelectItem value="business_loan">Business Loan</SelectItem>
+                  <SelectItem value="mortgage_loan">Mortgage Loan</SelectItem>
+                  <SelectItem value="unsecured_loan">Unsecured Loan</SelectItem>
                 </SelectContent>
               </Select>
             </div>

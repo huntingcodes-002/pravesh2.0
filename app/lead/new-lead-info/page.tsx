@@ -754,13 +754,13 @@ export default function NewLeadInfoPage() {
 
     return (
       <div className={tileWrapperClass}>
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-            <UserCheck className="w-5 h-5" />
+        <div className="flex items-start gap-4 flex-1 min-w-0">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
+            <UserCheck className="w-6 h-6" />
           </div>
-          <div className="flex-1 min-w-0 text-sm text-gray-900">
+          <div className="flex-1 min-w-0">
             {hasDetails ? (
-              <div className="space-y-1">
+              <div className="space-y-2.5">
                 {(() => {
                   const fullName = primaryParticipant?.personal_info?.full_name;
                   const nameValue = fullName?.value || (typeof fullName === 'string' ? fullName : null);
@@ -773,12 +773,13 @@ export default function NewLeadInfoPage() {
 
                   if (!displayName) return null;
                   return (
-                    <p className="flex items-center gap-2">
-                      {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                      <span>
-                        <span className="font-semibold">Full Name:</span> {displayName}
-                      </span>
-                    </p>
+                    <div className="flex items-start gap-2">
+                      {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
+                      <p className="text-sm leading-relaxed">
+                        <span className="font-semibold text-gray-700">Full Name:</span>{' '}
+                        <span className="text-gray-900">{displayName}</span>
+                      </p>
+                    </div>
                   );
                 })()}
                 {(() => {
@@ -793,12 +794,13 @@ export default function NewLeadInfoPage() {
                     : dobDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
                   return (
-                    <p className="flex items-center gap-2">
-                      {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                      <span>
-                        <span className="font-semibold">Date of Birth:</span> {formatted}
-                      </span>
-                    </p>
+                    <div className="flex items-start gap-2">
+                      {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
+                      <p className="text-sm leading-relaxed">
+                        <span className="font-semibold text-gray-700">Date of Birth:</span>{' '}
+                        <span className="text-gray-900">{formatted}</span>
+                      </p>
+                    </div>
                   );
                 })()}
                 {(() => {
@@ -808,20 +810,22 @@ export default function NewLeadInfoPage() {
 
                   if (panValue) {
                     return (
-                      <p className="flex items-center gap-2">
-                        {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                        <span>
-                          <span className="font-semibold">PAN Number:</span> {panValue}
-                        </span>
-                      </p>
+                      <div className="flex items-start gap-2">
+                        {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
+                        <p className="text-sm leading-relaxed">
+                          <span className="font-semibold text-gray-700">PAN Number:</span>{' '}
+                          <span className="text-gray-900">{panValue}</span>
+                        </p>
+                      </div>
                     );
                   }
 
                   const step2 = currentLead?.formData?.step2;
                   if (step2?.hasPan === 'no' && step2?.alternateIdType && step2?.documentNumber) {
                     return (
-                      <p>
-                        <span className="font-semibold">{step2.alternateIdType}:</span> {step2.documentNumber}
+                      <p className="text-sm leading-relaxed">
+                        <span className="font-semibold text-gray-700">{step2.alternateIdType}:</span>{' '}
+                        <span className="text-gray-900">{step2.documentNumber}</span>
                       </p>
                     );
                   }
@@ -834,40 +838,44 @@ export default function NewLeadInfoPage() {
 
                   if (!mobileValue) return null;
                   return (
-                    <p className="flex items-center gap-2">
-                      {isVerified && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                      <span>
-                        <span className="font-semibold">Mobile:</span> {mobileValue}
-                      </span>
-                    </p>
+                    <div className="flex items-start gap-2">
+                      {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
+                      <p className="text-sm leading-relaxed">
+                        <span className="font-semibold text-gray-700">Mobile:</span>{' '}
+                        <span className="text-gray-900">{mobileValue}</span>
+                      </p>
+                    </div>
                   );
                 })()}
                 {(() => {
                   const gender = primaryParticipant?.personal_info?.gender || currentLead?.gender;
                   if (!gender) return null;
                   return (
-                    <p>
-                      <span className="font-semibold">Gender:</span> {gender.charAt(0).toUpperCase() + gender.slice(1)}
+                    <p className="text-sm leading-relaxed">
+                      <span className="font-semibold text-gray-700">Gender:</span>{' '}
+                      <span className="text-gray-900">{gender.charAt(0).toUpperCase() + gender.slice(1)}</span>
                     </p>
                   );
                 })()}
-                {(currentLead?.formData?.step2?.autoFilledViaPAN || primaryParticipant?.personal_info?.pan_number?.verified) && (
-                  <p className="text-xs text-gray-500">Auto-filled and verified via PAN & NSDL workflow.</p>
-                )}
-                <p className="text-xs text-gray-500">Submitted by RM</p>
+                <div className="pt-1 space-y-1">
+                  {(currentLead?.formData?.step2?.autoFilledViaPAN || primaryParticipant?.personal_info?.pan_number?.verified) && (
+                    <p className="text-xs text-gray-500 leading-relaxed">Auto-filled and verified via PAN & NSDL workflow.</p>
+                  )}
+                  <p className="text-xs text-gray-500 leading-relaxed">Submitted by RM</p>
+                </div>
               </div>
             ) : (
-              <div className="space-y-0.5 text-sm">
-                <p className="font-semibold text-gray-900">No basic details added yet</p>
+              <div className="space-y-1">
+                <p className="font-semibold text-gray-900 text-sm">No basic details added yet</p>
                 <p className="text-xs text-gray-500">Upload PAN to auto-fill Name, DOB & PAN Number</p>
               </div>
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2 min-w-[140px]">
+        <div className="flex flex-col items-end gap-2.5 min-w-[140px] flex-shrink-0">
           {renderSectionStatusPill(step2Status)}
           {showPanVerifiedPill && (
-            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1 font-medium">
               Verified via PAN
             </Badge>
           )}
@@ -876,6 +884,7 @@ export default function NewLeadInfoPage() {
             size="sm"
             onClick={() => router.push('/lead/basic-details')}
             className={tileButtonClass}
+            disabled={!isPaymentCompleted}
           >
             Edit
           </Button>
@@ -899,13 +908,13 @@ export default function NewLeadInfoPage() {
 
     return (
       <div className={tileWrapperClass}>
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-            <MapPin className="w-5 h-5" />
+        <div className="flex items-start gap-4 flex-1 min-w-0">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
+            <MapPin className="w-6 h-6" />
           </div>
-          <div className="flex-1 min-w-0 text-sm text-gray-900">
+          <div className="flex-1 min-w-0">
             {hasDetails ? (
-              <div className="space-y-1">
+              <div className="space-y-2.5">
                 {(() => {
                   const addressesToShow =
                     apiAddresses.length > 0
@@ -928,48 +937,48 @@ export default function NewLeadInfoPage() {
                   return (
                     <>
                       {primaryAddress.address_line_1 && (
-                        <p className="flex items-center gap-2">
-                          {showAadhaarVerifiedPill && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                          <span>
-                            <span className="font-semibold">Address:</span> {primaryAddress.address_line_1}
-                          </span>
-                        </p>
+                        <div className="flex items-start gap-2">
+                          {showAadhaarVerifiedPill && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
+                          <p className="text-sm leading-relaxed">
+                            <span className="font-semibold text-gray-700">Address:</span>{' '}
+                            <span className="text-gray-900">{primaryAddress.address_line_1}</span>
+                          </p>
+                        </div>
                       )}
                       {primaryAddress.city && (
-                        <p className="flex items-center gap-2">
-                          {showAadhaarVerifiedPill && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                          <span>
-                            <span className="font-semibold">City:</span> {primaryAddress.city}
-                          </span>
-                        </p>
+                        <div className="flex items-start gap-2">
+                          {showAadhaarVerifiedPill && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
+                          <p className="text-sm leading-relaxed">
+                            <span className="font-semibold text-gray-700">City:</span>{' '}
+                            <span className="text-gray-900">{primaryAddress.city}</span>
+                          </p>
+                        </div>
                       )}
                       {primaryAddress.pincode && (
-                        <p className="flex items-center gap-2">
-                          {showAadhaarVerifiedPill && <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />}
-                          <span>
-                            <span className="font-semibold">Pincode:</span> {primaryAddress.pincode}
-                          </span>
-                        </p>
-                      )}
-                      {showAadhaarVerifiedPill && (
-                        <p className="text-xs text-gray-500">Auto-filled and verified via Aadhaar OCR workflow.</p>
+                        <div className="flex items-start gap-2">
+                          {showAadhaarVerifiedPill && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
+                          <p className="text-sm leading-relaxed">
+                            <span className="font-semibold text-gray-700">Pincode:</span>{' '}
+                            <span className="text-gray-900">{primaryAddress.pincode}</span>
+                          </p>
+                        </div>
                       )}
                     </>
                   );
                 })()}
               </div>
             ) : (
-              <div className="space-y-0.5 text-sm">
-                <p className="font-semibold text-gray-900">No address details added yet</p>
-                <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill Address & Pincode</p>
+              <div className="space-y-1">
+                <p className="font-semibold text-gray-900 text-sm">No address details added yet</p>
+                <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill address</p>
               </div>
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2 min-w-[140px]">
+        <div className="flex flex-col items-end gap-2.5 min-w-[140px] flex-shrink-0">
           {renderSectionStatusPill(step3Status)}
           {showAadhaarVerifiedPill && (
-            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1 font-medium">
               Verified via Aadhaar
             </Badge>
           )}
@@ -992,13 +1001,13 @@ export default function NewLeadInfoPage() {
 
     return (
       <div className={tileWrapperClass}>
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-            <Briefcase className="w-5 h-5" />
+        <div className="flex items-start gap-4 flex-1 min-w-0">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
+            <Briefcase className="w-6 h-6" />
           </div>
           <div className="flex-1 min-w-0">
             {hasDetails ? (
-              <div className="mt-2 space-y-1 text-xs text-gray-600">
+              <div className="space-y-2">
                 {(() => {
                   const step5 = currentLead?.formData?.step5;
                   if (!step5) return null;
@@ -1011,21 +1020,22 @@ export default function NewLeadInfoPage() {
 
                   return (
                     <>
-                      <p>
-                        <span className="font-medium">Occupation Type:</span>{' '}
-                        {occupationTypeLabels[step5.occupationType] || step5.occupationType}
+                      <p className="text-sm leading-relaxed">
+                        <span className="font-semibold text-gray-700">Occupation Type:</span>{' '}
+                        <span className="text-gray-900">{occupationTypeLabels[step5.occupationType] || step5.occupationType}</span>
                       </p>
                       {step5.occupationType === 'salaried' && (
                         <>
                           {step5.employerName && (
-                            <p>
-                              <span className="font-medium">Employer:</span> {step5.employerName}
+                            <p className="text-sm leading-relaxed">
+                              <span className="font-semibold text-gray-700">Employer:</span>{' '}
+                              <span className="text-gray-900">{step5.employerName}</span>
                             </p>
                           )}
                           {step5.employmentStatus && (
-                            <p>
-                              <span className="font-medium">Status:</span>{' '}
-                              {step5.employmentStatus === 'present' ? 'Present' : 'Past'}
+                            <p className="text-sm leading-relaxed">
+                              <span className="font-semibold text-gray-700">Status:</span>{' '}
+                              <span className="text-gray-900">{step5.employmentStatus === 'present' ? 'Present' : 'Past'}</span>
                             </p>
                           )}
                         </>
@@ -1033,30 +1043,31 @@ export default function NewLeadInfoPage() {
                       {(step5.occupationType === 'self-employed-non-professional' ||
                         step5.occupationType === 'self-employed-professional') &&
                         (step5.orgNameSENP || step5.orgNameSEP) && (
-                          <p>
-                            <span className="font-medium">Organization:</span> {step5.orgNameSENP || step5.orgNameSEP}
+                          <p className="text-sm leading-relaxed">
+                            <span className="font-semibold text-gray-700">Organization:</span>{' '}
+                            <span className="text-gray-900">{step5.orgNameSENP || step5.orgNameSEP}</span>
                           </p>
                         )}
                       {step5.occupationType === 'others' && step5.natureOfOccupation && (
-                        <p>
-                          <span className="font-medium">Nature:</span>{' '}
-                          {step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}
+                        <p className="text-sm leading-relaxed">
+                          <span className="font-semibold text-gray-700">Nature:</span>{' '}
+                          <span className="text-gray-900">{step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}</span>
                         </p>
                       )}
-                      <p className="text-[11px] text-gray-400">Submitted by RM</p>
+                      <p className="text-xs text-gray-500 leading-relaxed pt-1">Submitted by RM</p>
                     </>
                   );
                 })()}
               </div>
             ) : (
-              <div className="space-y-0.5">
+              <div className="space-y-1">
                 <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
                 <p className="text-xs text-gray-500">Upload or enter occupation and employment details manually</p>
               </div>
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2 min-w-[140px]">
+        <div className="flex flex-col items-end gap-2.5 min-w-[140px] flex-shrink-0">
           {renderSectionStatusPill(employmentStatus)}
           <Button
             variant="outline"
