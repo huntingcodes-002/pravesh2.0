@@ -716,7 +716,7 @@ export async function verifyCoApplicantMobileOTP(
 ): Promise<ApiResponse<CoApplicantVerifyMobileResponse>> {
   const { application_id, co_applicant_index, otp } = data;
   return apiFetch<CoApplicantVerifyMobileResponse>(
-    `applications/${application_id}/co-applicant-verify-mobile-otp/${co_applicant_index}/`,
+    `applications/${application_id}/co-applicant-verify-mobile/${co_applicant_index}/`,
     {
       method: 'POST',
       body: JSON.stringify({ otp }),
@@ -814,11 +814,13 @@ export async function submitAddressDetails(data: AddressDetailsRequest): Promise
  */
 export interface DocumentUploadRequest {
   application_id: string;
-  document_type: 'pan_card' | 'aadhaar_card' | 'driving_license' | 'passport' | 'voter_id' | 'collateral_documents' | 'bank_statement' | 'salary_slip' | 'itr' | 'other';
+  document_type: 'pan_card' | 'aadhaar_card' | 'driving_license' | 'passport' | 'voter_id' | 'collateral_documents' | 'collateral_legal' | 'bank_statement' | 'salary_slip' | 'itr' | 'other' | string;
   front_file: File;
   back_file?: File;
   document_name?: string;
   metadata?: Record<string, any>;
+  latitude?: string;
+  longitude?: string;
 }
 
 export interface DocumentUploadResponse {
@@ -862,6 +864,14 @@ export async function uploadDocument(data: DocumentUploadRequest): Promise<ApiRe
 
   if (data.metadata) {
     formData.append('metadata', JSON.stringify(data.metadata));
+  }
+
+  if (data.latitude) {
+    formData.append('latitude', data.latitude);
+  }
+
+  if (data.longitude) {
+    formData.append('longitude', data.longitude);
   }
 
   return apiFetchFormData<DocumentUploadResponse>('applications/document-upload/', formData);
@@ -1137,3 +1147,32 @@ export async function getCoApplicantManagement(
   );
 }
 
+
+/**
+ * Payment Waiver Request
+ */
+export interface PaymentWaiverRequest {
+  application_id: string;
+  applicant_name: string;
+  comment: string;
+  system_value: string;
+  branch_code: string;
+  state_code: string;
+}
+
+export interface PaymentWaiverResponse {
+  deviation_id: number;
+  status: 'pending' | 'approved' | 'rejected';
+}
+
+export async function requestPaymentWaiver(
+  data: PaymentWaiverRequest
+): Promise<ApiResponse<PaymentWaiverResponse>> {
+  return apiFetch<PaymentWaiverResponse>(
+    'applications/payment-waiver/',
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  );
+}

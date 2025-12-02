@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, UserCheck, MapPin, Trash2, Briefcase, Database } from 'lucide-react';
+import { Users, UserCheck, MapPin, Trash2, Briefcase, Database, ChevronDown, ChevronUp } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -58,6 +58,11 @@ export default function CoApplicantInfoPage() {
   const { toast } = useToast();
 
   const coApplicants = currentLead?.formData?.coApplicants ?? [];
+  const [expandedCards, setExpandedCards] = useState<Record<number, boolean>>({});
+
+  const toggleCard = (index: number) => {
+    setExpandedCards((prev) => ({ ...prev, [index]: !prev[index] }));
+  };
 
   // Interface for co-applicant data from detailed-info API
   interface CoApplicantFromDetailedInfo {
@@ -287,7 +292,7 @@ export default function CoApplicantInfoPage() {
     const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
     const localStep2 = localCoApp?.data?.step2;
     const showPanVerifiedPill = Boolean(localStep2?.autoFilledViaPAN || personalInfo?.pan_number?.verified);
-    const canEditBasic = status !== 'completed' && Boolean(localCoApp);
+    const canEditBasic = Boolean(localCoApp);
 
     return (
       <div className={tileWrapperClass}>
@@ -400,7 +405,7 @@ export default function CoApplicantInfoPage() {
     const showAadhaarVerifiedPill = Boolean(
       localStep3?.autoFilledViaAadhaar || localStep3?.addresses?.some((addr: any) => addr?.autoFilledViaAadhaar)
     );
-    const canEditAddress = status !== 'completed' && Boolean(localCoApp);
+    const canEditAddress = Boolean(localCoApp);
 
     return (
       <div className={tileWrapperClass}>
@@ -562,6 +567,9 @@ export default function CoApplicantInfoPage() {
               const fullName = apiCoApp.personal_info?.full_name?.value || (localCoApp ? [localCoApp?.data?.basicDetails?.firstName ?? localCoApp?.data?.step1?.firstName, localCoApp?.data?.basicDetails?.lastName ?? localCoApp?.data?.step1?.lastName].filter(Boolean).join(' ') : 'Unnamed Co-applicant');
               const relation = localCoApp ? RELATIONSHIP_LABELS[localCoApp.relationship] ?? localCoApp.relationship : 'Not set';
 
+              const isMobileVerified = apiCoApp.personal_info?.mobile_number?.verified;
+              const isExpanded = expandedCards[apiCoApp.co_applicant_index] !== false; // Default expanded
+
               return (
                 <Card key={`co-applicant-${apiCoApp.co_applicant_index}`} className="border border-gray-200 bg-white mb-4 border-l-4 border-l-blue-600 relative">
                   <CardContent className="p-5 space-y-4">
@@ -575,13 +583,13 @@ export default function CoApplicantInfoPage() {
                           </p>
                         )}
                       </div>
-                      {localCoApp && (
+                      <div className="flex items-center gap-3">
                         <button
                           type="button"
                           className="text-red-500 hover:text-red-600"
                           onClick={() => {
                             setPendingDelete({
-                              id: localCoApp.id,
+                              id: localCoApp?.id || '',
                               name: fullName,
                               index: apiCoApp.co_applicant_index,
                             });
@@ -590,116 +598,152 @@ export default function CoApplicantInfoPage() {
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
-                      )}
-                    </div>
-
-                    <div className="grid gap-4">
-                      {renderBasicDetails(apiCoApp)}
-                      {renderAddressDetails(apiCoApp)}
-
-                      {(() => {
-                        const employmentStatus = localCoApp ? getEmploymentStatusForCoApplicant(localCoApp.id) : 'incomplete';
-                        const step5 = localCoApp?.data?.step5;
-                        const occupationTypeLabels: Record<string, string> = {
-                          'salaried': 'Salaried',
-                          'self-employed-non-professional': 'Self Employed Non Professional',
-                          'self-employed-professional': 'Self Employed Professional',
-                          'others': 'Others'
-                        };
-
-                        return (
-                          <div className={tileWrapperClass}>
-                            <div className="flex items-start gap-3 flex-1 min-w-0">
-                              <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-                                <Briefcase className="w-5 h-5" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                {employmentStatus === 'incomplete' ? (
-                                  <div className="space-y-0.5">
-                                    <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
-                                    <p className="text-xs text-gray-500">Upload or enter occupation and employment details manually</p>
-                                  </div>
-                                ) : step5 ? (
-                                  <div className="mt-2 space-y-1 text-xs text-gray-600">
-                                    <p>
-                                      <span className="font-medium">Occupation Type:</span> {occupationTypeLabels[step5.occupationType] || step5.occupationType}
-                                    </p>
-                                    {step5.occupationType === 'salaried' && (
-                                      <>
-                                        {step5.employerName && (
-                                          <p>
-                                            <span className="font-medium">Employer:</span> {step5.employerName}
-                                          </p>
-                                        )}
-                                        {step5.employmentStatus && (
-                                          <p>
-                                            <span className="font-medium">Status:</span> {step5.employmentStatus === 'present' ? 'Present' : 'Past'}
-                                          </p>
-                                        )}
-                                      </>
-                                    )}
-                                    {(step5.occupationType === 'self-employed-non-professional' || step5.occupationType === 'self-employed-professional') &&
-                                      (step5.orgNameSENP || step5.orgNameSEP) && (
-                                        <p>
-                                          <span className="font-medium">Organization:</span> {step5.orgNameSENP || step5.orgNameSEP}
-                                        </p>
-                                      )}
-                                    {step5.occupationType === 'others' && step5.natureOfOccupation && (
-                                      <p>
-                                        <span className="font-medium">Nature:</span> {step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}
-                                      </p>
-                                    )}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                            <div className="flex flex-col items-end gap-2 min-w-[140px]">
-                              {employmentStatus !== 'incomplete' && (
-                                <Badge className={cn(
-                                  'rounded-full text-[11px] px-3 py-1 border',
-                                  employmentStatus === 'completed'
-                                    ? 'bg-white border-green-200 text-green-700'
-                                    : 'bg-white border-yellow-200 text-yellow-700'
-                                )}>
-                                  {employmentStatus === 'completed' ? 'Completed' : 'In Progress'}
-                                </Badge>
-                              )}
-                              {localCoApp && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => router.push(`/lead/co-applicant/employment-details?coApplicantId=${localCoApp.id}`)}
-                                  className={tileButtonClass}
-                                >
-                                  Edit
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      <div className={tileWrapperClass}>
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-                            <Database className="w-5 h-5" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-900">No account aggregator request initiated</p>
-                            <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-2 min-w-[140px]">
-                          <Button variant="outline" size="sm" className={tileButtonClass} disabled>
-                            Initiate
-                          </Button>
-                        </div>
+                        {isMobileVerified && (
+                          <button
+                            type="button"
+                            onClick={() => toggleCard(apiCoApp.co_applicant_index)}
+                            className="text-gray-500 hover:text-gray-700"
+                          >
+                            {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-gray-100 text-xs text-gray-400">
-                      {localCoApp ? documentsSummary(localCoApp) : 'No documents linked yet'}
-                    </div>
+                    {!isMobileVerified ? (
+                      <div className="mt-4">
+                        <Button
+                          onClick={() => {
+                            if (localCoApp) {
+                              router.push(`/lead/co-applicant/new?coApplicantId=${localCoApp.id}&openOtp=true`);
+                            } else {
+                              // Fallback if localCoApp is missing but API has it (rare case)
+                              // We can't easily edit without ID, maybe show toast
+                              toast({
+                                title: "Error",
+                                description: "Co-applicant details missing locally. Please refresh.",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                          className="w-full bg-[#0072CE] hover:bg-[#005a9e] text-white"
+                        >
+                          Proceed to Consent
+                        </Button>
+                      </div>
+                    ) : (
+                      isExpanded && (
+                        <>
+                          <div className="grid gap-4">
+                            {renderBasicDetails(apiCoApp)}
+                            {renderAddressDetails(apiCoApp)}
+
+                            {(() => {
+                              const employmentStatus = localCoApp ? getEmploymentStatusForCoApplicant(localCoApp.id) : 'incomplete';
+                              const step5 = localCoApp?.data?.step5;
+                              const occupationTypeLabels: Record<string, string> = {
+                                'salaried': 'Salaried',
+                                'self-employed-non-professional': 'Self Employed Non Professional',
+                                'self-employed-professional': 'Self Employed Professional',
+                                'others': 'Others'
+                              };
+
+                              return (
+                                <div className={tileWrapperClass}>
+                                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                                    <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+                                      <Briefcase className="w-5 h-5" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      {employmentStatus === 'incomplete' ? (
+                                        <div className="space-y-0.5">
+                                          <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
+                                          <p className="text-xs text-gray-500">Upload or enter occupation and employment details manually</p>
+                                        </div>
+                                      ) : step5 ? (
+                                        <div className="mt-2 space-y-1 text-xs text-gray-600">
+                                          <p>
+                                            <span className="font-medium">Occupation Type:</span> {occupationTypeLabels[step5.occupationType] || step5.occupationType}
+                                          </p>
+                                          {step5.occupationType === 'salaried' && (
+                                            <>
+                                              {step5.employerName && (
+                                                <p>
+                                                  <span className="font-medium">Employer:</span> {step5.employerName}
+                                                </p>
+                                              )}
+                                              {step5.employmentStatus && (
+                                                <p>
+                                                  <span className="font-medium">Status:</span> {step5.employmentStatus === 'present' ? 'Present' : 'Past'}
+                                                </p>
+                                              )}
+                                            </>
+                                          )}
+                                          {(step5.occupationType === 'self-employed-non-professional' || step5.occupationType === 'self-employed-professional') &&
+                                            (step5.orgNameSENP || step5.orgNameSEP) && (
+                                              <p>
+                                                <span className="font-medium">Organization:</span> {step5.orgNameSENP || step5.orgNameSEP}
+                                              </p>
+                                            )}
+                                          {step5.occupationType === 'others' && step5.natureOfOccupation && (
+                                            <p>
+                                              <span className="font-medium">Nature:</span> {step5.natureOfOccupation.charAt(0).toUpperCase() + step5.natureOfOccupation.slice(1)}
+                                            </p>
+                                          )}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-col items-end gap-2 min-w-[140px]">
+                                    {employmentStatus !== 'incomplete' && (
+                                      <Badge className={cn(
+                                        'rounded-full text-[11px] px-3 py-1 border',
+                                        employmentStatus === 'completed'
+                                          ? 'bg-white border-green-200 text-green-700'
+                                          : 'bg-white border-yellow-200 text-yellow-700'
+                                      )}>
+                                        {employmentStatus === 'completed' ? 'Completed' : 'In Progress'}
+                                      </Badge>
+                                    )}
+                                    {localCoApp && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => router.push(`/lead/co-applicant/employment-details?coApplicantId=${localCoApp.id}`)}
+                                        className={tileButtonClass}
+                                      >
+                                        Edit
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+
+                            <div className={tileWrapperClass}>
+                              <div className="flex items-start gap-3 flex-1 min-w-0">
+                                <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+                                  <Database className="w-5 h-5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-gray-900">No account aggregator request initiated</p>
+                                  <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
+                                </div>
+                              </div>
+                              <div className="flex flex-col items-end gap-2 min-w-[140px]">
+                                <Button variant="outline" size="sm" className={tileButtonClass} disabled>
+                                  Initiate
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-gray-100 text-xs text-gray-400">
+                            {localCoApp ? documentsSummary(localCoApp) : 'No documents linked yet'}
+                          </div>
+                        </>
+                      )
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -770,7 +814,13 @@ export default function CoApplicantInfoPage() {
                     throw new Error(response.error || 'Failed to delete co-applicant.');
                   }
 
-                  deleteCoApplicant(currentLead.id, id);
+                  if (id) {
+                    deleteCoApplicant(currentLead.id, id);
+                  } else {
+                    // If local co-applicant is missing, we still deleted from API.
+                    // We should reload to sync state.
+                    window.location.reload();
+                  }
                   toast({
                     title: 'Co-applicant Deleted',
                     description: `${name} has been removed successfully.`,

@@ -203,12 +203,12 @@ interface DocumentDefinition {
 }
 
 const PROPERTY_PHOTO_OPTIONS = [
-    { value: 'front', label: 'Front' },
-    { value: 'side', label: 'Side' },
-    { value: 'approach_road', label: 'Approach Road' },
-    { value: 'surrounding_view', label: 'Surrounding View' },
-    { value: 'inside_living_room', label: 'Inside - Living Room' },
-    { value: 'selfie_with_owner', label: 'Selfie with Owner' },
+    { value: 'collateral_images_front', label: 'Property Front' },
+    { value: 'collateral_images_side', label: 'Property Side' },
+    { value: 'collateral_images_road', label: 'Property Approach Road' },
+    { value: 'collateral_images_surrounding', label: 'Property Surrounding View' },
+    { value: 'collateral_images_inside', label: 'Property Inside' },
+    { value: 'collateral_images_selfie', label: 'Selfie with owner inside property' },
 ] as const;
 
 type PropertyPhotoType = (typeof PROPERTY_PHOTO_OPTIONS)[number]['value'];
@@ -252,6 +252,16 @@ const generateDocumentList = (lead: any): DocumentDefinition[] => {
         applicantType: 'main',
         required: true,
         requiresFrontBack: true,
+    });
+
+    documents.push({
+        value: 'bank_statement',
+        label: `Bank Statement - ${mainApplicantName}`,
+        fileTypes: ['pdf', 'image'],
+        requiresCamera: false,
+        applicantType: 'main',
+        required: false,
+        requiresFrontBack: false,
     });
 
     const coApplicants = lead?.formData?.coApplicants || [];
@@ -300,10 +310,21 @@ const generateDocumentList = (lead: any): DocumentDefinition[] => {
             required: true,
             requiresFrontBack: true,
         });
+
+        documents.push({
+            value: `bank_statement_${coApp.id}`,
+            label: `Bank Statement - ${name}`,
+            fileTypes: ['pdf', 'image'],
+            requiresCamera: false,
+            applicantType: 'coapplicant',
+            coApplicantId: coApp.id,
+            required: false,
+            requiresFrontBack: false,
+        });
     });
 
     documents.push({
-        value: 'CollateralPapers',
+        value: 'collateral_legal',
         label: 'Sale Deed',
         fileTypes: ['pdf'],
         requiresCamera: false,
@@ -625,20 +646,27 @@ function Step8Content() {
     }, [stream]);
 
     // Helper function to map frontend document type to backend format
-    const mapDocumentTypeToBackend = (docType: string): 'pan_card' | 'aadhaar_card' | 'driving_license' | 'passport' | 'voter_id' | 'collateral_documents' | 'bank_statement' | 'salary_slip' | 'itr' | 'other' => {
+    const mapDocumentTypeToBackend = (docType: string): string => {
+        // Check if it's a property photo type first (before parsing) - return it as-is
+        if (docType.startsWith('collateral_images_')) {
+            return docType;
+        }
+
         const { baseValue } = parseDocumentValue(docType);
-        const mapping: Record<string, 'pan_card' | 'aadhaar_card' | 'driving_license' | 'passport' | 'voter_id' | 'collateral_documents' | 'bank_statement' | 'salary_slip' | 'itr' | 'other'> = {
+        const mapping: Record<string, string> = {
             'PAN': 'pan_card',
             'Adhaar': 'aadhaar_card',
             'DrivingLicense': 'driving_license',
             'Passport': 'passport',
             'VoterID': 'voter_id',
             'CollateralPapers': 'collateral_documents',
-            'PropertyPhotos': 'collateral_documents',
+            'collateral': 'collateral_legal',
             'BankStatement': 'bank_statement',
+            'bank': 'bank_statement',
             'SalarySlip': 'salary_slip',
             'ITR': 'itr',
         };
+
         return mapping[baseValue] || 'other';
     };
 
@@ -722,6 +750,8 @@ function Step8Content() {
                     back_file: backFile,
                     document_name: options?.documentLabel || docInfo?.label || file.name,
                     metadata: Object.keys(metadata).length ? metadata : undefined,
+                    latitude: locationCoords.latitude,
+                    longitude: locationCoords.longitude,
                 });
             }
 
@@ -1636,9 +1666,9 @@ function Step8Content() {
         setIsUploadingPropertyPhoto(true);
         toast({ title: 'Processing', description: `Uploading ${displayLabel}...` });
 
-        const uploadResult = await handleDocumentUpload(fileSource, 'PropertyPhotos', fileId, undefined, {
+        // Use the specific property photo type as document type
+        const uploadResult = await handleDocumentUpload(fileSource, photoType, fileId, undefined, {
             documentLabel: displayLabel,
-            metadata: { property_photo_type: photoType },
         });
 
         const isSuccess = uploadResult?.success === true;

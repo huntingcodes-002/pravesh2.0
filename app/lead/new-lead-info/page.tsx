@@ -32,6 +32,7 @@ export default function NewLeadInfoPage() {
   const [isCoApplicantsLoading, setIsCoApplicantsLoading] = useState(false);
   const [detailedInfo, setDetailedInfo] = useState<ApplicationDetails | null>(null);
   const [isLoadingDetailedInfo, setIsLoadingDetailedInfo] = useState(false);
+  const [isWaiverPending, setIsWaiverPending] = useState(false);
   const [showKycModal, setShowKycModal] = useState(false);
 
   // Redirect if no current lead
@@ -108,6 +109,8 @@ export default function NewLeadInfoPage() {
               nextStatus = 'Paid';
             } else if (paymentState === 'failed' || paymentState === 'cancelled') {
               nextStatus = 'Failed';
+            } else if (paymentState === 'waived') {
+              nextStatus = 'Waived';
             }
             setPaymentStatus(nextStatus);
             // Ensure we stop showing "Checking..." since we have the status
@@ -211,6 +214,24 @@ export default function NewLeadInfoPage() {
       }
     }
   }, [paymentStatus, currentLead]);
+
+  // Check for pending waiver in session storage
+  useEffect(() => {
+    if (!currentLead?.appId) return;
+
+    const storageKey = `payment-state-${currentLead.appId}`;
+    try {
+      const raw = sessionStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.waiverStatus === 'pending') {
+          setIsWaiverPending(true);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to read payment state', e);
+    }
+  }, [currentLead?.appId]);
 
   const handleKycModalAction = (action: 'aadhaar' | 'pan' | 'skip') => {
     if (action === 'skip') {
@@ -597,6 +618,8 @@ export default function NewLeadInfoPage() {
     switch (paymentStatus) {
       case 'Paid':
         return <Badge className={cn(baseClasses, "bg-green-100 border-green-200 text-green-700")}>Completed</Badge>;
+      case 'Waived':
+        return <Badge className={cn(baseClasses, "bg-blue-100 border-blue-200 text-blue-700")}>Waived</Badge>;
       case 'Failed':
         return <Badge className={cn(baseClasses, "bg-red-100 border-red-200 text-red-600")}>Failed</Badge>;
       default:
@@ -644,7 +667,7 @@ export default function NewLeadInfoPage() {
   const coApplicantCount = detailedInfo?.participants?.filter((p: Participant) => p.participant_type === 'co-applicant').length || apiCoApplicants.length;
   const hasCoApplicants = coApplicantCount > 0;
 
-  const isPaymentCompleted = paymentStatus === 'Paid';
+  const isPaymentCompleted = paymentStatus === 'Paid' || paymentStatus === 'Waived' || isWaiverPending;
   const paymentStepStatus: SectionStatus = isPaymentCompleted ? 'completed' : paymentStatus === 'Failed' ? 'in-progress' : 'in-progress';
   const documentsStepStatus: SectionStatus = areAllDocumentsUploaded
     ? 'completed'
@@ -729,12 +752,12 @@ export default function NewLeadInfoPage() {
     !isDocumentsCompleted;
 
   const tileWrapperClass =
-    'flex flex-row items-start justify-between gap-4 border-b border-gray-100 pb-4 mb-4 last:border-0 last:mb-0';
+    'flex flex-row items-start justify-between gap-3 border-b border-gray-100 pb-4 mb-4 last:border-0 last:mb-0';
   const tileButtonClass =
     'border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent';
 
   const renderSectionStatusPill = (status: SectionStatus) => {
-    const base = 'rounded-full text-xs font-semibold px-4 py-1 border';
+    const base = 'rounded-full text-[10px] font-semibold px-3 py-0.5 border';
     switch (status) {
       case 'completed':
         return <Badge className={`${base} bg-green-100 border-green-200 text-green-700`}>Completed</Badge>;
@@ -754,9 +777,9 @@ export default function NewLeadInfoPage() {
 
     return (
       <div className={tileWrapperClass}>
-        <div className="flex items-start gap-4 flex-1 min-w-0">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
-            <UserCheck className="w-6 h-6" />
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
+            <UserCheck className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
             {hasDetails ? (
@@ -872,10 +895,10 @@ export default function NewLeadInfoPage() {
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2.5 min-w-[140px] flex-shrink-0">
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
           {renderSectionStatusPill(step2Status)}
           {showPanVerifiedPill && (
-            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1 font-medium">
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
               Verified via PAN
             </Badge>
           )}
@@ -908,9 +931,9 @@ export default function NewLeadInfoPage() {
 
     return (
       <div className={tileWrapperClass}>
-        <div className="flex items-start gap-4 flex-1 min-w-0">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
-            <MapPin className="w-6 h-6" />
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
+            <MapPin className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
             {hasDetails ? (
@@ -969,16 +992,16 @@ export default function NewLeadInfoPage() {
               </div>
             ) : (
               <div className="space-y-1">
-                <p className="font-semibold text-gray-900 text-sm">No address details added yet</p>
+                <p className="font-semibold text-gray-900 text-sm">Address details</p>
                 <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill address</p>
               </div>
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2.5 min-w-[140px] flex-shrink-0">
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
           {renderSectionStatusPill(step3Status)}
           {showAadhaarVerifiedPill && (
-            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1 font-medium">
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
               Verified via Aadhaar
             </Badge>
           )}
@@ -1001,9 +1024,9 @@ export default function NewLeadInfoPage() {
 
     return (
       <div className={tileWrapperClass}>
-        <div className="flex items-start gap-4 flex-1 min-w-0">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
-            <Briefcase className="w-6 h-6" />
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
+            <Briefcase className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
             {hasDetails ? (
@@ -1061,13 +1084,13 @@ export default function NewLeadInfoPage() {
               </div>
             ) : (
               <div className="space-y-1">
-                <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
-                <p className="text-xs text-gray-500">Upload or enter occupation and employment details manually</p>
+                <p className="text-sm font-semibold text-gray-900">Employment details</p>
+                <p className="text-xs text-gray-500">Enter employment details</p>
               </div>
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2.5 min-w-[140px] flex-shrink-0">
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
           {renderSectionStatusPill(employmentStatus)}
           <Button
             variant="outline"
@@ -1089,11 +1112,11 @@ export default function NewLeadInfoPage() {
           <Database className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900">No account aggregator request initiated</p>
+          <p className="text-sm font-semibold text-gray-900">Account aggregator </p>
           <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
         </div>
       </div>
-      <div className="flex flex-col items-end gap-2 min-w-[140px]">
+      <div className="flex flex-col items-end gap-2 flex-shrink-0">
         <Button variant="outline" size="sm" className={tileButtonClass}>
           Initiate
         </Button>
@@ -1169,15 +1192,29 @@ export default function NewLeadInfoPage() {
                 {renderPaymentStatusBadge()}
               </div>
 
-              {isPaymentCompleted ? (
+              {isPaymentCompleted || isWaiverPending ? (
                 <div className="mb-4 space-y-3">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                      <CheckCircle className="w-6 h-6 text-green-600" />
+                      {paymentStatus === 'Waived' || isWaiverPending ? (
+                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
+                          <CheckCircle className="w-4 h-4 text-blue-600" />
+                        </div>
+                      ) : (
+                        <CheckCircle className="w-6 h-6 text-green-600" />
+                      )}
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Payment received successfully</p>
-                      <p className="text-xs text-gray-500">Login fee has been confirmed and recorded.</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {paymentStatus === 'Waived' || isWaiverPending ? 'Payment Waiver Request' : 'Payment received successfully'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {paymentStatus === 'Waived'
+                          ? 'Login fee has been waived.'
+                          : isWaiverPending
+                            ? 'Waiver request is in progress.'
+                            : 'Login fee has been confirmed and recorded.'}
+                      </p>
                     </div>
                   </div>
                   <Button
@@ -1222,8 +1259,8 @@ export default function NewLeadInfoPage() {
           )}>
             <CardContent className="p-5">
               {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Applicant Details</h3>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Applicant Details</h3>
                 <div className="flex items-center gap-2">
                   {getStatusBadge(applicantStatus)}
                 </div>
@@ -1331,59 +1368,13 @@ export default function NewLeadInfoPage() {
                         const fullName = participant?.personal_info?.full_name;
                         const name = fullName?.value || (typeof fullName === 'string' ? fullName : 'Unnamed Co-applicant');
                         const index = participant?.co_applicant_index ?? -1;
-                        const pan = participant?.personal_info?.pan_number;
-                        const mobile = participant?.personal_info?.mobile_number;
-                        const dob = participant?.personal_info?.date_of_birth;
 
                         return (
                           <div
                             key={`co-applicant-${index}`}
-                            className="rounded-lg border border-gray-200 bg-white px-4 py-3 space-y-2"
+                            className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-900"
                           >
-                            <div className="flex items-center justify-between">
-                              <p className="text-sm font-semibold text-gray-900">
-                                Co-Applicant {index + 1} – {name}
-                              </p>
-                            </div>
-                            <div className="space-y-1 text-xs text-gray-600">
-                              {pan?.value && (
-                                <p>
-                                  <span className="font-medium">PAN:</span> {pan.value}
-                                  {pan.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
-                                </p>
-                              )}
-                              {mobile?.value && (
-                                <p>
-                                  <span className="font-medium">Mobile:</span> {mobile.value}
-                                  {mobile.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
-                                </p>
-                              )}
-                              {dob?.value && (
-                                <p>
-                                  <span className="font-medium">DOB:</span> {new Date(dob.value).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                                  {dob.verified && <span className="ml-2 text-green-600 text-[10px]">✓ Verified</span>}
-                                </p>
-                              )}
-                              {participant?.addresses && participant.addresses.length > 0 && (
-                                <div className="mt-2 pt-2 border-t border-gray-100">
-                                  <p className="font-medium mb-1">Addresses:</p>
-                                  {participant.addresses.map((addr, addrIdx) => (
-                                    <div key={addrIdx} className="ml-2 mb-2 last:mb-0">
-                                      <p className="text-[11px] text-gray-600">
-                                        {addr.address_type.charAt(0).toUpperCase() + addr.address_type.slice(1)}
-                                        {addr.is_primary && <span className="ml-1 text-blue-600">(Primary)</span>}
-                                      </p>
-                                      <p className="text-[11px] text-gray-500">
-                                        {[addr.address_line_1, addr.address_line_2, addr.address_line_3].filter(Boolean).join(', ')}
-                                      </p>
-                                      <p className="text-[11px] text-gray-500">
-                                        {[addr.city, addr.state, addr.pincode].filter(Boolean).join(', ')}
-                                      </p>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
+                            {`Co-Applicant ${index + 1} – ${name}`}
                           </div>
                         );
                       })}

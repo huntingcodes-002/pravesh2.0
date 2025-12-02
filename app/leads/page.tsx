@@ -436,35 +436,16 @@ export default function LeadsDashboardPage() {
                       {/* Row 1: App ID & Status */}
                       <div className="flex justify-between items-start">
                         <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-gray-900">
-                              {lead.customerName || 'New Lead'}
-                            </p>
-                            {getStatusBadge(lead.status)}
-                          </div>
+                          <p className="font-semibold text-gray-900">
+                            {lead.customerName || 'New Lead'}
+                          </p>
                           <p className="text-sm font-medium text-gray-700">
                             {lead.appId || 'Pending Application ID'}
                           </p>
                         </div>
 
-                        {/* Preview Button (Moved) */}
-                        <Button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleAction(lead, 'view');
-                          }}
-                          variant="outline"
-                          size="icon"
-                          className="w-10 h-10 rounded-full text-blue-600 hover:bg-blue-50 border-blue-200 flex-shrink-0"
-                          disabled={isFetchingLead && activeLeadId === lead.id}
-                          title="Application Preview"
-                        >
-                          {isFetchingLead && activeLeadId === lead.id ? (
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                          ) : (
-                            <Eye className="w-5 h-5" />
-                          )}
-                        </Button>
+                        {/* Status Badge (Moved) */}
+                        {getStatusBadge(lead.status)}
                       </div>
 
                       {/* Row 2: Mobile & Timestamp */}
@@ -481,21 +462,7 @@ export default function LeadsDashboardPage() {
                       </div>
 
                       {/* Row 3: Action Buttons (Full Sized) */}
-                      <div className="grid grid-cols-2 gap-3 pt-3">
-
-                        {/* Call Customer Button */}
-                        <Button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleAction(lead, 'call');
-                          }}
-                          className="h-12 bg-green-500 hover:bg-green-600 text-white font-semibold text-xs sm:text-sm"
-                          title="Call Customer"
-                        >
-                          <Phone className="w-4 h-4 mr-1 sm:mr-2 flex-shrink-0" />
-                          <span className="truncate">Call Customer</span>
-                        </Button>
-
+                      <div className="pt-3">
                         {/* Continue / Edit Button */}
                         <Button
                           onClick={(e) => {
@@ -504,7 +471,7 @@ export default function LeadsDashboardPage() {
                           }}
                           disabled={isFinalized || (isFetchingLead && activeLeadId === lead.id)}
                           className={cn(
-                            "h-12 font-semibold text-xs sm:text-sm",
+                            "w-full h-12 font-semibold text-xs sm:text-sm",
                             isFinalized ?
                               "bg-gray-300 text-gray-600 cursor-not-allowed" :
                               "bg-blue-600 hover:bg-blue-700 text-white"
@@ -518,7 +485,6 @@ export default function LeadsDashboardPage() {
                           )}
                           <span className="truncate">{buttonText}</span>
                         </Button>
-
                       </div>
                     </div>
                   </CardContent>

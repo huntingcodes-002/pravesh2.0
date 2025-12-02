@@ -9,12 +9,13 @@ import {
   type ApplicationsSummaryResponse,
   type ApplicationSummaryItem,
   type DetailedInfoResponse,
+  type PaymentResult,
 } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
 export type LeadStatus = 'Draft' | 'Submitted' | 'Approved' | 'Disbursed' | 'Rejected';
 
-export type PaymentStatus = 'Pending' | 'Paid' | 'Failed';
+export type PaymentStatus = 'Pending' | 'Paid' | 'Failed' | 'Waived';
 
 export interface PaymentSession {
   id: string;
@@ -77,6 +78,7 @@ export interface Lead {
   createdAt: string;
   updatedAt: string;
   hasDetails?: boolean;
+  paymentResult?: PaymentResult;
 }
 
 export interface LeadSummaryStats {
@@ -293,25 +295,64 @@ function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Le
 
   // Sync co-applicant verification status from participants array
   if (detail.application_details?.participants) {
-    coApplicants = coApplicants.map((coApp: any) => {
-      const matchingParticipant = detail.application_details?.participants?.find(
-        (p: any) => p.participant_type === 'co-applicant' && p.co_applicant_index === coApp.workflowIndex
+    // If coApplicants list is empty but we have participants from API, populate it
+    if (coApplicants.length === 0) {
+      const apiCoApps = detail.application_details.participants.filter(
+        (p: any) => p.participant_type === 'co_applicant' || p.participant_type === 'co-applicant'
       );
 
-      if (matchingParticipant) {
-        const isVerified = matchingParticipant.personal_info?.mobile_number?.verified;
-        // Update isMobileVerified in data.basicDetails or data.step1
-        const newData = { ...coApp.data };
-        if (newData.basicDetails) {
-          newData.basicDetails = { ...newData.basicDetails, isMobileVerified: isVerified };
-        } else {
-          // Fallback or default structure
-          newData.step1 = { ...newData.step1, isMobileVerified: isVerified };
-        }
-        return { ...coApp, data: newData };
+      if (apiCoApps.length > 0) {
+        coApplicants = apiCoApps.map((p: any) => {
+          const fullName = p.personal_info?.full_name?.value || '';
+          const nameParts = fullName.split(' ');
+          const firstName = nameParts[0] || '';
+          const lastName = nameParts.slice(1).join(' ') || '';
+
+          return {
+            id: `temp-${p.co_applicant_index}`, // Generate a temp ID to allow local operations
+            workflowIndex: p.co_applicant_index,
+            relationship: p.relationship_to_primary || '',
+            data: {
+              step1: {
+                isMobileVerified: p.personal_info?.mobile_number?.verified,
+                firstName,
+                lastName,
+                mobile: p.personal_info?.mobile_number?.value || '',
+                relation: p.relationship_to_primary || '',
+              },
+              basicDetails: {
+                isMobileVerified: p.personal_info?.mobile_number?.verified,
+                firstName,
+                lastName,
+                mobile: p.personal_info?.mobile_number?.value || '',
+                relation: p.relationship_to_primary || '',
+              }
+            }
+          };
+        });
       }
-      return coApp;
-    });
+    } else {
+      // Sync existing co-applicants
+      coApplicants = coApplicants.map((coApp: any) => {
+        const matchingParticipant = detail.application_details?.participants?.find(
+          (p: any) => (p.participant_type === 'co_applicant' || p.participant_type === 'co-applicant') && p.co_applicant_index === coApp.workflowIndex
+        );
+
+        if (matchingParticipant) {
+          const isVerified = matchingParticipant.personal_info?.mobile_number?.verified;
+          // Update isMobileVerified in data.basicDetails or data.step1
+          const newData = { ...coApp.data };
+          if (newData.basicDetails) {
+            newData.basicDetails = { ...newData.basicDetails, isMobileVerified: isVerified };
+          } else {
+            // Fallback or default structure
+            newData.step1 = { ...newData.step1, isMobileVerified: isVerified };
+          }
+          return { ...coApp, data: newData };
+        }
+        return coApp;
+      });
+    }
   }
 
   const dob = personalInfo?.date_of_birth ?? baseLead.dob;
@@ -347,6 +388,7 @@ function mapDetailedInfoToLead(baseLead: Lead, detail: DetailedInfoResponse): Le
     step3Completed: completedSteps.address_details ?? baseLead.step3Completed,
     createdAt: newLeadData?.created_at ?? baseLead.createdAt,
     updatedAt,
+    paymentResult: detail.application_details?.payment_result,
     formData: {
       ...baseLead.formData,
       coApplicants,

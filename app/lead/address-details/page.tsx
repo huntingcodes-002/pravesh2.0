@@ -57,8 +57,8 @@ export default function Step3Page() {
   const [isSaving, setIsSaving] = useState(false);
   const hasFetchedOcrData = useRef<string | null>(null);
   const [isAutoFilledViaAadhaar, setIsAutoFilledViaAadhaar] = useState(
-    currentLead?.formData?.step3?.autoFilledViaAadhaar || 
-    currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar || 
+    currentLead?.formData?.step3?.autoFilledViaAadhaar ||
+    currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar ||
     false
   );
   const [pincodeLookupId, setPincodeLookupId] = useState<string | null>(null);
@@ -201,8 +201,8 @@ export default function Step3Page() {
     }
     // Sync auto-population flag from context
     setIsAutoFilledViaAadhaar(
-      currentLead?.formData?.step3?.autoFilledViaAadhaar || 
-      currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar || 
+      currentLead?.formData?.step3?.autoFilledViaAadhaar ||
+      currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar ||
       false
     );
   }, [currentLead]);
@@ -282,7 +282,7 @@ export default function Step3Page() {
 
         // Check if Aadhaar extracted address exists
         const aadhaarAddress = successResponse.workflow_state?.aadhaar_extracted_address;
-        
+
         if (aadhaarAddress) {
           // Extract address fields
           const addressLine1 = aadhaarAddress.address_line_one || aadhaarAddress.address_line_1 || '';
@@ -315,7 +315,7 @@ export default function Step3Page() {
                 }];
               } else {
                 // Overwrite first address with OCR data
-                updatedAddresses = prev.map((addr, index) => 
+                updatedAddresses = prev.map((addr, index) =>
                   index === 0 ? {
                     ...addr,
                     addressType: addressType,
@@ -331,7 +331,7 @@ export default function Step3Page() {
 
               // Set local state immediately for instant UI update
               setIsAutoFilledViaAadhaar(true);
-              
+
               // Update lead context with auto-population flag
               if (currentLead) {
                 // Mark addresses as auto-filled via Aadhaar
@@ -339,11 +339,11 @@ export default function Step3Page() {
                   ...addr,
                   autoFilledViaAadhaar: true,
                 }));
-                
+
                 updateLead(currentLead.id, {
                   formData: {
                     ...currentLead.formData,
-                    step3: { 
+                    step3: {
                       addresses: addressesWithFlag,
                       autoFilledViaAadhaar: true, // Mark step3 as auto-filled via Aadhaar
                     },
@@ -361,7 +361,7 @@ export default function Step3Page() {
             });
           }
         }
-        
+
         // Mark as fetched for this application ID to prevent re-fetching
         hasFetchedOcrData.current = appId;
       } catch (error: any) {
@@ -494,74 +494,74 @@ export default function Step3Page() {
     );
   };
 
-const handlePostalCodeChange = (id: string, rawValue: string) => {
-  if (isInteractionDisabled) return;
-  const numeric = rawValue.replace(/[^0-9]/g, '').slice(0, 6);
+  const handlePostalCodeChange = (id: string, rawValue: string) => {
+    if (isInteractionDisabled) return;
+    const numeric = rawValue.replace(/[^0-9]/g, '').slice(0, 6);
 
-  setAddresses(prev =>
-    prev.map((addr) =>
-      addr.id === id
-        ? {
+    setAddresses(prev =>
+      prev.map((addr) =>
+        addr.id === id
+          ? {
             ...addr,
             postalCode: numeric,
             city: numeric.length === 6 ? addr.city : '',
             stateCode: numeric.length === 6 ? addr.stateCode : '',
             stateName: numeric.length === 6 ? addr.stateName : '',
           }
-        : addr
-    )
-  );
+          : addr
+      )
+    );
 
-  if (numeric.length === 6) {
-    void performPincodeLookup(id, numeric);
-  } else if (pincodeLookupId === id) {
-    setPincodeLookupId(null);
-  }
-};
-
-const performPincodeLookup = async (id: string, zip: string) => {
-  setPincodeLookupId(id);
-  try {
-    const response = await lookupPincode(zip);
-    if (isApiError(response) || !response.success) {
-      throw new Error('Zipcode not found');
+    if (numeric.length === 6) {
+      void performPincodeLookup(id, numeric);
+    } else if (pincodeLookupId === id) {
+      setPincodeLookupId(null);
     }
+  };
 
-    const data = response;
-    setAddresses(prev =>
-      prev.map((addr) =>
-        addr.id === id
-          ? {
+  const performPincodeLookup = async (id: string, zip: string) => {
+    setPincodeLookupId(id);
+    try {
+      const response = await lookupPincode(zip);
+      if (isApiError(response) || !response.success) {
+        throw new Error('Zipcode not found');
+      }
+
+      const data = response;
+      setAddresses(prev =>
+        prev.map((addr) =>
+          addr.id === id
+            ? {
               ...addr,
               city: data.city ?? '',
               stateCode: data.state_code ?? '',
               stateName: data.state ?? '',
             }
-          : addr
-      )
-    );
-  } catch {
-    setAddresses(prev =>
-      prev.map((addr) =>
-        addr.id === id
-          ? {
+            : addr
+        )
+      );
+    } catch {
+      setAddresses(prev =>
+        prev.map((addr) =>
+          addr.id === id
+            ? {
               ...addr,
               city: '',
               stateCode: '',
               stateName: '',
             }
-          : addr
-      )
-    );
-    toast({
-      title: 'Zipcode not found',
-      description: 'Please check the pincode and try again.',
-      variant: 'destructive',
-    });
-  } finally {
-    setPincodeLookupId(null);
-  }
-};
+            : addr
+        )
+      );
+      toast({
+        title: 'Zipcode not found',
+        description: 'Please check the pincode and try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setPincodeLookupId(null);
+    }
+  };
 
 
   const handleSave = async () => {
@@ -597,9 +597,9 @@ const performPincodeLookup = async (id: string, zip: string) => {
     const normalizedAddresses = addresses.some((addr: Address) => addr.isPrimary)
       ? addresses
       : addresses.map((addr, index) => ({
-          ...addr,
-          isPrimary: index === 0,
-        }));
+        ...addr,
+        isPrimary: index === 0,
+      }));
 
     const backendAddresses = normalizedAddresses.map((addr) => {
       const addressLine1 = addr.addressLine1?.trim() ?? '';
@@ -649,7 +649,10 @@ const performPincodeLookup = async (id: string, zip: string) => {
         step3Completed: true,
         formData: {
           ...currentLead.formData,
-          step3: { addresses: addressesForContext },
+          step3: {
+            ...currentLead.formData?.step3,
+            addresses: addressesForContext
+          },
         },
       });
 
@@ -745,7 +748,7 @@ const performPincodeLookup = async (id: string, zip: string) => {
             </p>
           </div>
         )}
-        
+
         <div className="bg-white rounded-xl shadow-sm p-6 space-y-6 border border-gray-100">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
@@ -961,10 +964,10 @@ const performPincodeLookup = async (id: string, zip: string) => {
                 variant="outline"
                 className={cn(
                   "w-full h-12 text-[#0072CE] border-dashed border-[#0072CE]/50 hover:bg-[#E6F0FA] rounded-lg font-medium",
-                isInteractionDisabled && "text-gray-400 border-gray-300 hover:bg-white cursor-not-allowed"
+                  isInteractionDisabled && "text-gray-400 border-gray-300 hover:bg-white cursor-not-allowed"
                 )}
                 onClick={handleAddAddress}
-              disabled={isInteractionDisabled}
+                disabled={isInteractionDisabled}
               >
                 <Plus className="w-5 h-5 mr-2" />
                 Add Another Address
@@ -972,7 +975,7 @@ const performPincodeLookup = async (id: string, zip: string) => {
             </div>
 
           </div>
-          
+
           {/* Auto-filled verification message */}
           {(isAutoFilledViaAadhaar || currentLead?.formData?.step3?.autoFilledViaAadhaar || currentLead?.formData?.step3?.addresses?.[0]?.autoFilledViaAadhaar) && (
             <p className="text-xs text-gray-400 mt-4">Auto-filled and verified via Aadhaar OCR workflow</p>

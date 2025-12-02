@@ -14,9 +14,10 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { RefreshCw, CheckCircle, ChevronDown, Trash2, Send, Wallet } from 'lucide-react';
 import { useLead } from '@/contexts/LeadContext';
-import { getAccessToken } from '@/lib/api';
+import { getAccessToken, requestPaymentWaiver, isApiError } from '@/lib/api';
 
-type PaymentStatus = 'Pending' | 'Paid' | 'Failed';
+type PaymentStatus = 'Pending' | 'Paid' | 'Failed' | 'Waived';
+type WaiverStatus = 'none' | 'pending' | 'approved' | 'rejected';
 
 const API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/applications';
 
@@ -48,6 +49,12 @@ export default function PaymentsPage() {
   const { toast } = useToast();
   const sendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasHydratedState = useRef(false);
+
+  // Waiver-related state
+  const [waiverStatus, setWaiverStatus] = useState<WaiverStatus>('none');
+  const [waiverDeviationId, setWaiverDeviationId] = useState<number | null>(null);
+  const [isSubmittingWaiver, setIsSubmittingWaiver] = useState(false);
+  const waiverRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const getAuthorizationHeader = () => {
     const token = getAccessToken();
@@ -95,6 +102,13 @@ export default function PaymentsPage() {
         setDisplayMobile(parsed.displayMobile ?? derivedMobile);
         setRemarks(parsed.remarks ?? '');
         setReceivedOn(parsed.receivedOn ? new Date(parsed.receivedOn) : null);
+        setWaiverStatus(parsed.waiverStatus ?? 'none');
+        setWaiverDeviationId(parsed.waiverDeviationId ?? null);
+
+        // Restart auto-refresh if waiver is pending
+        if (parsed.waiverStatus === 'pending') {
+          startWaiverAutoRefresh();
+        }
       }
     } catch (error) {
       console.warn('Failed to hydrate payment state', error);
@@ -118,6 +132,8 @@ export default function PaymentsPage() {
       displayMobile,
       remarks,
       receivedOn: receivedOn ? receivedOn.toISOString() : null,
+      waiverStatus,
+      waiverDeviationId,
     };
     try {
       sessionStorage.setItem(storageKey, JSON.stringify(payload));
@@ -134,9 +150,47 @@ export default function PaymentsPage() {
     displayMobile,
     remarks,
     receivedOn,
+    waiverStatus,
+    waiverDeviationId,
   ]);
 
   useEffect(() => {
+    // Check paymentResult from detailed info first (authoritative source)
+    if (currentLead?.paymentResult) {
+      const result = currentLead.paymentResult;
+      const statusValue = String(result.state || '').toLowerCase();
+      let nextStatus: PaymentStatus = 'Pending';
+
+      if (statusValue === 'completed') {
+        nextStatus = 'Paid';
+      } else if (statusValue === 'failed' || statusValue === 'cancelled') {
+        nextStatus = 'Failed';
+      } else if (statusValue === 'waived') {
+        nextStatus = 'Waived';
+        setWaiverStatus('approved');
+      }
+
+      // If we already have a definitive status (Paid or Waived), don't overwrite it with Pending
+      // unless the new status is also definitive
+      if ((paymentStatus === 'Paid' || paymentStatus === 'Waived') && nextStatus === 'Pending') {
+        return;
+      }
+
+      setPaymentStatus(nextStatus);
+      setHasSentLink(true);
+
+      if (result.order_id) setPaymentOrderId(result.order_id);
+      if (result.paid_on) {
+        try {
+          setReceivedOn(new Date(result.paid_on));
+        } catch {
+          setReceivedOn(null);
+        }
+      }
+      return;
+    }
+
+    // Fallback to payments array if paymentResult is missing
     if (!currentLead?.payments || currentLead.payments.length === 0) return;
     const latestPayment: any = [...currentLead.payments].reverse().find((payment) => payment?.status);
     if (!latestPayment) return;
@@ -147,6 +201,12 @@ export default function PaymentsPage() {
       nextStatus = 'Paid';
     } else if (statusValue === 'failed' || statusValue === 'expired' || statusValue === 'cancelled') {
       nextStatus = 'Failed';
+    }
+
+    // If we already have a definitive status (Paid or Waived), don't overwrite it with Pending
+    // unless the new status is also definitive
+    if ((paymentStatus === 'Paid' || paymentStatus === 'Waived') && nextStatus === 'Pending') {
+      return;
     }
 
     setPaymentStatus(nextStatus);
@@ -165,22 +225,79 @@ export default function PaymentsPage() {
         setReceivedOn(null);
       }
     }
-  }, [currentLead?.payments]);
+  }, [currentLead?.payments, currentLead?.paymentResult]);
+
+  // Fetch latest status on mount
+  useEffect(() => {
+    if (applicationId && applicationId !== 'N/A') {
+      checkPaymentStatus(false);
+    }
+  }, [applicationId]);
 
   const handleWaveOffSubmit = async () => {
-    if (!waveOffRemarks.trim()) return;
+    if (!waveOffRemarks.trim()) {
+      toast({
+        title: 'Remarks Required',
+        description: 'Please enter remarks for the waiver request.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-    // TODO: Implement actual API call for wave off request
-    // For now, we'll simulate a successful request and redirect
+    if (!applicationId || applicationId === 'N/A') {
+      toast({
+        title: 'Error',
+        description: 'Application ID is missing.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-    toast({
-      title: 'Request Submitted',
-      description: 'Fee wave off request has been submitted successfully.',
-    });
+    const applicantName = `${currentLead?.customerFirstName || ''} ${currentLead?.customerLastName || ''}`.trim() || 'Applicant';
 
-    setIsWaveOffModalOpen(false);
-    setWaveOffRemarks('');
-    router.push('/lead/new-lead-info');
+    setIsSubmittingWaiver(true);
+
+    try {
+      const response = await requestPaymentWaiver({
+        application_id: applicationId,
+        applicant_name: applicantName,
+        comment: waveOffRemarks.trim(),
+        system_value: '0',
+        branch_code: 'BR001',
+        state_code: '10',
+      });
+
+      if (isApiError(response)) {
+        toast({
+          title: 'Request Failed',
+          description: response.error || 'Failed to submit waiver request. Please try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Success - update state
+      setWaiverStatus('pending');
+      setWaiverDeviationId(response.data?.deviation_id || null);
+      setIsWaveOffModalOpen(false);
+      setWaveOffRemarks('');
+
+      toast({
+        title: 'Request Submitted',
+        description: 'Fee waiver request has been submitted successfully.',
+      });
+
+      // Start auto-refresh for waiver status
+      startWaiverAutoRefresh();
+    } catch (error: any) {
+      toast({
+        title: 'Request Failed',
+        description: error?.message || 'Failed to submit waiver request. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmittingWaiver(false);
+    }
   };
 
   const handleSendToCustomer = async () => {
@@ -253,23 +370,16 @@ export default function PaymentsPage() {
   };
 
   const handleRefreshStatus = async () => {
-    if (isRefreshing) return;
-
-    if (!applicationId || applicationId === 'N/A') {
-      toast({
-        title: 'Cannot refresh status',
-        description: 'Application ID is missing.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    const authorization = getAuthorizationHeader();
-    if (!authorization) {
-      return;
-    }
-
     setIsRefreshing(true);
+    await checkPaymentStatus(true);
+    setIsRefreshing(false);
+  };
+
+  const checkPaymentStatus = async (showToast = false) => {
+    if (!applicationId || applicationId === 'N/A') return;
+
+    const authHeader = getAuthorizationHeader();
+    if (!authHeader) return;
 
     try {
       const response = await fetch(
@@ -277,54 +387,83 @@ export default function PaymentsPage() {
         {
           method: 'GET',
           headers: {
-            Accept: '*/*',
-            Authorization: authorization,
+            'Content-Type': 'application/json',
+            'Authorization': authHeader,
           },
           credentials: 'include',
         }
       );
 
       if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || 'Failed to fetch payment status.');
+        return;
       }
 
       const result = await response.json();
       const statusData = result?.data;
-
-      if (statusData?.masked_customer_mobile) {
-        setDisplayMobile(statusData.masked_customer_mobile);
-      }
-
       const apiState = (statusData?.state || '').toLowerCase();
+
       let nextStatus: PaymentStatus = 'Pending';
       if (apiState === 'completed') {
         nextStatus = 'Paid';
       } else if (apiState === 'failed' || apiState === 'cancelled') {
         nextStatus = 'Failed';
+      } else if (apiState === 'waived') {
+        nextStatus = 'Waived';
+        setWaiverStatus('approved');
+        // Stop auto-refresh if waiver is approved
+        if (waiverRefreshIntervalRef.current) {
+          clearInterval(waiverRefreshIntervalRef.current);
+          waiverRefreshIntervalRef.current = null;
+        }
       }
 
       setPaymentStatus(nextStatus);
-      if (statusData?.paid_on && nextStatus === 'Paid') {
+      if (statusData?.paid_on && (nextStatus === 'Paid' || nextStatus === 'Waived')) {
         setReceivedOn(new Date(statusData.paid_on));
-      } else {
-        setReceivedOn(null);
       }
 
-      toast({
-        title: 'Status Refreshed',
-        description: `Payment status is now ${nextStatus}.`,
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Failed to refresh status',
-        description: error?.message || 'Something went wrong while refreshing payment status.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsRefreshing(false);
+      if (showToast) {
+        toast({
+          title: 'Status Refreshed',
+          description: `Payment status is now ${nextStatus}.`,
+        });
+      }
+    } catch (error) {
+      // Silent fail for auto-refresh
+      console.error('Failed to refresh payment status:', error);
+      if (showToast) {
+        toast({
+          title: 'Failed to refresh status',
+          description: 'Something went wrong while refreshing payment status.',
+          variant: 'destructive',
+        });
+      }
     }
   };
+
+  const startWaiverAutoRefresh = () => {
+    // Clear any existing interval
+    if (waiverRefreshIntervalRef.current) {
+      clearInterval(waiverRefreshIntervalRef.current);
+    }
+
+    // Set up auto-refresh every 2 minutes
+    waiverRefreshIntervalRef.current = setInterval(() => {
+      checkPaymentStatus(false);
+    }, 2 * 60 * 1000); // 2 minutes
+
+    // Also do an immediate check
+    checkPaymentStatus(false);
+  };
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (waiverRefreshIntervalRef.current) {
+        clearInterval(waiverRefreshIntervalRef.current);
+      }
+    };
+  }, []);
 
   const handleResendPaymentLink = async () => {
     if (isResending) return;
@@ -485,7 +624,8 @@ export default function PaymentsPage() {
 
   const displayedPaymentLink = paymentUrl ?? defaultPaymentLink;
   const maskedOrderId = paymentOrderId ? `****${paymentOrderId.slice(-4)}` : 'N/A';
-  const isPaymentCompleted = paymentStatus === 'Paid';
+  const isPaymentCompleted = paymentStatus === 'Paid' || paymentStatus === 'Waived';
+  const isWaiverPending = waiverStatus === 'pending';
 
   const handleExit = () => {
     router.push('/lead/new-lead-info');
@@ -509,7 +649,31 @@ export default function PaymentsPage() {
             </CardContent>
           </Card>
 
-          {!hasSentLink && !isPaymentCompleted && !showSendLinkCard && (
+          {isWaiverPending && (
+            <Card className="border border-yellow-200 bg-yellow-50 shadow-sm">
+              <CardContent className="flex flex-col items-center justify-center py-12 space-y-6">
+                <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center border border-yellow-200">
+                  <Wallet className="w-10 h-10 text-yellow-600" />
+                </div>
+                <div className="text-center space-y-2">
+                  <h3 className="text-xl font-bold text-yellow-800">Application fee waiver request in progress</h3>
+                  <p className="text-sm text-yellow-700">
+                    Your request (Deviation ID: {waiverDeviationId}) is being processed.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => checkPaymentStatus(true)}
+                  className="h-12 px-8 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white font-semibold text-base flex items-center gap-2"
+                  disabled={isRefreshing}
+                >
+                  <RefreshCw className={cn('w-4 h-4', isRefreshing && 'animate-spin')} />
+                  Check Status
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {!hasSentLink && !isPaymentCompleted && !showSendLinkCard && !isWaiverPending && (
             <Card className="border border-gray-200 shadow-sm">
               <CardContent className="flex flex-col items-center justify-center py-12 space-y-6">
                 <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center border border-blue-100">
@@ -526,7 +690,7 @@ export default function PaymentsPage() {
             </Card>
           )}
 
-          {!hasSentLink && !isPaymentCompleted && showSendLinkCard && (
+          {!hasSentLink && !isPaymentCompleted && showSendLinkCard && !isWaiverPending && (
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
               <div className="p-6 space-y-6">
                 <p className="text-sm text-gray-600 text-center">
@@ -587,9 +751,25 @@ export default function PaymentsPage() {
               </div>
             </div>
           )}
+          {paymentStatus === 'Waived' && (
+            <Card className="border border-blue-200 bg-blue-50 shadow-sm">
+              <CardContent className="flex flex-col items-center justify-center py-12 space-y-6">
+                <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center border border-blue-200">
+                  <CheckCircle className="w-10 h-10 text-blue-600" />
+                </div>
+                <div className="text-center space-y-2">
+                  <h3 className="text-xl font-bold text-blue-800">Application Fee Waived</h3>
+                  <p className="text-sm text-blue-700">
+                    The login/IMD fee has been successfully waived.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
         </div>
 
-        {(hasSentLink || isPaymentCompleted) && (
+        {(hasSentLink || isPaymentCompleted) && paymentStatus !== 'Waived' && (
           <Card className="border border-gray-200">
             <CardContent className="p-6 space-y-4">
               <div className="flex items-center justify-between">
@@ -772,6 +952,6 @@ export default function PaymentsPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </DashboardLayout>
+    </DashboardLayout >
   );
 }
