@@ -1176,3 +1176,33 @@ export async function requestPaymentWaiver(
     }
   );
 }
+
+export interface DocumentStatus {
+  required: boolean;
+  uploaded: boolean;
+}
+
+export interface RequiredDocumentsResponse {
+  success: boolean;
+  application_id: string;
+  required_documents: Record<string, DocumentStatus>;
+}
+
+export interface CoApplicantRequiredDocumentsResponse {
+  success: boolean;
+  application_id: string;
+  co_applicant_index: number;
+  required_documents: Record<string, DocumentStatus>;
+}
+
+export async function getRequiredDocuments(applicationId: string): Promise<ApiResponse<RequiredDocumentsResponse>> {
+  return apiFetch<RequiredDocumentsResponse>(`applications/${applicationId}/required-documents/`, {
+    method: 'GET',
+  });
+}
+
+export async function getCoApplicantRequiredDocuments(applicationId: string, index: number): Promise<ApiResponse<CoApplicantRequiredDocumentsResponse>> {
+  return apiFetch<CoApplicantRequiredDocumentsResponse>(`applications/${applicationId}/co-applicant-required-documents/${index}/`, {
+    method: 'GET',
+  });
+}

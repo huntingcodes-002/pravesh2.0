@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard } from 'lucide-react';
+import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard, Check } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,29 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult } from '@/lib/api';
+import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult, getRequiredDocuments, getCoApplicantRequiredDocuments, type DocumentStatus } from '@/lib/api';
+
+const DOC_LABELS: Record<string, string> = {
+  aadhaar_card: 'Aadhaar Card',
+  pan_card: 'PAN Card',
+  bank_statement: 'Bank Statement',
+  driving_license: 'Driving License',
+  voter_id: 'Voter ID',
+  passport: 'Passport',
+  form_60: 'Form 60',
+  current_address_proof: 'Current Address Proof',
+  permanent_address_proof: 'Permanent Address Proof',
+  office_current_address_proof: 'Office Current Address Proof',
+  office_permanent_address_proof: 'Office Permanent Address Proof',
+  collateral_images_front: 'Front View',
+  collateral_images_inside: 'Inside View',
+  collateral_images_road: 'Road View',
+  collateral_images_selfie: 'Selfie',
+  collateral_images_side: 'Side View',
+  collateral_images_surrounding: 'Surrounding View',
+  collateral_legal: 'Legal Document',
+  collateral_ownership: 'Ownership Document',
+};
 
 type SectionStatus = 'incomplete' | 'in-progress' | 'completed';
 
@@ -31,6 +53,10 @@ export default function NewLeadInfoPage() {
   const [apiCoApplicants, setApiCoApplicants] = useState<Array<{ index: number; name: string }>>([]);
   const [isCoApplicantsLoading, setIsCoApplicantsLoading] = useState(false);
   const [detailedInfo, setDetailedInfo] = useState<ApplicationDetails | null>(null);
+  const [workflowState, setWorkflowState] = useState<any>(null);
+  const [applicantDocs, setApplicantDocs] = useState<Record<string, DocumentStatus> | null>(null);
+  const [coApplicantDocs, setCoApplicantDocs] = useState<Record<number, Record<string, DocumentStatus>>>({});
+  const [isDocsLoading, setIsDocsLoading] = useState(false);
   const [isLoadingDetailedInfo, setIsLoadingDetailedInfo] = useState(false);
   const [isWaiverPending, setIsWaiverPending] = useState(false);
   const [showKycModal, setShowKycModal] = useState(false);
@@ -97,27 +123,24 @@ export default function NewLeadInfoPage() {
         // Extract application_details from response
         const successResponse = response as ApiSuccess<any>;
         const applicationDetails = successResponse.data?.application_details || successResponse.application_details;
+        const wfState = successResponse.data?.workflow_state || successResponse.workflow_state;
 
         if (applicationDetails) {
           setDetailedInfo(applicationDetails);
+          setWorkflowState(wfState);
 
-          // Update payment status from payment_result
+          // Check payment status from detailed info
           if (applicationDetails.payment_result) {
-            const paymentState = String(applicationDetails.payment_result.state || '').toLowerCase();
-            let nextStatus: PaymentStatus = 'Pending';
-            if (paymentState === 'completed') {
-              nextStatus = 'Paid';
-            } else if (paymentState === 'failed' || paymentState === 'cancelled') {
-              nextStatus = 'Failed';
-            } else if (paymentState === 'waived') {
-              nextStatus = 'Waived';
+            const status = String(applicationDetails.payment_result.state || '').toLowerCase();
+            if (status === 'completed') {
+              setPaymentStatus('Paid');
+            } else if (status === 'failed' || status === 'cancelled') {
+              setPaymentStatus('Failed');
+            } else if (status === 'waived') {
+              setPaymentStatus('Waived');
             }
-            setPaymentStatus(nextStatus);
-            // Ensure we stop showing "Checking..." since we have the status
             setIsPaymentStatusLoading(false);
           } else {
-            // If no payment result in detailed info, we might still be pending
-            // But we should stop loading indicator if we have the full details
             setIsPaymentStatusLoading(false);
           }
 
@@ -179,6 +202,8 @@ export default function NewLeadInfoPage() {
           nextStatus = 'Paid';
         } else if (normalizedState === 'failed' || normalizedState === 'cancelled') {
           nextStatus = 'Failed';
+        } else if (normalizedState === 'waived') {
+          nextStatus = 'Waived';
         }
 
         setPaymentStatus(nextStatus);
@@ -199,21 +224,23 @@ export default function NewLeadInfoPage() {
   }, [currentLead?.appId, detailedInfo?.payment_result]);
 
   useEffect(() => {
-    // Show KYC modal if payment is completed and required documents (PAN & Aadhaar) are missing
-    if (paymentStatus === 'Paid' && currentLead) {
-      const uploadedFiles = currentLead.formData?.step8?.files || [];
-      const successFiles = uploadedFiles.filter((f: any) => f.status === 'Success');
+    // Show KYC modal if payment is completed (or waived) and required documents (PAN & Aadhaar) are missing
+    const isPaymentDone = paymentStatus === 'Paid' || paymentStatus === 'Waived';
 
-      const hasPan = successFiles.some((f: any) => f.type === 'PAN');
-      const hasAadhaar = successFiles.some((f: any) => f.type === 'Adhaar');
+    // Only proceed if applicantDocs is loaded
+    if (isPaymentDone && currentLead && applicantDocs) {
+      const hasPan = applicantDocs.pan_card?.uploaded;
+      const hasAadhaar = applicantDocs.aadhaar_card?.uploaded;
 
       if (!hasPan || !hasAadhaar) {
         // Small delay to ensure smooth transition after payment or page load
         const timer = setTimeout(() => setShowKycModal(true), 1000);
         return () => clearTimeout(timer);
+      } else {
+        setShowKycModal(false);
       }
     }
-  }, [paymentStatus, currentLead]);
+  }, [paymentStatus, currentLead, applicantDocs]);
 
   // Check for pending waiver in session storage
   useEffect(() => {
@@ -232,6 +259,47 @@ export default function NewLeadInfoPage() {
       console.error('Failed to read payment state', e);
     }
   }, [currentLead?.appId]);
+
+  // Fetch required documents status
+  useEffect(() => {
+    if (!currentLead?.appId) return;
+
+    const fetchDocs = async () => {
+      setIsDocsLoading(true);
+      try {
+        // Fetch Applicant Docs
+        const appDocsRes = await getRequiredDocuments(currentLead.appId);
+        if (!isApiError(appDocsRes)) {
+          const data = (appDocsRes as any).required_documents || (appDocsRes as any).data?.required_documents;
+          setApplicantDocs(data);
+        }
+
+        // Fetch Co-Applicant Docs
+        if (detailedInfo?.participants) {
+          const coApps = detailedInfo.participants.filter((p: any) => p.participant_type === 'co-applicant' || p.participant_type === 'co_applicant');
+          const coAppDocsMap: Record<number, Record<string, DocumentStatus>> = {};
+
+          await Promise.all(coApps.map(async (p: any) => {
+            const idx = p.co_applicant_index;
+            if (typeof idx === 'number') {
+              const res = await getCoApplicantRequiredDocuments(currentLead.appId, idx);
+              if (!isApiError(res)) {
+                const data = (res as any).required_documents || (res as any).data?.required_documents;
+                coAppDocsMap[idx] = data;
+              }
+            }
+          }));
+          setCoApplicantDocs(coAppDocsMap);
+        }
+      } catch (e) {
+        console.error('Failed to fetch document statuses', e);
+      } finally {
+        setIsDocsLoading(false);
+      }
+    };
+
+    fetchDocs();
+  }, [currentLead?.appId, detailedInfo]);
 
   const handleKycModalAction = (action: 'aadhaar' | 'pan' | 'skip') => {
     if (action === 'skip') {
@@ -896,12 +964,17 @@ export default function NewLeadInfoPage() {
           </div>
         </div>
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          {renderSectionStatusPill(step2Status)}
-          {showPanVerifiedPill && (
+          {applicantDocs?.aadhaar_card?.uploaded && (
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+              Verified via Aadhaar
+            </Badge>
+          )}
+          {applicantDocs?.pan_card?.uploaded && (
             <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
               Verified via PAN
             </Badge>
           )}
+          {renderSectionStatusPill(step2Status)}
           <Button
             variant="outline"
             size="sm"
@@ -1610,29 +1683,104 @@ export default function NewLeadInfoPage() {
                 </div>
               </div>
 
-              {uploadedDocuments.length === 0 ? (
-                <div className="text-center py-6">
-                  <p className="text-sm font-semibold text-gray-900 mb-1">No documents added yet</p>
-                  <p className="text-xs text-gray-500">Uploaded files will appear here once added</p>
+              {isDocsLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  <span className="text-sm text-gray-500">Loading documents...</span>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {(() => {
-                    // Get unique document types that have been successfully uploaded
-                    const successFiles = uploadedDocuments.filter((f: any) => f.status === 'Success');
-                    const uniqueDocTypes = Array.from(new Set(successFiles.map((f: any) => f.type))) as string[];
+                <div className="space-y-4">
+                  {/* Applicant Section */}
+                  <div>
+                    <h4 className="text-sm font-bold text-gray-800 mb-2">Applicant</h4>
+                    <div className="space-y-1">
+                      {applicantDocs && Object.entries(applicantDocs)
+                        .filter(([key, status]) => status.uploaded && !key.startsWith('collateral_'))
+                        .map(([key]) => (
+                          <div key={key} className="flex items-center justify-between py-1 px-1">
+                            <p className="text-sm text-gray-700">{DOC_LABELS[key] || key.replace(/_/g, ' ')}</p>
+                            <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
+                          </div>
+                        ))}
+                      {(!applicantDocs || !Object.entries(applicantDocs).some(([key, status]) => status.uploaded && !key.startsWith('collateral_'))) && (
+                        <p className="text-xs text-gray-500 italic pl-1">No documents uploaded</p>
+                      )}
+                    </div>
+                  </div>
 
-                    return uniqueDocTypes.map((docType: string) => (
-                      <div
-                        key={docType}
-                        className="p-3 border border-gray-200 rounded-lg bg-white"
-                      >
-                        <p className="text-sm font-medium text-gray-900">
-                          {getDocumentDisplayName(docType)}
-                        </p>
-                      </div>
-                    ));
-                  })()}
+                  {/* Co-Applicants Section */}
+                  {Object.keys(coApplicantDocs).length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-800 mb-2 mt-4">Co-Applicant(s)</h4>
+                      {Object.entries(coApplicantDocs).map(([indexStr, docs]) => {
+                        const index = parseInt(indexStr);
+                        const coAppName = detailedInfo?.participants?.find((p: any) => p.co_applicant_index === index)?.personal_info?.full_name?.value || `Co-Applicant ${index + 1}`;
+                        const uploaded = Object.entries(docs).filter(([_, status]) => status.uploaded);
+
+                        if (uploaded.length === 0) return null;
+
+                        return (
+                          <div key={index} className="mb-3 last:mb-0">
+                            <p className="text-xs font-semibold text-gray-600 mb-1">{coAppName}</p>
+                            <div className="space-y-1 pl-2 border-l-2 border-gray-100">
+                              {uploaded.map(([key]) => (
+                                <div key={key} className="flex items-center justify-between py-1 px-1">
+                                  <p className="text-sm text-gray-700">{DOC_LABELS[key] || key.replace(/_/g, ' ')}</p>
+                                  <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Collateral Section */}
+                  <div>
+                    <h4 className="text-sm font-bold text-gray-800 mb-2 mt-4">Collateral</h4>
+                    <div className="space-y-1">
+                      {(() => {
+                        const collateralDocs = applicantDocs ? Object.entries(applicantDocs).filter(([key, status]) => status.uploaded && key.startsWith('collateral_')) : [];
+
+                        const COLLATERAL_IMAGE_KEYS = [
+                          'collateral_images_front',
+                          'collateral_images_inside',
+                          'collateral_images_road',
+                          'collateral_images_selfie',
+                          'collateral_images_side',
+                          'collateral_images_surrounding'
+                        ];
+
+                        const hasAllImages = COLLATERAL_IMAGE_KEYS.every(key => applicantDocs?.[key]?.uploaded);
+
+                        const otherCollateralDocs = collateralDocs.filter(([key]) => !COLLATERAL_IMAGE_KEYS.includes(key));
+
+                        const hasAnyCollateral = hasAllImages || otherCollateralDocs.length > 0;
+
+                        if (!hasAnyCollateral) {
+                          return <p className="text-xs text-gray-500 italic pl-1">No collateral documents uploaded</p>;
+                        }
+
+                        return (
+                          <>
+                            {hasAllImages && (
+                              <div className="flex items-center justify-between py-1 px-1">
+                                <p className="text-sm text-gray-700">Property Images</p>
+                                <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
+                              </div>
+                            )}
+                            {otherCollateralDocs.map(([key]) => (
+                              <div key={key} className="flex items-center justify-between py-1 px-1">
+                                <p className="text-sm text-gray-700">{DOC_LABELS[key] || key.replace(/_/g, ' ')}</p>
+                                <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
+                              </div>
+                            ))}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -1673,22 +1821,26 @@ export default function NewLeadInfoPage() {
           </DialogHeader>
 
           <div className="space-y-3 py-2">
-            <Button
-              onClick={() => handleKycModalAction('aadhaar')}
-              className="w-full h-12 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-sm"
-            >
-              <CreditCard className="w-5 h-5" />
-              Upload Aadhaar
-            </Button>
+            {!applicantDocs?.aadhaar_card?.uploaded && (
+              <Button
+                onClick={() => handleKycModalAction('aadhaar')}
+                className="w-full h-12 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-sm"
+              >
+                <CreditCard className="w-5 h-5" />
+                Upload Aadhaar
+              </Button>
+            )}
 
-            <Button
-              onClick={() => handleKycModalAction('pan')}
-              variant="secondary"
-              className="w-full h-12 bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold rounded-xl flex items-center justify-center gap-2 border border-gray-200"
-            >
-              <FileText className="w-5 h-5" />
-              Upload PAN
-            </Button>
+            {!applicantDocs?.pan_card?.uploaded && (
+              <Button
+                onClick={() => handleKycModalAction('pan')}
+                variant="secondary"
+                className="w-full h-12 bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold rounded-xl flex items-center justify-center gap-2 border border-gray-200"
+              >
+                <FileText className="w-5 h-5" />
+                Upload PAN
+              </Button>
+            )}
 
             <div className="pt-4 text-center">
               <button
