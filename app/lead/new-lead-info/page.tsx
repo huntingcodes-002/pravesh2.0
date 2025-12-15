@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard, Check } from 'lucide-react';
+import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard, Check, AlertTriangle, RefreshCw } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult, getRequiredDocuments, getCoApplicantRequiredDocuments, type DocumentStatus } from '@/lib/api';
+import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult, getRequiredDocuments, getCoApplicantRequiredDocuments, type DocumentStatus, initiateAccountAggregator, resendAccountAggregatorConsent, getAccountAggregatorStatus, initiateCoApplicantAccountAggregator, resendCoApplicantAccountAggregatorConsent, getCoApplicantAccountAggregatorStatus } from '@/lib/api';
 
 const DOC_LABELS: Record<string, string> = {
   aadhaar_card: 'Aadhaar Card',
@@ -60,6 +60,7 @@ export default function NewLeadInfoPage() {
   const [isLoadingDetailedInfo, setIsLoadingDetailedInfo] = useState(false);
   const [isWaiverPending, setIsWaiverPending] = useState(false);
   const [showKycModal, setShowKycModal] = useState(false);
+  const [aaStatus, setAaStatus] = useState<Record<string, { status: string; loading: boolean }>>({});
 
   // Redirect if no current lead
   useEffect(() => {
@@ -300,6 +301,85 @@ export default function NewLeadInfoPage() {
 
     fetchDocs();
   }, [currentLead?.appId, detailedInfo]);
+
+  useEffect(() => {
+    if (!currentLead?.appId) return;
+
+    const fetchAaStatus = async () => {
+      // Primary
+      try {
+        const res = await getAccountAggregatorStatus(currentLead.appId);
+        if (!isApiError(res)) {
+          setAaStatus(prev => ({ ...prev, primary: { status: res.status || 'PENDING', loading: false } }));
+        } else {
+          setAaStatus(prev => ({ ...prev, primary: { status: 'NOT_INITIATED', loading: false } }));
+        }
+      } catch {
+        setAaStatus(prev => ({ ...prev, primary: { status: 'NOT_INITIATED', loading: false } }));
+      }
+
+      // Co-Applicants
+      if (apiCoApplicants.length > 0) {
+        apiCoApplicants.forEach(async (coApp) => {
+          try {
+            const res = await getCoApplicantAccountAggregatorStatus(currentLead.appId, coApp.index);
+            if (!isApiError(res)) {
+              setAaStatus(prev => ({ ...prev, [`coapplicant_${coApp.index}`]: { status: res.status || 'PENDING', loading: false } }));
+            } else {
+              setAaStatus(prev => ({ ...prev, [`coapplicant_${coApp.index}`]: { status: 'NOT_INITIATED', loading: false } }));
+            }
+          } catch {
+            setAaStatus(prev => ({ ...prev, [`coapplicant_${coApp.index}`]: { status: 'NOT_INITIATED', loading: false } }));
+          }
+        });
+      }
+    };
+
+    fetchAaStatus();
+  }, [currentLead?.appId, apiCoApplicants]);
+
+  const handleAaAction = async (action: 'initiate' | 'resend' | 'refresh', type: 'primary' | 'coapplicant', index?: number) => {
+    if (!currentLead?.appId) return;
+
+    const key = type === 'primary' ? 'primary' : `coapplicant_${index}`;
+    setAaStatus(prev => ({ ...prev, [key]: { ...prev[key] || { status: 'NOT_INITIATED' }, loading: true } }));
+
+    try {
+      let response;
+      if (type === 'primary') {
+        if (action === 'initiate') response = await initiateAccountAggregator(currentLead.appId);
+        else if (action === 'resend') response = await resendAccountAggregatorConsent(currentLead.appId);
+        else if (action === 'refresh') response = await getAccountAggregatorStatus(currentLead.appId);
+      } else if (typeof index === 'number') {
+        if (action === 'initiate') response = await initiateCoApplicantAccountAggregator(currentLead.appId, index);
+        else if (action === 'resend') response = await resendCoApplicantAccountAggregatorConsent(currentLead.appId, index);
+        else if (action === 'refresh') response = await getCoApplicantAccountAggregatorStatus(currentLead.appId, index);
+      }
+
+      if (response && !isApiError(response)) {
+        if (action === 'initiate') {
+          toast({ title: 'Success', description: 'Account Aggregator flow initiated successfully.', className: 'bg-green-50 border-green-200' });
+          setAaStatus(prev => ({ ...prev, [key]: { status: 'PENDING', loading: false } }));
+        } else if (action === 'resend') {
+          toast({ title: 'Success', description: 'Consent SMS resent successfully.', className: 'bg-green-50 border-green-200' });
+          setAaStatus(prev => ({ ...prev, [key]: { ...prev[key], loading: false } }));
+        } else if (action === 'refresh') {
+          const status = response.status || 'PENDING';
+          setAaStatus(prev => ({ ...prev, [key]: { status: status, loading: false } }));
+          if (status === 'COMPLETED' || status === 'COMPLETE' || status === 'SUCCESS') {
+            toast({ title: 'Completed', description: 'Account Aggregator flow completed.', className: 'bg-green-50 border-green-200' });
+          } else {
+            toast({ title: 'Status Updated', description: `Current status: ${status}` });
+          }
+        }
+      } else {
+        throw new Error(response?.error || 'Action failed');
+      }
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message || 'Failed to perform action', variant: 'destructive' });
+      setAaStatus(prev => ({ ...prev, [key]: { ...prev[key], loading: false } }));
+    }
+  };
 
   const handleKycModalAction = (action: 'aadhaar' | 'pan' | 'skip') => {
     if (action === 'skip') {
@@ -743,7 +823,17 @@ export default function NewLeadInfoPage() {
       ? 'in-progress'
       : 'incomplete';
   const isDocumentsCompleted = documentsStepStatus === 'completed';
+
   const isCoApplicantStepCompleted = hasCoApplicants ? coApplicantStatus === 'completed' : true;
+  const employmentStatus = currentLead ? getEmploymentStatus() : 'incomplete';
+
+  const isAllOtherStepsCompleted =
+    applicantStatus === 'completed' &&
+    paymentStepStatus === 'completed' &&
+    documentsStepStatus === 'completed' &&
+    loanStatus === 'completed' &&
+    isCoApplicantStepCompleted &&
+    employmentStatus === 'completed';
 
   // All hooks must be called before any early returns
   const progressSteps = useMemo(() => {
@@ -1178,24 +1268,63 @@ export default function NewLeadInfoPage() {
     );
   };
 
-  const renderAccountAggregatorTile = () => (
-    <div className={tileWrapperClass}>
-      <div className="flex items-start gap-3 flex-1 min-w-0">
-        <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-          <Database className="w-5 h-5" />
+  const renderAccountAggregatorTile = () => {
+    const status = aaStatus.primary;
+    const isCompleted = status?.status === 'COMPLETED' || status?.status === 'COMPLETE' || status?.status === 'SUCCESS';
+    const isPending = status?.status === 'PENDING';
+
+    return (
+      <div className={tileWrapperClass}>
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
+            <Database className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {isCompleted ? 'Account Aggregator fetched successfully' : isPending ? 'Verification Pending' : 'Initiate to fetch customer\'s bank statements digitally'}
+            </p>
+          </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900">Account aggregator </p>
-          <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          {isCompleted ? (
+            <Badge className="bg-green-100 text-green-700 border-green-200">Completed</Badge>
+          ) : isPending ? (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleAaAction('resend', 'primary')}
+                disabled={status?.loading}
+                className={tileButtonClass}
+              >
+                Resend
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => handleAaAction('refresh', 'primary')}
+                disabled={status?.loading}
+                className="h-8 w-8 text-gray-500 hover:text-blue-600"
+              >
+                <RefreshCw className={cn("w-4 h-4", status?.loading && "animate-spin")} />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleAaAction('initiate', 'primary')}
+              disabled={status?.loading}
+              className={tileButtonClass}
+            >
+              {status?.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Initiate'}
+            </Button>
+          )}
         </div>
       </div>
-      <div className="flex flex-col items-end gap-2 flex-shrink-0">
-        <Button variant="outline" size="sm" className={tileButtonClass}>
-          Initiate
-        </Button>
-      </div>
-    </div>
-  );
+    );
+  };
 
 
 
@@ -1304,7 +1433,7 @@ export default function NewLeadInfoPage() {
                     <div className="mb-4 space-y-2 p-3 bg-gray-50 rounded-lg">
                       <div className="flex justify-between items-center">
                         <span className="text-xs font-medium text-gray-600">Amount:</span>
-                        <span className="text-sm font-semibold text-gray-900">₹{detailedInfo.payment_result.amount.toLocaleString('en-IN')}</span>
+                        <span className="text-sm font-semibold text-gray-900">₹{detailedInfo.payment_result.amount?.toLocaleString('en-IN') || '0'}</span>
                       </div>
                       {detailedInfo.payment_result.order_id && (
                         <div className="flex justify-between items-center">
@@ -1441,26 +1570,95 @@ export default function NewLeadInfoPage() {
                         const fullName = participant?.personal_info?.full_name;
                         const name = fullName?.value || (typeof fullName === 'string' ? fullName : 'Unnamed Co-applicant');
                         const index = participant?.co_applicant_index ?? -1;
+                        const key = `coapplicant_${index}`;
+                        const status = aaStatus[key];
+                        const isCompleted = status?.status === 'COMPLETED' || status?.status === 'COMPLETE' || status?.status === 'SUCCESS';
+                        const isPending = status?.status === 'PENDING';
 
                         return (
                           <div
                             key={`co-applicant-${index}`}
-                            className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-900"
+                            className="rounded-lg border border-gray-200 bg-white p-4"
                           >
-                            {`Co-Applicant ${index + 1} – ${name}`}
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="text-sm font-medium text-gray-900">{`Co-Applicant ${index + 1} – ${name}`}</span>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                              <div className="flex items-center gap-2">
+                                <Database className="w-4 h-4 text-gray-400" />
+                                <div className="flex flex-col">
+                                  <span className="text-xs text-gray-600">Account Aggregator</span>
+                                  {isCompleted && <span className="text-[10px] text-green-600">Fetched successfully</span>}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {isCompleted ? (
+                                  <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">Completed</Badge>
+                                ) : isPending ? (
+                                  <>
+                                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAaAction('resend', 'coapplicant', index)} disabled={status?.loading}>Resend</Button>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleAaAction('refresh', 'coapplicant', index)} disabled={status?.loading}>
+                                      <RefreshCw className={cn("w-3 h-3", status?.loading && "animate-spin")} />
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Button variant="outline" size="sm" className="h-7 text-xs border-blue-600 text-blue-600" onClick={() => handleAaAction('initiate', 'coapplicant', index)} disabled={status?.loading}>
+                                    {status?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Initiate'}
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         );
                       })}
                     {apiCoApplicants.length > 0 && !detailedInfo?.participants && (
                       // Fallback to simple list if detailed info not available
-                      apiCoApplicants.map((coApp) => (
-                        <div
-                          key={`co-applicant-${coApp.index}`}
-                          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-900"
-                        >
-                          {`Co-Applicant ${coApp.index + 1} – ${coApp.name}`}
-                        </div>
-                      ))
+                      apiCoApplicants.map((coApp) => {
+                        const key = `coapplicant_${coApp.index}`;
+                        const status = aaStatus[key];
+                        const isCompleted = status?.status === 'COMPLETED' || status?.status === 'COMPLETE' || status?.status === 'SUCCESS';
+                        const isPending = status?.status === 'PENDING';
+
+                        return (
+                          <div
+                            key={`co-applicant-${coApp.index}`}
+                            className="rounded-lg border border-gray-200 bg-white p-4"
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="text-sm font-medium text-gray-900">{`Co-Applicant ${coApp.index + 1} – ${coApp.name}`}</span>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                              <div className="flex items-center gap-2">
+                                <Database className="w-4 h-4 text-gray-400" />
+                                <div className="flex flex-col">
+                                  <span className="text-xs text-gray-600">Account Aggregator</span>
+                                  {isCompleted && <span className="text-[10px] text-green-600">Fetched successfully</span>}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {isCompleted ? (
+                                  <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">Completed</Badge>
+                                ) : isPending ? (
+                                  <>
+                                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAaAction('resend', 'coapplicant', coApp.index)} disabled={status?.loading}>Resend</Button>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleAaAction('refresh', 'coapplicant', coApp.index)} disabled={status?.loading}>
+                                      <RefreshCw className={cn("w-3 h-3", status?.loading && "animate-spin")} />
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Button variant="outline" size="sm" className="h-7 text-xs border-blue-600 text-blue-600" onClick={() => handleAaAction('initiate', 'coapplicant', coApp.index)} disabled={status?.loading}>
+                                    {status?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Initiate'}
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })
                     )}
                   </div>
                 </>
@@ -1665,6 +1863,50 @@ export default function NewLeadInfoPage() {
             </CardContent>
           </Card>
 
+          {/* Risk & Eligibility Card */}
+          <Card className={cn(
+            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600"
+          )}>
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Risk & Eligibility</h3>
+                <div className="flex items-center gap-2">
+                  <Badge className="rounded-full bg-gray-100 border border-gray-200 text-gray-600">
+                    Pending
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-gray-900">
+                        Pending Assessment
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Complete application to view risk assessment
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push('/lead/risk-eligibility')}
+                  className={tileButtonClass}
+                >
+                  Edit
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+
+
           {/* Documents Added Card */}
           <Card className={cn(
             "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
@@ -1785,6 +2027,8 @@ export default function NewLeadInfoPage() {
               )}
             </CardContent>
           </Card>
+
+
 
           {showDocsWarning && (
             <div className="mt-5 text-sm font-semibold text-red-600">

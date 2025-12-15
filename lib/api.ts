@@ -818,7 +818,7 @@ export interface DocumentUploadRequest {
   front_file: File;
   back_file?: File;
   document_name?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, any> | string;
   latitude?: string;
   longitude?: string;
 }
@@ -863,7 +863,11 @@ export async function uploadDocument(data: DocumentUploadRequest): Promise<ApiRe
   }
 
   if (data.metadata) {
-    formData.append('metadata', JSON.stringify(data.metadata));
+    if (typeof data.metadata === 'string') {
+      formData.append('metadata', data.metadata);
+    } else {
+      formData.append('metadata', JSON.stringify(data.metadata));
+    }
   }
 
   if (data.latitude) {
@@ -1203,6 +1207,111 @@ export async function getRequiredDocuments(applicationId: string): Promise<ApiRe
 
 export async function getCoApplicantRequiredDocuments(applicationId: string, index: number): Promise<ApiResponse<CoApplicantRequiredDocumentsResponse>> {
   return apiFetch<CoApplicantRequiredDocumentsResponse>(`applications/${applicationId}/co-applicant-required-documents/${index}/`, {
+    method: 'GET',
+  });
+}
+
+/**
+ * Trigger Bureau Check
+ * POST /api/lead-collection/applications/{application_id}/bureau-check/
+ */
+export interface BureauCheckRequest {
+  application_id: string;
+  agency?: string; // Default 'CRIF'
+}
+
+export interface BureauCheckResponse {
+  success: boolean;
+  message: string;
+  application_id: string;
+  data: any;
+}
+
+export async function triggerBureauCheck(
+  data: BureauCheckRequest
+): Promise<ApiResponse<BureauCheckResponse>> {
+  return apiFetch<BureauCheckResponse>(
+    `applications/${data.application_id}/bureau-check/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ agency: data.agency || 'CRIF' }),
+    }
+  );
+}
+
+/**
+ * Trigger BRE (Business Rule Engine)
+ * GET /api/bre/trigger/?application_number={application_id}
+ */
+export interface BreQuestion {
+  id: number;
+  question_text: string;
+  rule_id: string;
+  status: string;
+  created_at: string;
+}
+
+export interface BreTriggerResponse {
+  success: boolean;
+  data: string[]; // Array of question strings
+  count: number;
+  message: string;
+  saved_questions: BreQuestion[];
+}
+
+export async function triggerBre(applicationId: string): Promise<ApiResponse<BreTriggerResponse>> {
+  return apiFetch<BreTriggerResponse>(`bre/trigger/?application_number=${encodeURIComponent(applicationId)}`, {
+    method: 'GET',
+  });
+}
+
+// Account Aggregator APIs
+
+export interface AccountAggregatorResponse {
+  success: boolean;
+  message?: string;
+  application_id: string;
+  next_step?: string;
+  data?: any;
+  aa_workflow_id?: string;
+  status?: string;
+  info?: any;
+}
+
+// Applicant
+export async function initiateAccountAggregator(applicationId: string): Promise<ApiResponse<AccountAggregatorResponse>> {
+  return apiFetch<AccountAggregatorResponse>(`applications/${applicationId}/account-aggregator/`, {
+    method: 'POST',
+  });
+}
+
+export async function resendAccountAggregatorConsent(applicationId: string): Promise<ApiResponse<AccountAggregatorResponse>> {
+  return apiFetch<AccountAggregatorResponse>(`applications/${applicationId}/account-aggregator/resend-consent/`, {
+    method: 'POST',
+  });
+}
+
+export async function getAccountAggregatorStatus(applicationId: string): Promise<ApiResponse<AccountAggregatorResponse>> {
+  return apiFetch<AccountAggregatorResponse>(`applications/${applicationId}/account-aggregator/`, {
+    method: 'GET',
+  });
+}
+
+// Co-Applicant
+export async function initiateCoApplicantAccountAggregator(applicationId: string, index: number): Promise<ApiResponse<AccountAggregatorResponse>> {
+  return apiFetch<AccountAggregatorResponse>(`applications/${applicationId}/co-applicant-account-aggregator/${index}/`, {
+    method: 'POST',
+  });
+}
+
+export async function resendCoApplicantAccountAggregatorConsent(applicationId: string, index: number): Promise<ApiResponse<AccountAggregatorResponse>> {
+  return apiFetch<AccountAggregatorResponse>(`applications/${applicationId}/co-applicant-account-aggregator/${index}/resend-consent/`, {
+    method: 'POST',
+  });
+}
+
+export async function getCoApplicantAccountAggregatorStatus(applicationId: string, index: number): Promise<ApiResponse<AccountAggregatorResponse>> {
+  return apiFetch<AccountAggregatorResponse>(`applications/${applicationId}/co-applicant-account-aggregator/${index}/`, {
     method: 'GET',
   });
 }

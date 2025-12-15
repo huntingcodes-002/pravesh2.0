@@ -7,7 +7,7 @@ import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-im
 import 'react-image-crop/dist/ReactCrop.css';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { uploadDocument, uploadCoApplicantDocument, getDetailedInfo, submitPersonalInfo, isApiError, type ApiSuccess } from '@/lib/api';
+import { uploadDocument, uploadCoApplicantDocument, getDetailedInfo, submitPersonalInfo, isApiError, type ApiSuccess, triggerBureauCheck } from '@/lib/api';
 import { useGeolocation } from '@uidotdev/usehooks';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -443,6 +443,7 @@ function Step8Content() {
     // Preview state
     const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null);
     const [showPreview, setShowPreview] = useState(false);
+    const [bankStatementPassword, setBankStatementPassword] = useState('');
 
     // Geolocation for co-applicant document uploads
     const geolocation = useGeolocation({
@@ -676,7 +677,7 @@ function Step8Content() {
         documentType: string,
         fileId: string,
         backFile?: File,
-        options?: { metadata?: Record<string, any>; documentLabel?: string }
+        options?: { metadata?: Record<string, any> | string; documentLabel?: string }
     ) => {
         if (!currentLead?.appId) {
             toast({
@@ -735,12 +736,21 @@ function Step8Content() {
                 });
             } else {
                 // Use existing document upload API for applicant and other documents
-                const metadata: Record<string, any> = { ...(options?.metadata || {}) };
+                const metadataObj: Record<string, any> = typeof options?.metadata === 'object' ? { ...options.metadata } : {};
+
                 if (docInfo?.applicantType === 'coapplicant' && docInfo.coApplicantId) {
-                    metadata.co_applicant_id = docInfo.coApplicantId;
+                    metadataObj.co_applicant_id = docInfo.coApplicantId;
                 }
                 if (docInfo?.applicantType === 'collateral') {
-                    metadata.document_owner = 'collateral';
+                    metadataObj.document_owner = 'collateral';
+                }
+
+                let finalMetadata: string | Record<string, any> = metadataObj;
+
+                // Custom format for bank statement with password: {key:value} without quotes
+                if (backendDocType === 'bank_statement' && metadataObj.password) {
+                    const parts = Object.entries(metadataObj).map(([key, value]) => `${key}:${value}`);
+                    finalMetadata = `{${parts.join(',')}}`;
                 }
 
                 uploadResponse = await uploadDocument({
@@ -749,7 +759,7 @@ function Step8Content() {
                     front_file: file,
                     back_file: backFile,
                     document_name: options?.documentLabel || docInfo?.label || file.name,
-                    metadata: Object.keys(metadata).length ? metadata : undefined,
+                    metadata: finalMetadata,
                     latitude: locationCoords.latitude,
                     longitude: locationCoords.longitude,
                 });
@@ -769,6 +779,28 @@ function Step8Content() {
 
             // If PAN or Aadhaar, fetch parsed data from Endpoint 6 after backend processes it
             if (baseDocType === 'PAN' || baseDocType === 'Adhaar') {
+
+                // Check if we should trigger Bureau Check
+                // Conditions: PAN uploaded, Aadhaar uploaded, Address Details submitted
+                const isAddressSubmitted = currentLead?.step3Completed;
+                const existingFiles = currentLead?.formData?.step8?.files || [];
+                const successFiles = existingFiles.filter((f: any) => f.status === 'Success');
+
+                const hasPan = baseDocType === 'PAN' || successFiles.some((f: any) => f.type === 'PAN');
+                const hasAadhaar = baseDocType === 'Adhaar' || successFiles.some((f: any) => f.type === 'Adhaar');
+
+                if (hasPan && hasAadhaar && isAddressSubmitted) {
+                    try {
+                        await triggerBureauCheck({
+                            application_id: currentLead.appId,
+                            agency: 'CRIF'
+                        });
+                        console.log('Bureau check triggered');
+                    } catch (err) {
+                        console.error('Bureau check trigger failed', err);
+                    }
+                }
+
                 // Wait a bit for backend to process the document
                 await new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -1213,8 +1245,14 @@ function Step8Content() {
             }
             toast({ title: 'Processing', description: `Uploading ${documentLabel}...` });
 
+            // Prepare metadata
+            const metadata: Record<string, any> = {};
+            if (documentType === 'bank_statement' && bankStatementPassword) {
+                metadata.password = bankStatementPassword;
+            }
+
             // Upload document via API
-            const uploadResult = await handleDocumentUpload(file, documentType, fileId);
+            const uploadResult = await handleDocumentUpload(file, documentType, fileId, undefined, { metadata });
 
             // Only mark as success if backend returned 200 OK (success: true)
             const isSuccess = uploadResult?.success === true;
@@ -2174,6 +2212,7 @@ function Step8Content() {
                                     setFrontFile(null);
                                     setBackFile(null);
                                     setUploadError('');
+                                    setBankStatementPassword(''); // Reset password when changing document type
                                     if (value !== 'PropertyPhotos') {
                                         setSelectedPropertyPhotoType('');
                                         setPendingPropertyPhoto(null);
@@ -2192,6 +2231,22 @@ function Step8Content() {
                                     </SelectContent>
                                 </Select>
                             </div>
+
+                            {documentType === 'bank_statement' && (
+                                <div className="mt-4">
+                                    <Label htmlFor="docPassword">Document Password (Optional)</Label>
+                                    <div className="relative mt-1">
+                                        <input
+                                            type="text"
+                                            id="docPassword"
+                                            value={bankStatementPassword}
+                                            onChange={(e) => setBankStatementPassword(e.target.value)}
+                                            className="flex h-12 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                            placeholder="Enter password if protected"
+                                        />
+                                    </div>
+                                </div>
+                            )}
 
                             {documentType && selectedDocument && (
                                 <>
@@ -2743,10 +2798,10 @@ function Step8Content() {
                     </div>
                 </div>
 
-            </div>
+            </div >
 
             {/* Preview Modal */}
-            <Dialog open={showPreview} onOpenChange={setShowPreview}>
+            < Dialog open={showPreview} onOpenChange={setShowPreview} >
                 <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>
@@ -2845,7 +2900,7 @@ function Step8Content() {
                         )}
                     </div>
                 </DialogContent>
-            </Dialog>
+            </Dialog >
             <Dialog open={showPropertyGallery} onOpenChange={setShowPropertyGallery}>
                 <DialogContent className="max-w-4xl">
                     <DialogHeader>
@@ -2874,7 +2929,7 @@ function Step8Content() {
                     </div>
                 </DialogContent>
             </Dialog>
-        </DashboardLayout>
+        </DashboardLayout >
     );
 }
 

@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { submitAddressDetails, isApiError, getDetailedInfo, lookupPincode } from '@/lib/api';
+import { submitAddressDetails, isApiError, getDetailedInfo, lookupPincode, triggerBureauCheck } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -655,6 +655,27 @@ export default function Step3Page() {
           },
         },
       });
+
+
+
+      // Check if we should trigger Bureau Check
+      // Conditions: Address submitted (just done), PAN uploaded, Aadhaar uploaded
+      const existingFiles = currentLead?.formData?.step8?.files || [];
+      const successFiles = existingFiles.filter((f: any) => f.status === 'Success');
+      const hasPan = successFiles.some((f: any) => f.type === 'PAN');
+      const hasAadhaar = successFiles.some((f: any) => f.type === 'Adhaar');
+
+      if (hasPan && hasAadhaar) {
+        try {
+          await triggerBureauCheck({
+            application_id: currentLead.appId,
+            agency: 'CRIF'
+          });
+          console.log('Bureau check triggered');
+        } catch (err) {
+          console.error('Bureau check trigger failed', err);
+        }
+      }
 
       toast({
         title: 'Success',
