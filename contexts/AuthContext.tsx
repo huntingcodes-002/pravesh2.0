@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { loginPravesh, verifyPraveshOTP, resendPraveshOTP, getUserProfile, isApiError, type ApiSuccess, type VerifyOTPResponseData, type LoginPraveshResponse, type UserProfileResponse } from '@/lib/api';
+import { loginPravesh, verifyPraveshOTP, resendPraveshOTP, getUserProfile, logoutUser, isApiError, type ApiSuccess, type VerifyOTPResponseData, type LoginPraveshResponse, type UserProfileResponse } from '@/lib/api';
 
 interface User {
   user_id: number;
@@ -77,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (typeof window !== 'undefined') {
       const storedAuth = getFromStorage(AUTH_STORAGE_KEY);
       const storedUser = getFromStorage(USER_STORAGE_KEY);
-      
+
       if (storedAuth && storedUser) {
         try {
           setUser(JSON.parse(storedUser));
@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           removeFromStorage(USER_STORAGE_KEY);
         }
       }
-      
+
       // 2. Check for pending authentication (waiting for OTP)
       const storedPendingAuth = getFromStorage(PENDING_AUTH_KEY);
       if (storedPendingAuth) {
@@ -112,7 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         sessionStorage.removeItem('auth');
         // Don't clear user yet - wait until OTP is verified
       }
-      
+
       const response = await loginPravesh({ username: email, password });
 
       if (isApiError(response)) {
@@ -128,14 +128,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { verification_code, masked_phone_number } = successResponse.data;
 
       // Store pending auth with email, verificationCode, and maskedPhone
-      const authData = { 
-        email, 
+      const authData = {
+        email,
         verificationCode: verification_code,
         maskedPhone: masked_phone_number
       };
       setPendingAuth(authData);
       saveToStorage(PENDING_AUTH_KEY, JSON.stringify(authData));
-      
+
       return true;
     } catch (error) {
       return false;
@@ -146,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       // Retrieve verificationCode from pendingAuth state (or storage as fallback)
       let verificationCode: string | null = null;
-      
+
       if (pendingAuth?.verificationCode) {
         verificationCode = pendingAuth.verificationCode;
       } else if (typeof window !== 'undefined') {
@@ -174,7 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Backend response structure: { success: true, message, data: { access_token, refresh_token, ... } }
       // Tokens are in the data object
       const successResponse = response as ApiSuccess<VerifyOTPResponseData>;
-      
+
       if (!successResponse.data) {
         return false;
       }
@@ -186,7 +186,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem('auth');
         sessionStorage.removeItem('auth');
       }
-      
+
       // Store new tokens in localStorage
       const authData = {
         access_token: successResponse.data.access_token,
@@ -197,11 +197,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
 
       saveToStorage(AUTH_STORAGE_KEY, JSON.stringify(authData));
-      
-      // Fetch user profile using the access token
+
+      // Fetch user profile using the id token (handled by apiFetchAuth automatically via getAuthToken)
       // Wait a tiny bit to ensure token is saved to localStorage
       await new Promise(resolve => setTimeout(resolve, 10));
-      
+
       try {
         const profileResponse = await getUserProfile();
         if (!isApiError(profileResponse) && profileResponse.data) {
@@ -212,7 +212,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const hex = uuid.replace(/-/g, '').substring(0, 8);
             return parseInt(hex, 16) || 0;
           };
-          
+
           const userData: User = {
             user_id: uuidToNumber(profile.id),
             email: profile.email,
@@ -228,7 +228,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } : null,
             state: null, // Not in profile response
           };
-          
+
           setUser(userData);
           saveToStorage(USER_STORAGE_KEY, JSON.stringify(userData));
         }
@@ -240,7 +240,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Clear pending auth
       removeFromStorage(PENDING_AUTH_KEY);
       setPendingAuth(null);
-      
+
       return true;
     } catch (error) {
       return false;
@@ -252,7 +252,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Retrieve verificationCode from pendingAuth state (or storage as fallback)
       let verificationCode: string | null = null;
       let email: string | null = null;
-      
+
       if (pendingAuth?.verificationCode) {
         verificationCode = pendingAuth.verificationCode;
         email = pendingAuth.email;
@@ -283,32 +283,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const successResponse = response as ApiSuccess<LoginPraveshResponse>;
       if (successResponse.data) {
         const { verification_code, masked_phone_number } = successResponse.data;
-        
+
         // Update pendingAuth with new verification_code
-        const authData = { 
-          email: email || '', 
+        const authData = {
+          email: email || '',
           verificationCode: verification_code,
           maskedPhone: masked_phone_number
         };
         setPendingAuth(authData);
         saveToStorage(PENDING_AUTH_KEY, JSON.stringify(authData));
       }
-      
+
       return true;
     } catch (error) {
       return false;
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await logoutUser();
+    } catch (e) {
+      // Ignore errors during logout
+    }
+
     setUser(null);
     setPendingAuth(null);
-    
+
     // Clear all auth-related storage from both localStorage and sessionStorage
     removeFromStorage(USER_STORAGE_KEY);
     removeFromStorage(AUTH_STORAGE_KEY);
     removeFromStorage(PENDING_AUTH_KEY);
-    
+
     // Additional cleanup: explicitly clear all possible auth keys
     if (typeof window !== 'undefined') {
       // Clear from localStorage
@@ -327,7 +333,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem('pendingAuth');
       sessionStorage.removeItem('pendingAuth');
     }
-    
+
     router.push('/login');
   };
 

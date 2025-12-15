@@ -34,9 +34,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       )}
 
       <div
-        className={`fixed top-0 left-0 h-full w-80 bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out ${
-          isOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={`fixed top-0 left-0 h-full w-80 bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
       >
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between p-6 border-b">
@@ -56,8 +55,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">
-                  {user?.first_name && user?.last_name 
-                    ? `${user.first_name} ${user.last_name}` 
+                  {user?.first_name && user?.last_name
+                    ? `${user.first_name} ${user.last_name}`
                     : user?.username || 'User'}
                 </h3>
                 <p className="text-sm text-gray-600">{user?.employee_code || user?.username}</p>
@@ -69,15 +68,15 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             <div className="space-y-1 text-sm text-gray-700">
               <p className="flex items-center">
                 <span className="font-medium w-16">Email:</span>
-                <span>{user?.email}</span>
+                <span className="truncate" title={user?.email}>{user?.email}</span>
               </p>
               {user?.branch && (
                 <p className="flex items-center">
                   <span className="font-medium w-16">Branch:</span>
-                  <span>{user.branch.name} ({user.branch.code})</span>
+                  <span>{user.branch.name ? `${user.branch.name} (${user.branch.code})` : user.branch.code}</span>
                 </p>
               )}
-              {user?.state && (
+              {user?.state && user.state.name && (
                 <p className="flex items-center">
                   <span className="font-medium w-16">State:</span>
                   <span>{user.state.name}</span>

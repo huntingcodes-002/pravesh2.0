@@ -3,7 +3,7 @@
  */
 
 const API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/lead-collection/';
-const AUTH_API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/auth/';
+const AUTH_API_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/token/';
 
 export interface ApiError {
   success: false;
@@ -131,24 +131,38 @@ async function apiFetch<T = any>(
 ): Promise<ApiResponse<T>> {
   try {
     // Get auth token if available
-    const authToken = getAuthToken();
+    let authToken = getAuthToken();
 
     // Build fetch options ensuring method from options takes precedence
-    const fetchOptions: RequestInit = {
+    const buildOptions = (token: string | null): RequestInit => ({
       ...options, // Spread options first (includes method if specified)
       headers: {
         'Content-Type': 'application/json',
-        ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+        ...(token && { 'Authorization': `Bearer ${token}` }),
         ...options.headers, // Allow custom headers to override
       },
-    };
+    });
+
+    let fetchOptions = buildOptions(authToken);
 
     // If no method specified, default to GET (but POST should be specified in options)
     if (!fetchOptions.method) {
       fetchOptions.method = 'GET';
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
+    let response = await fetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
+
+    // Handle 401 Unauthorized - Attempt Refresh Token
+    if (response.status === 401) {
+      const refreshed = await handleTokenRefresh();
+      if (refreshed) {
+        // Retry original request with new token
+        authToken = getAuthToken();
+        fetchOptions = buildOptions(authToken);
+        if (!fetchOptions.method) fetchOptions.method = 'GET';
+        response = await fetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
+      }
+    }
 
     const data = await response.json();
 
@@ -161,6 +175,51 @@ async function apiFetch<T = any>(
     return data as ApiSuccess<T>;
   } catch (error: any) {
     return handleApiError(error);
+  }
+}
+
+/**
+ * Helper to refresh token
+ */
+async function handleTokenRefresh(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+
+  const authDataStr = localStorage.getItem('auth') || sessionStorage.getItem('auth');
+  if (!authDataStr) return false;
+
+  try {
+    const authData = JSON.parse(authDataStr);
+    const refreshToken = authData.refresh_token;
+
+    if (!refreshToken) return false;
+
+    const response = await refreshAuthToken({ refresh_token: refreshToken });
+
+    if (isApiError(response) || !response.success || !response.data) {
+      // Refresh failed, clear auth
+      localStorage.removeItem('auth');
+      sessionStorage.removeItem('auth');
+      localStorage.removeItem('user');
+      sessionStorage.removeItem('user');
+      // Optional: Redirect to login or let the app handle the 401
+      return false;
+    }
+
+    // Update storage with new tokens
+    const newAuthData = {
+      ...authData,
+      ...response.data,
+    };
+
+    localStorage.setItem('auth', JSON.stringify(newAuthData));
+    // Update sessionStorage if it was there
+    if (sessionStorage.getItem('auth')) {
+      sessionStorage.setItem('auth', JSON.stringify(newAuthData));
+    }
+
+    return true;
+  } catch (e) {
+    return false;
   }
 }
 
@@ -281,7 +340,7 @@ export async function loginPravesh(data: LoginPraveshRequest): Promise<ApiRespon
  * Based on Postman collection, tokens are in data object
  */
 export interface VerifyOTPResponseData {
-  access_token: string;
+  access_token?: string; // Optional as per new API
   expires_in: number;
   refresh_expires_in: number;
   refresh_token: string;
@@ -338,6 +397,49 @@ export async function resendPraveshOTP(data: ResendPraveshOTPRequest): Promise<A
     method: 'POST',
     body: formData.toString(),
   }, true);
+}
+
+/**
+ * Authentication: Refresh Token
+ * POST /api/token/refresh-token/
+ */
+export interface RefreshTokenRequest {
+  refresh_token: string;
+}
+
+export async function refreshAuthToken(data: RefreshTokenRequest): Promise<ApiResponse<VerifyOTPResponseData>> {
+  // Send refresh token in Authorization header without Bearer prefix
+  return apiFetchAuth<VerifyOTPResponseData>('refresh-token/', {
+    method: 'POST',
+    headers: {
+      'Authorization': data.refresh_token
+    }
+  }, false, false);
+}
+
+/**
+ * Authentication: Logout
+ * GET /api/token/logout/
+ */
+export async function logoutUser(): Promise<ApiResponse<any>> {
+  return apiFetchAuth('logout/', {
+    method: 'GET',
+  }, false, true); // Include auth token
+}
+
+/**
+ * Authentication: Forgot Password
+ * POST /api/token/forgotpassword/
+ */
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export async function forgotPassword(data: ForgotPasswordRequest): Promise<ApiResponse<any>> {
+  return apiFetchAuth('forgotpassword/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }, false, false);
 }
 
 /**
