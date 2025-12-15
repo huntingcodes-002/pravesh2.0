@@ -15,7 +15,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from "@/lib/utils";
 import { useToast } from '@/hooks/use-toast';
-import { getAccessToken } from '@/lib/api';
+import { getAuthToken } from '@/lib/api';
 
 interface Address {
   id: string;
@@ -46,7 +46,7 @@ function CoApplicantStep3PageContent() {
     if (!currentLead || !coApplicantId || !coApplicant) {
       router.replace('/lead/step5');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentLead, coApplicantId]);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
@@ -77,7 +77,7 @@ function CoApplicantStep3PageContent() {
     // Collapse all existing addresses when adding a new one
     const newCollapsed = new Set(addresses.map(addr => addr.id));
     setCollapsedAddresses(newCollapsed);
-    
+
     setAddresses([
       ...addresses,
       {
@@ -106,7 +106,7 @@ function CoApplicantStep3PageContent() {
   const handleRemoveAddress = (id: string) => {
     const remainingAddresses = addresses.filter((addr) => addr.id !== id);
     if (remainingAddresses.length > 0 && !remainingAddresses.some(a => a.isPrimary)) {
-        remainingAddresses[0].isPrimary = true;
+      remainingAddresses[0].isPrimary = true;
     }
     setAddresses(remainingAddresses);
   };
@@ -131,11 +131,11 @@ function CoApplicantStep3PageContent() {
 
     // Save current step data (Rule c)
     updateCoApplicant(currentLead.id, coApplicantId, {
-        currentStep: 3,
-        data: {
-            ...coApplicant?.data,
-            step3: { addresses },
-        }
+      currentStep: 3,
+      data: {
+        ...coApplicant?.data,
+        step3: { addresses },
+      }
     });
 
     // Back to co-applicants should go to main step 5
@@ -167,7 +167,7 @@ function CoApplicantStep3PageContent() {
       return;
     }
 
-    const token = getAccessToken();
+    const token = getAuthToken();
     if (!token) {
       toast({
         title: 'Authentication required',
@@ -257,7 +257,7 @@ function CoApplicantStep3PageContent() {
   const canProceed = addresses.every(
     (addr) => addr.addressType && addr.addressLine1 && addr.landmark && addr.postalCode && addr.postalCode.length === 6
   );
-  
+
   const progressBarText = 'Co-Applicant Details';
 
   if (!coApplicant) {
@@ -295,9 +295,8 @@ function CoApplicantStep3PageContent() {
 
                     <CollapsibleTrigger asChild>
                       <div
-                        className={`flex items-start justify-between cursor-pointer bg-gray-50 hover:bg-gray-100 px-4 py-3 transition-all duration-200 ${
-                          isCollapsed ? "rounded-xl" : "rounded-t-xl"
-                        }`}
+                        className={`flex items-start justify-between cursor-pointer bg-gray-50 hover:bg-gray-100 px-4 py-3 transition-all duration-200 ${isCollapsed ? "rounded-xl" : "rounded-t-xl"
+                          }`}
                       >
                         {/* Left side - Address info */}
                         <div className="flex flex-col min-w-0">
@@ -347,7 +346,7 @@ function CoApplicantStep3PageContent() {
                           </div>
                         </div>
                       </div>
-                    </CollapsibleTrigger>       
+                    </CollapsibleTrigger>
 
                     <CollapsibleContent>
                       <CardContent className="px-4 py-5 space-y-4 bg-white">
@@ -492,26 +491,26 @@ function CoApplicantStep3PageContent() {
 
         </div>
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
-            <div className="flex gap-3 max-w-2xl mx-auto">
-                <Button onClick={handlePrevious} variant="outline" className="flex-1 h-12 rounded-lg">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Previous
-                </Button>
-                <Button
-                  onClick={handleNext}
-                  disabled={!canProceed || isSaving}
-                  className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] disabled:opacity-80"
-                >
-                  {isSaving ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Saving...
-                    </span>
-                  ) : (
-                    'Save & Add Co-Applicant'
-                  )}
-                </Button>
-            </div>
+          <div className="flex gap-3 max-w-2xl mx-auto">
+            <Button onClick={handlePrevious} variant="outline" className="flex-1 h-12 rounded-lg">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Previous
+            </Button>
+            <Button
+              onClick={handleNext}
+              disabled={!canProceed || isSaving}
+              className="flex-1 h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] disabled:opacity-80"
+            >
+              {isSaving ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
+                </span>
+              ) : (
+                'Save & Add Co-Applicant'
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     </DashboardLayout>

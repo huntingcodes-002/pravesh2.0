@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { startCoApplicantWorkflow, submitCoApplicantConsentMobile, verifyCoApplicantMobileOTP, isApiError, getAccessToken } from '@/lib/api';
+import { startCoApplicantWorkflow, submitCoApplicantConsentMobile, verifyCoApplicantMobileOTP, isApiError, getAuthToken } from '@/lib/api';
 import { CheckCircle, Edit, Loader, Send } from 'lucide-react';
 
 const RELATIONSHIPS = [
@@ -350,7 +350,7 @@ function CoApplicantNewPageContent() {
       return;
     }
 
-    const token = getAccessToken();
+    const token = getAuthToken();
     if (!token) {
       toast({
         title: 'Authentication required',

@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import {
   fetchApplicationsSummary,
   getDetailedInfo,
-  getAccessToken,
+  getAuthToken,
   isApiError,
   type ApplicationsSummaryResponse,
   type ApplicationSummaryItem,
@@ -115,7 +115,7 @@ const LeadContext = createContext<LeadContextType | undefined>(undefined);
 
 const DEFAULT_SUMMARY_STATS: LeadSummaryStats = { total: 0, draft: 0, completed: 0 };
 
-// Use centralized getAccessToken from lib/api.ts instead of local implementation
+// Use centralized getAuthToken from lib/api.ts instead of local implementation
 
 function composeCustomerName(first?: string | null, last?: string | null, fallback?: string) {
   const parts = [first, last].filter(Boolean) as string[];
@@ -526,7 +526,7 @@ export function LeadProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    const token = getAccessToken();
+    const token = getAuthToken();
 
     if (!authLoading && user && token) {
       setLoading(true);

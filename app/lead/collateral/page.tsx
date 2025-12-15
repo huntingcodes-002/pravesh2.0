@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { RefreshCw, Loader, AlertTriangle } from 'lucide-react';
 import { useGeolocation } from '@uidotdev/usehooks';
-import { lookupPincode, isApiError, getAccessToken } from '@/lib/api';
+import { lookupPincode, isApiError, getAuthToken } from '@/lib/api';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,7 +29,7 @@ export default function CollateralPage() {
   const { currentLead, updateLead } = useLead();
   const router = useRouter();
   const { toast } = useToast();
-  
+
   const formatIndianNumber = (value: string | number): string => {
     if (value === '' || value === null || value === undefined) return '';
     const strValue = value.toString();
@@ -64,7 +64,7 @@ export default function CollateralPage() {
   const [city, setCity] = useState(currentLead?.formData?.step6?.city || '');
   const [stateCode, setStateCode] = useState(currentLead?.formData?.step6?.stateCode || '');
   const [stateName, setStateName] = useState(currentLead?.formData?.step6?.stateName || '');
-  
+
   // Geolocation state
   const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
   const suppressModalAutoOpenRef = useRef(false);
@@ -143,7 +143,7 @@ export default function CollateralPage() {
       } else if (ownershipType === 'jointOwnership') {
         ownershipType = 'joint_ownership';
       }
-      
+
       setFormData({
         collateralType: step6.collateralType || 'property',
         collateralSubType: step6.collateralSubType || '',
@@ -239,7 +239,7 @@ export default function CollateralPage() {
     if (isInteractionDisabled) return;
     const numeric = rawValue.replace(/[^0-9]/g, '').slice(0, 6);
     setFormData(prev => ({ ...prev, pincode: numeric }));
-    
+
     if (numeric.length === 6) {
       void performPincodeLookup(numeric);
     } else {
@@ -323,7 +323,7 @@ export default function CollateralPage() {
       return;
     }
 
-    const token = getAccessToken();
+    const token = getAuthToken();
     if (!token) {
       toast({
         title: 'Authentication required',
@@ -429,10 +429,10 @@ export default function CollateralPage() {
   }
 
   return (
-    <DashboardLayout 
-      title="Collateral Details" 
+    <DashboardLayout
+      title="Collateral Details"
       showNotifications={false}
-      showExitButton={true} 
+      showExitButton={true}
       onExit={handleExit}
     >
       <div className="max-w-2xl mx-auto mb-20">
@@ -447,8 +447,8 @@ export default function CollateralPage() {
                 </Label>
                 <Select
                   value={formData.collateralType}
-                  onValueChange={(value:string) => {
-                    setFormData({...formData, collateralType: value, collateralSubType: ''});
+                  onValueChange={(value: string) => {
+                    setFormData({ ...formData, collateralType: value, collateralSubType: '' });
                   }}
                   disabled={isInteractionDisabled}
                 >
@@ -469,7 +469,7 @@ export default function CollateralPage() {
                   </Label>
                   <Select
                     value={formData.collateralSubType}
-                    onValueChange={(value:string) => setField('collateralSubType', value)}
+                    onValueChange={(value: string) => setField('collateralSubType', value)}
                     disabled={isInteractionDisabled}
                   >
                     <SelectTrigger id="collateralSubType" className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
@@ -492,7 +492,7 @@ export default function CollateralPage() {
                 </Label>
                 <Select
                   value={formData.ownershipType}
-                  onValueChange={(value:string) => setField('ownershipType', value)}
+                  onValueChange={(value: string) => setField('ownershipType', value)}
                   disabled={isInteractionDisabled}
                 >
                   <SelectTrigger id="ownershipType" className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
@@ -544,7 +544,7 @@ export default function CollateralPage() {
 
               <div className="space-y-4 pt-4 border-t">
                 <h3 className="text-lg font-semibold text-[#003366]">Collateral Location</h3>
-                
+
                 <div>
                   <Label htmlFor="addressLine1">
                     Address Line 1 <span className="text-red-500">*</span>

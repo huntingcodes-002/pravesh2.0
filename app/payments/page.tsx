@@ -14,7 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { RefreshCw, CheckCircle, ChevronDown, Trash2, Send, Wallet } from 'lucide-react';
 import { useLead } from '@/contexts/LeadContext';
-import { getAccessToken, requestPaymentWaiver, isApiError } from '@/lib/api';
+import { getAuthToken, requestPaymentWaiver, isApiError } from '@/lib/api';
 
 type PaymentStatus = 'Pending' | 'Paid' | 'Failed' | 'Waived';
 type WaiverStatus = 'none' | 'pending' | 'approved' | 'rejected';
@@ -57,7 +57,7 @@ export default function PaymentsPage() {
   const waiverRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const getAuthorizationHeader = () => {
-    const token = getAccessToken();
+    const token = getAuthToken();
     if (!token) {
       toast({
         title: 'Authentication required',

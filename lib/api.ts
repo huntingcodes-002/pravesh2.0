@@ -54,24 +54,25 @@ export function isApiError(response: ApiResponse): response is ApiError {
 }
 
 /**
- * Helper function to get access token from localStorage (with sessionStorage fallback)
+ * Helper function to get auth token (ID Token) from localStorage (with sessionStorage fallback)
  * Exported for use across the application
  * Always fetches fresh token from storage (no caching)
  */
-export function getAccessToken(): string | null {
+export function getAuthToken(): string | null {
   if (typeof window !== 'undefined') {
     // Check localStorage first (new auth) - always read fresh
     let authData = localStorage.getItem('auth');
     if (authData) {
       try {
         const parsed = JSON.parse(authData);
-        const token = parsed.access_token;
+        // Use id_token instead of access_token
+        const token = parsed.id_token;
         // Validate token exists and is not empty
         if (token && typeof token === 'string' && token.trim().length > 0) {
           return token;
         }
-        // Invalid token, clear it
-        localStorage.removeItem('auth');
+        // If id_token is missing but we have auth data, we might want to keep it or clear it.
+        // For now, if the expected token is missing, we treat it as no token.
       } catch {
         // Invalid JSON, clear it
         localStorage.removeItem('auth');
@@ -82,13 +83,11 @@ export function getAccessToken(): string | null {
     if (authData) {
       try {
         const parsed = JSON.parse(authData);
-        const token = parsed.access_token;
+        const token = parsed.id_token;
         // Validate token exists and is not empty
         if (token && typeof token === 'string' && token.trim().length > 0) {
           return token;
         }
-        // Invalid token, clear it
-        sessionStorage.removeItem('auth');
       } catch {
         // Invalid JSON, clear it
         sessionStorage.removeItem('auth');
@@ -131,15 +130,15 @@ async function apiFetch<T = any>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    // Get access token if available
-    const accessToken = getAccessToken();
+    // Get auth token if available
+    const authToken = getAuthToken();
 
     // Build fetch options ensuring method from options takes precedence
     const fetchOptions: RequestInit = {
       ...options, // Spread options first (includes method if specified)
       headers: {
         'Content-Type': 'application/json',
-        ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
         ...options.headers, // Allow custom headers to override
       },
     };
@@ -173,12 +172,12 @@ async function apiFetchFormData<T = any>(
   formData: FormData
 ): Promise<ApiResponse<T>> {
   try {
-    // Get access token if available
-    const accessToken = getAccessToken();
+    // Get auth token if available
+    const authToken = getAuthToken();
 
     const headers: HeadersInit = {};
-    if (accessToken) {
-      headers['Authorization'] = `Bearer ${accessToken}`;
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
     }
     // Don't set Content-Type header - browser will set it with boundary
 
@@ -212,15 +211,15 @@ async function apiFetchAuth<T = any>(
   includeAuth: boolean = false
 ): Promise<ApiResponse<T>> {
   try {
-    // Get access token if needed
-    const accessToken = includeAuth ? getAccessToken() : null;
+    // Get auth token if needed
+    const authToken = includeAuth ? getAuthToken() : null;
 
     // Build fetch options ensuring method from options takes precedence
     const fetchOptions: RequestInit = {
       ...options, // Spread options first (includes method if specified)
       headers: {
         ...(useUrlEncoded ? { 'Content-Type': 'application/x-www-form-urlencoded' } : { 'Content-Type': 'application/json' }),
-        ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
         ...options.headers, // Allow custom headers to override
       },
     };
@@ -536,14 +535,14 @@ export async function lookupPincode(
   zip_code: string
 ): Promise<PincodeLookupResponse> {
   try {
-    const token = getAccessToken();
+    const authToken = getAuthToken();
 
     const response = await fetch('https://uatlb.api.saarathifinance.com/api/base/pincode/lookup/', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
+        ...(authToken && { Authorization: `Bearer ${authToken}` }),
       },
       body: JSON.stringify({ zip_code }),
       credentials: 'include',
@@ -916,7 +915,7 @@ export async function uploadCoApplicantDocument(
   data: CoApplicantDocumentUploadRequest
 ): Promise<ApiResponse<CoApplicantDocumentUploadResponse>> {
   try {
-    const accessToken = getAccessToken();
+    const authToken = getAuthToken();
 
     const formData = new FormData();
     formData.append('document_type', data.document_type);
@@ -937,8 +936,8 @@ export async function uploadCoApplicantDocument(
     formData.append('longitude', data.longitude);
 
     const headers: HeadersInit = {};
-    if (accessToken) {
-      headers['Authorization'] = `Bearer ${accessToken}`;
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
     }
 
     const response = await fetch(

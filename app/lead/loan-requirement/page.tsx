@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { RefreshCw } from 'lucide-react';
-import { getAccessToken } from '@/lib/api';
+import { getAuthToken } from '@/lib/api';
 
 export default function LoanRequirementPage() {
   const { currentLead, updateLead } = useLead();
@@ -121,7 +121,7 @@ export default function LoanRequirementPage() {
       return;
     }
 
-    const token = getAccessToken();
+    const token = getAuthToken();
     if (!token) {
       toast({
         title: 'Authentication required',
