@@ -722,14 +722,7 @@ export default function NewLeadInfoPage() {
   const handleSubmit = () => {
     if (!currentLead) return;
 
-    if (!canSubmitApplication) {
-      toast({
-        title: 'Cannot Submit',
-        description: 'Please complete all steps before submitting.',
-        variant: 'destructive'
-      });
-      return;
-    }
+
 
     submitLead(currentLead.id);
     toast({
@@ -1070,7 +1063,6 @@ export default function NewLeadInfoPage() {
             size="sm"
             onClick={() => router.push('/lead/basic-details')}
             className={tileButtonClass}
-            disabled={!isPaymentCompleted}
           >
             Edit
           </Button>
@@ -1376,7 +1368,6 @@ export default function NewLeadInfoPage() {
             <Button
               onClick={handleUploadDocuments}
               className="w-full h-14 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!isPaymentCompleted}
             >
               <Upload className="w-5 h-5 mr-2" />
               Add a Document
@@ -1532,7 +1523,6 @@ export default function NewLeadInfoPage() {
                     size="sm"
                     onClick={() => router.push('/lead/co-applicant-info')}
                     className={tileButtonClass}
-                    disabled={!isPaymentCompleted}
                   >
                     Manage
                   </Button>
@@ -1558,7 +1548,6 @@ export default function NewLeadInfoPage() {
                       size="sm"
                       onClick={() => router.push('/lead/co-applicant-info')}
                       className={tileButtonClass}
-                      disabled={!isPaymentCompleted}
                     >
                       Manage
                     </Button>
@@ -2043,13 +2032,7 @@ export default function NewLeadInfoPage() {
           <div className="flex gap-3 max-w-2xl mx-auto">
             <Button
               onClick={handleSubmit}
-              disabled={!canSubmitApplication}
-              className={cn(
-                "flex-1 h-12 rounded-lg font-medium text-white",
-                canSubmitApplication
-                  ? "bg-[#0072CE] hover:bg-[#005a9e]"
-                  : "bg-gray-300 text-gray-600 cursor-not-allowed"
-              )}
+              className="flex-1 h-12 rounded-lg font-medium text-white bg-[#0072CE] hover:bg-[#005a9e]"
             >
               Submit Application
             </Button>
