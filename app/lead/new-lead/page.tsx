@@ -392,11 +392,11 @@ function Step1PageContent() {
   const handleNext = () => {
     if (!currentLead) return;
 
-    // Save and proceed to Payments page
+    // Save and proceed to Application Hub
     updateLead(currentLead.id, {
       currentStep: 2,
     });
-    router.push('/payments');
+    router.push('/lead/new-lead-info');
   };
 
   const canSendOtp = Boolean(

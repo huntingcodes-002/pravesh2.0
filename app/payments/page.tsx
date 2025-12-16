@@ -234,71 +234,75 @@ export default function PaymentsPage() {
     }
   }, [applicationId]);
 
-  const handleWaveOffSubmit = async () => {
-    if (!waveOffRemarks.trim()) {
-      toast({
-        title: 'Remarks Required',
-        description: 'Please enter remarks for the waiver request.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!applicationId || applicationId === 'N/A') {
-      toast({
-        title: 'Error',
-        description: 'Application ID is missing.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    const applicantName = `${currentLead?.customerFirstName || ''} ${currentLead?.customerLastName || ''}`.trim() || 'Applicant';
-
-    setIsSubmittingWaiver(true);
-
-    try {
-      const response = await requestPaymentWaiver({
-        application_id: applicationId,
-        applicant_name: applicantName,
-        comment: waveOffRemarks.trim(),
-        system_value: '0',
-        branch_code: 'BR001',
-        state_code: '10',
-      });
-
-      if (isApiError(response)) {
+  //Payment Comment Start 
+  /*
+    const handleWaveOffSubmit = async () => {
+      if (!waveOffRemarks.trim()) {
         toast({
-          title: 'Request Failed',
-          description: response.error || 'Failed to submit waiver request. Please try again.',
+          title: 'Remarks Required',
+          description: 'Please enter remarks for the waiver request.',
           variant: 'destructive',
         });
         return;
       }
-
-      // Success - update state
-      setWaiverStatus('pending');
-      setWaiverDeviationId(response.data?.deviation_id || null);
-      setIsWaveOffModalOpen(false);
-      setWaveOffRemarks('');
-
-      toast({
-        title: 'Request Submitted',
-        description: 'Fee waiver request has been submitted successfully.',
-      });
-
-      // Start auto-refresh for waiver status
-      startWaiverAutoRefresh();
-    } catch (error: any) {
-      toast({
-        title: 'Request Failed',
-        description: error?.message || 'Failed to submit waiver request. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSubmittingWaiver(false);
-    }
-  };
+  
+      if (!applicationId || applicationId === 'N/A') {
+        toast({
+          title: 'Error',
+          description: 'Application ID is missing.',
+          variant: 'destructive',
+        });
+        return;
+      }
+  
+      const applicantName = `${currentLead?.customerFirstName || ''} ${currentLead?.customerLastName || ''}`.trim() || 'Applicant';
+  
+      setIsSubmittingWaiver(true);
+  
+      try {
+        const response = await requestPaymentWaiver({
+          application_id: applicationId,
+          applicant_name: applicantName,
+          comment: waveOffRemarks.trim(),
+          system_value: '0',
+          branch_code: 'BR001',
+          state_code: '10',
+        });
+  
+        if (isApiError(response)) {
+          toast({
+            title: 'Request Failed',
+            description: response.error || 'Failed to submit waiver request. Please try again.',
+            variant: 'destructive',
+          });
+          return;
+        }
+  
+        // Success - update state
+        setWaiverStatus('pending');
+        setWaiverDeviationId(response.data?.deviation_id || null);
+        setIsWaveOffModalOpen(false);
+        setWaveOffRemarks('');
+  
+        toast({
+          title: 'Request Submitted',
+          description: 'Fee waiver request has been submitted successfully.',
+        });
+  
+        // Start auto-refresh for waiver status
+        startWaiverAutoRefresh();
+      } catch (error: any) {
+        toast({
+          title: 'Request Failed',
+          description: error?.message || 'Failed to submit waiver request. Please try again.',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsSubmittingWaiver(false);
+      }
+    };
+  */
+  //Payment Comment End
 
   const handleSendToCustomer = async () => {
     if (isSending) return;
@@ -708,6 +712,20 @@ export default function PaymentsPage() {
                   </div>
 
                   <div>
+                    <Label className="text-sm font-medium text-gray-700 mb-2 block">Base Amount (₹)</Label>
+                    <div className="flex items-center px-4 h-12 bg-[#F3F4F6] border border-gray-300 rounded-lg">
+                      <span className="text-[#003366] font-medium">₹999.90</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700 mb-2 block">GST (18%)</Label>
+                    <div className="flex items-center px-4 h-12 bg-[#F3F4F6] border border-gray-300 rounded-lg">
+                      <span className="text-[#003366] font-medium">₹180</span>
+                    </div>
+                  </div>
+
+                  <div>
                     <Label className="text-sm font-medium text-gray-700 mb-2 block">Amount</Label>
                     <div className="flex items-center px-4 h-12 bg-[#F3F4F6] border border-gray-300 rounded-lg">
                       <span className="text-[#003366] font-medium">₹ 1,180 (incl. GST)</span>
@@ -735,6 +753,7 @@ export default function PaymentsPage() {
                   )}
                 </Button>
 
+                {/* //Payment Comment Start 
                 <div className="relative flex py-2 items-center">
                   <div className="flex-grow border-t border-gray-300"></div>
                   <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">Or</span>
@@ -748,6 +767,7 @@ export default function PaymentsPage() {
                 >
                   Request Wave Off
                 </Button>
+//Payment Comment End */}
               </div>
             </div>
           )}
@@ -920,6 +940,7 @@ export default function PaymentsPage() {
         </div>
       </div>
 
+      {/* //Payment Comment Start 
       <Dialog open={isWaveOffModalOpen} onOpenChange={setIsWaveOffModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -952,6 +973,7 @@ export default function PaymentsPage() {
           </div>
         </DialogContent>
       </Dialog>
+//Payment Comment End */}
     </DashboardLayout >
   );
 }
