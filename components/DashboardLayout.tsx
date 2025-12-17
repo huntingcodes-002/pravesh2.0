@@ -41,16 +41,16 @@ export default function DashboardLayout({
       }
       router.push('/leads');
     } else {
-        router.push('/leads');
+      router.push('/leads');
     }
   };
 
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <header className="bg-white shadow-sm sticky top-0 z-30">
+      <header className="bg-white shadow-sm z-30 flex-none">
         <div className="px-4 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <button
@@ -64,13 +64,13 @@ export default function DashboardLayout({
 
           <div className="flex items-center space-x-4">
             {showExitButton && (
-                <button
-                    onClick={handleExit}
-                    className="p-2 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200"
-                    title="Exit and Save Draft"
-                >
-                    <X className="w-5 h-5 text-red-600" />
-                </button>
+              <button
+                onClick={handleExit}
+                className="p-2 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200"
+                title="Exit and Save Draft"
+              >
+                <X className="w-5 h-5 text-red-600" />
+              </button>
             )}
             {showNotifications && (
               <button className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors">
@@ -86,7 +86,7 @@ export default function DashboardLayout({
         </div>
       </header>
 
-      <main className="p-4 pb-8">
+      <main className="flex-1 overflow-y-auto p-4 pb-8 scrollbar-hide">
         {children}
       </main>
     </div>

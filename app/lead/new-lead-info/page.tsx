@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard, Check, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard, Check, AlertTriangle, RefreshCw, ShieldCheck } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult, getRequiredDocuments, getCoApplicantRequiredDocuments, type DocumentStatus, initiateAccountAggregator, resendAccountAggregatorConsent, getAccountAggregatorStatus, initiateCoApplicantAccountAggregator, resendCoApplicantAccountAggregatorConsent, getCoApplicantAccountAggregatorStatus } from '@/lib/api';
+import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult, getRequiredDocuments, getCoApplicantRequiredDocuments, type DocumentStatus, initiateAccountAggregator, resendAccountAggregatorConsent, getAccountAggregatorStatus, initiateCoApplicantAccountAggregator, resendCoApplicantAccountAggregatorConsent, getCoApplicantAccountAggregatorStatus, uploadDocument } from '@/lib/api';
 
 const DOC_LABELS: Record<string, string> = {
   aadhaar_card: 'Aadhaar Card',
@@ -60,7 +60,30 @@ export default function NewLeadInfoPage() {
   const [isLoadingDetailedInfo, setIsLoadingDetailedInfo] = useState(false);
   const [isWaiverPending, setIsWaiverPending] = useState(false);
   const [showKycModal, setShowKycModal] = useState(false);
+  const [showAadhaarModal, setShowAadhaarModal] = useState(false);
+  const [aadhaarFront, setAadhaarFront] = useState<File | null>(null);
+  const [aadhaarBack, setAadhaarBack] = useState<File | null>(null);
+  const [isAadhaarUploading, setIsAadhaarUploading] = useState(false);
   const [aaStatus, setAaStatus] = useState<Record<string, { status: string; loading: boolean }>>({});
+  const [locationCoords, setLocationCoords] = useState<{ latitude: string; longitude: string } | null>(null);
+
+  // Get location for upload
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setLocationCoords({
+            latitude: position.coords.latitude.toFixed(6),
+            longitude: position.coords.longitude.toFixed(6),
+          });
+        },
+        (error) => {
+          console.warn('Location access denied:', error);
+          // Fallback or handle error - for now we might proceed without or show error on upload
+        }
+      );
+    }
+  }, []);
 
   // Redirect if no current lead
   useEffect(() => {
@@ -225,19 +248,22 @@ export default function NewLeadInfoPage() {
   }, [currentLead?.appId, detailedInfo?.payment_result]);
 
   useEffect(() => {
-    // Show KYC modal if required documents (PAN & Aadhaar) are missing, regardless of payment status
-
-    // Only proceed if applicantDocs is loaded
+    // Show Aadhaar modal if Aadhaar is missing
     if (currentLead && applicantDocs) {
-      const hasPan = applicantDocs.pan_card?.uploaded;
       const hasAadhaar = applicantDocs.aadhaar_card?.uploaded;
+      const hasPan = applicantDocs.pan_card?.uploaded;
 
-      if (!hasPan || !hasAadhaar) {
-        // Small delay to ensure smooth transition after page load
-        const timer = setTimeout(() => setShowKycModal(true), 1000);
-        return () => clearTimeout(timer);
-      } else {
+      if (!hasAadhaar) {
+        setShowAadhaarModal(true);
         setShowKycModal(false);
+      } else {
+        setShowAadhaarModal(false);
+        // If Aadhaar is uploaded, check for PAN
+        if (!hasPan) {
+          setShowKycModal(true);
+        } else {
+          setShowKycModal(false);
+        }
       }
     }
   }, [currentLead, applicantDocs]);
@@ -387,6 +413,59 @@ export default function NewLeadInfoPage() {
       router.push('/lead/documents?preselect=aadhaar');
     } else if (action === 'pan') {
       router.push('/lead/documents?preselect=pan');
+    }
+  };
+
+  const handleAadhaarUpload = async () => {
+    if (!aadhaarFront || !aadhaarBack || !currentLead?.appId) return;
+
+    if (!locationCoords) {
+      toast({
+        title: "Location Required",
+        description: "Please allow location access to upload documents.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsAadhaarUploading(true);
+    try {
+      const response = await uploadDocument({
+        application_id: currentLead.appId,
+        document_type: 'aadhaar_card',
+        front_file: aadhaarFront,
+        back_file: aadhaarBack,
+        document_name: 'Aadhaar Card',
+        latitude: locationCoords.latitude,
+        longitude: locationCoords.longitude
+      });
+
+      if (isApiError(response) || !response.success) {
+        throw new Error(response.error || 'Upload failed');
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Aadhaar card uploaded successfully.',
+        className: 'bg-green-50 border-green-200'
+      });
+
+      // Refresh docs status
+      const appDocsRes = await getRequiredDocuments(currentLead.appId);
+      if (!isApiError(appDocsRes)) {
+        const data = (appDocsRes as any).required_documents || (appDocsRes as any).data?.required_documents;
+        setApplicantDocs(data);
+      }
+
+      setShowAadhaarModal(false);
+    } catch (error: any) {
+      toast({
+        title: 'Upload Failed',
+        description: error.message || 'Failed to upload Aadhaar card.',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsAadhaarUploading(false);
     }
   };
 
@@ -869,7 +948,7 @@ export default function NewLeadInfoPage() {
   if (isLoadingDetailedInfo && !detailedInfo) {
     return (
       <DashboardLayout
-        title="New Lead Information"
+        title="Application Hub"
         showNotifications={false}
         showExitButton={true}
         onExit={handleExit}
@@ -1321,769 +1400,921 @@ export default function NewLeadInfoPage() {
 
   return (
     <DashboardLayout
-      title="New Lead Information"
+      title="Application Hub"
       showNotifications={false}
       showExitButton={true}
       onExit={handleExit}
     >
-      <div className="max-w-2xl mx-auto flex flex-col h-[calc(100vh-120px)] relative">
-        {/* Scrollable Content - Hidden Scrollbar */}
-        <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide" style={{
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-        }}>
-          {/* Progress Bar */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-gray-700">Progress</span>
-              <span className="text-sm font-semibold text-blue-600">
-                {completedStepsCount}/{totalSteps} Modules Started
-              </span>
-            </div>
-            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-blue-600 to-green-600 transition-all duration-300"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-          </div>
+      <div className="max-w-2xl mx-auto">
+        {showAadhaarModal ? (
+          <>
+            <div className="p-4 pb-32">
+              <Card className="border-0 shadow-none bg-transparent">
+                <CardContent className="p-0 space-y-6">
 
 
-          {/* Notification Banner for Pending Payment */}
-          {!isPaymentCompleted && (
-            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-sm font-semibold text-yellow-800">Complete Payment to Proceed</h4>
-                <p className="text-xs text-yellow-700 mt-1">
-                  Please complete the Login / IMD Fee payment to unlock the rest of the application process.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Upload Documents Button */}
-          <div className="mb-6">
-            <Button
-              onClick={handleUploadDocuments}
-              className="w-full h-14 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Upload className="w-5 h-5 mr-2" />
-              Add a Document
-            </Button>
-          </div>
-
-          {/* Payment Details Card */}
-          <Card className={cn(
-            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
-            isPaymentCompleted ? "border-l-green-600" : "border-l-blue-600"
-          )}>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Payment Details</h3>
-                {renderPaymentStatusBadge()}
-              </div>
-
-              {isPaymentCompleted || isWaiverPending ? (
-                <div className="mb-4 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                      {paymentStatus === 'Waived' || isWaiverPending ? (
-                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
-                          <CheckCircle className="w-4 h-4 text-blue-600" />
+                  {/* Upload Card */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
+                          <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                          </svg>
                         </div>
-                      ) : (
-                        <CheckCircle className="w-6 h-6 text-green-600" />
-                      )}
+                        <h2 className="text-lg font-bold text-gray-900">Upload Aadhaar</h2>
+                      </div>
+                      <Badge className="bg-red-100 text-red-700 hover:bg-red-100 border-red-200">Required</Badge>
                     </div>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {paymentStatus === 'Waived' || isWaiverPending ? 'Payment Waiver Request' : 'Payment received successfully'}
+
+                    <div className="bg-blue-50 rounded-lg p-3 flex gap-3 mb-6">
+                      <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-blue-800 leading-relaxed">
+                        Please upload your Aadhaar card to auto-fill address details and verify your identity.
                       </p>
-                      <p className="text-xs text-gray-500">
-                        {paymentStatus === 'Waived'
-                          ? 'Login fee has been waived.'
-                          : isWaiverPending
-                            ? 'Waiver request is in progress.'
-                            : 'Login fee has been confirmed and recorded.'}
-                      </p>
+                    </div>
+
+                    <div className="space-y-6">
+                      <h3 className="font-semibold text-gray-900">Aadhaar - {currentLead?.customerName || 'Applicant'}</h3>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        {/* Front Side */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-gray-600 block">Front Side</label>
+                          <div
+                            onClick={() => document.getElementById('aadhaar-front-input')?.click()}
+                            className={cn(
+                              "aspect-[4/3] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors relative overflow-hidden",
+                              aadhaarFront ? "border-green-500 bg-green-50" : "border-gray-300 hover:border-blue-500 hover:bg-gray-50"
+                            )}
+                          >
+                            <input
+                              id="aadhaar-front-input"
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files?.[0]) setAadhaarFront(e.target.files[0]);
+                              }}
+                            />
+                            {aadhaarFront ? (
+                              <div className="w-full h-full relative">
+                                <img
+                                  src={URL.createObjectURL(aadhaarFront)}
+                                  alt="Front Preview"
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                  <CheckCircle className="w-8 h-8 text-white" />
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <ImageIcon className="w-8 h-8 text-gray-400 mb-2" />
+                                <span className="text-xs text-gray-500 font-medium">Upload Front</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Back Side */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-gray-600 block">Back Side</label>
+                          <div
+                            onClick={() => document.getElementById('aadhaar-back-input')?.click()}
+                            className={cn(
+                              "aspect-[4/3] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors relative overflow-hidden",
+                              aadhaarBack ? "border-green-500 bg-green-50" : "border-gray-300 hover:border-blue-500 hover:bg-gray-50"
+                            )}
+                          >
+                            <input
+                              id="aadhaar-back-input"
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files?.[0]) setAadhaarBack(e.target.files[0]);
+                              }}
+                            />
+                            {aadhaarBack ? (
+                              <div className="w-full h-full relative">
+                                <img
+                                  src={URL.createObjectURL(aadhaarBack)}
+                                  alt="Back Preview"
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                  <CheckCircle className="w-8 h-8 text-white" />
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <ImageIcon className="w-8 h-8 text-gray-400 mb-2" />
+                                <span className="text-xs text-gray-500 font-medium">Upload Back</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button
+                        className="w-full h-12 bg-[#3B82F6] hover:bg-[#2563EB] text-white font-semibold rounded-xl text-sm"
+                        disabled={!aadhaarFront || !aadhaarBack || isAadhaarUploading}
+                        onClick={handleAadhaarUpload}
+                      >
+                        {isAadhaarUploading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Uploading...
+                          </>
+                        ) : (
+                          <>
+                            <FileText className="w-4 h-4 mr-2" />
+                            Upload Aadhaar
+                          </>
+                        )}
+                      </Button>
                     </div>
                   </div>
-                  <Button
-                    onClick={handleGeneratePaymentLink}
-                    variant="outline"
-                    className="w-full border-blue-600 text-blue-600 hover:bg-blue-50"
-                  >
-                    View Details
-                  </Button>
+                  {/* Instructions */}
+                  <div className="bg-blue-50 rounded-xl p-5 border border-blue-100">
+                    <h4 className="text-sm font-bold text-blue-900 mb-3">How to upload:</h4>
+                    <ul className="space-y-2">
+                      <li className="text-xs text-blue-800 flex items-start gap-2">
+                        <span className="font-medium">1.</span>
+                        Ensure the photo is clear and text is readable.
+                      </li>
+                      <li className="text-xs text-blue-800 flex items-start gap-2">
+                        <span className="font-medium">2.</span>
+                        Capture both front and back sides of the card.
+                      </li>
+                    </ul>
+                  </div>
+
+                </CardContent>
+              </Card>
+            </div>
+            {/* Fixed Back to Dashboard Footer */}
+            <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4 z-20">
+              <div className="flex gap-3 max-w-2xl mx-auto">
+                <Button
+                  variant="outline"
+                  className="flex-1 h-12 rounded-lg font-medium border-blue-200 text-blue-600 hover:bg-blue-50"
+                  onClick={() => router.push('/leads')}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="grid grid-cols-2 gap-0.5">
+                      <div className="w-1.5 h-1.5 bg-current rounded-[1px]"></div>
+                      <div className="w-1.5 h-1.5 bg-current rounded-[1px]"></div>
+                      <div className="w-1.5 h-1.5 bg-current rounded-[1px]"></div>
+                      <div className="w-1.5 h-1.5 bg-current rounded-[1px]"></div>
+                    </div>
+                    Back to Dashboard
+                  </div>
+                </Button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="pb-32 px-4 pt-4">
+              {/* Progress Bar */}
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-700">Progress</span>
+                  <span className="text-sm font-semibold text-blue-600">
+                    {completedStepsCount}/{totalSteps} Modules Started
+                  </span>
                 </div>
-              ) : (
-                <>
-                  {detailedInfo?.payment_result && (
-                    <div className="mb-4 space-y-2 p-3 bg-gray-50 rounded-lg">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-medium text-gray-600">Amount:</span>
-                        <span className="text-sm font-semibold text-gray-900">₹{detailedInfo.payment_result.amount?.toLocaleString('en-IN') || '0'}</span>
+                <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-blue-600 to-green-600 transition-all duration-300"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </div>
+
+
+
+
+              {/* Upload Documents Button */}
+              <div className="mb-6">
+                <Button
+                  onClick={handleUploadDocuments}
+                  className="w-full h-14 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Upload className="w-5 h-5 mr-2" />
+                  Add a Document
+                </Button>
+              </div>
+
+              {/* Payment Details Card */}
+              <Card className={cn(
+                "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+                isPaymentCompleted ? "border-l-green-600" : "border-l-blue-600"
+              )}>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Payment Details</h3>
+                    {renderPaymentStatusBadge()}
+                  </div>
+
+                  {isPaymentCompleted || isWaiverPending ? (
+                    <div className="mb-4 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                          {paymentStatus === 'Waived' || isWaiverPending ? (
+                            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
+                              <CheckCircle className="w-4 h-4 text-blue-600" />
+                            </div>
+                          ) : (
+                            <CheckCircle className="w-6 h-6 text-green-600" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">
+                            {paymentStatus === 'Waived' || isWaiverPending ? 'Payment Waiver Request' : 'Payment received successfully'}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {paymentStatus === 'Waived'
+                              ? 'Login fee has been waived.'
+                              : isWaiverPending
+                                ? 'Waiver request is in progress.'
+                                : 'Login fee has been confirmed and recorded.'}
+                          </p>
+                        </div>
                       </div>
-                      {detailedInfo.payment_result.order_id && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-medium text-gray-600">Order ID:</span>
-                          <span className="text-xs text-gray-700 font-mono">{detailedInfo.payment_result.order_id}</span>
+                      <Button
+                        onClick={handleGeneratePaymentLink}
+                        variant="outline"
+                        className="w-full border-blue-600 text-blue-600 hover:bg-blue-50"
+                      >
+                        View Details
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      {detailedInfo?.payment_result && (
+                        <div className="mb-4 space-y-2 p-3 bg-gray-50 rounded-lg">
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs font-medium text-gray-600">Amount:</span>
+                            <span className="text-sm font-semibold text-gray-900">₹{detailedInfo.payment_result.amount?.toLocaleString('en-IN') || '0'}</span>
+                          </div>
+                          {detailedInfo.payment_result.order_id && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-medium text-gray-600">Order ID:</span>
+                              <span className="text-xs text-gray-700 font-mono">{detailedInfo.payment_result.order_id}</span>
+                            </div>
+                          )}
                         </div>
                       )}
-                    </div>
+                      <Button
+                        onClick={handleGeneratePaymentLink}
+                        className="w-full h-12 rounded-xl bg-[#0B63F6] hover:bg-[#0954d4] text-white font-semibold transition-colors"
+                      >
+                        Generate Payment Link
+                      </Button>
+                    </>
                   )}
-                  <Button
-                    onClick={handleGeneratePaymentLink}
-                    className="w-full h-12 rounded-xl bg-[#0B63F6] hover:bg-[#0954d4] text-white font-semibold transition-colors"
-                  >
-                    Generate Payment Link
-                  </Button>
-                </>
-              )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
 
-          {/* Applicant Details Card */}
-          <Card className={cn(
-            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
-            applicantStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
-          )}>
-            <CardContent className="p-5">
-              {/* Header */}
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Applicant Details</h3>
-                <div className="flex items-center gap-2">
-                  {getStatusBadge(applicantStatus)}
-                </div>
-              </div>
+              {/* Applicant Details Card */}
+              <Card className={cn(
+                "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+                applicantStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+              )}>
+                <CardContent className="p-5">
+                  {/* Header */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                    <h3 className="text-base sm:text-lg font-semibold text-gray-900">Applicant Details</h3>
+                    <div className="flex items-center gap-2">
+                      {getStatusBadge(applicantStatus)}
+                    </div>
+                  </div>
 
-              <div className="space-y-3">
-                {renderBasicDetailsTile()}
-                {renderAddressDetailsTile()}
-                {renderEmploymentDetailsTile()}
-                {renderAccountAggregatorTile()}
-              </div>
+                  <div className="space-y-3">
+                    {renderBasicDetailsTile()}
+                    {renderAddressDetailsTile()}
+                    {renderEmploymentDetailsTile()}
+                    {renderAccountAggregatorTile()}
+                  </div>
 
-              {/* Footer */}
-              {/* <div className="mt-4 pt-4 border-t border-gray-100">
+                  {/* Footer */}
+                  {/* <div className="mt-4 pt-4 border-t border-gray-100">
                 <p className="text-xs text-gray-400">
                   {uploadedDocuments.length === 0 ? 'No documents linked yet' : 
                    'Documents linked and verified'}
                 </p>
               </div> */}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
 
-          {/* Co-Applicants Card */}
-          <Card className={cn(
-            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
-            hasCoApplicants && coApplicantStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
-          )}>
-            <CardContent className="p-5 space-y-5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900">Co-Applicant(s)</h3>
-                {isCoApplicantsLoading ? (
-                  <Badge className="rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
-                    Loading...
-                  </Badge>
-                ) : (
-                  <Badge
-                    className={cn(
-                      'rounded-full px-3 py-1 text-xs font-medium',
-                      hasCoApplicants ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-gray-50 text-gray-500 border border-gray-200'
+              {/* Co-Applicants Card */}
+              <Card className={cn(
+                "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+                hasCoApplicants && coApplicantStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+              )}>
+                <CardContent className="p-5 space-y-5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">Co-Applicant(s)</h3>
+                    {isCoApplicantsLoading ? (
+                      <Badge className="rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                        Loading...
+                      </Badge>
+                    ) : (
+                      <Badge
+                        className={cn(
+                          'rounded-full px-3 py-1 text-xs font-medium',
+                          hasCoApplicants ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-gray-50 text-gray-500 border border-gray-200'
+                        )}
+                      >
+                        {hasCoApplicants ? `${coApplicantCount} Added` : 'No Data'}
+                      </Badge>
                     )}
-                  >
-                    {hasCoApplicants ? `${coApplicantCount} Added` : 'No Data'}
-                  </Badge>
-                )}
-              </div>
+                  </div>
 
-              {isCoApplicantsLoading ? (
-                <div className="flex items-center justify-center py-4">
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Loading co-applicants...</span>
-                  </div>
-                </div>
-              ) : !hasCoApplicants ? (
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                      <Users className="w-5 h-5 text-blue-600" />
+                  {isCoApplicantsLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Loading co-applicants...</span>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">No co-applicants added yet</p>
-                      <p className="text-xs text-gray-500">Add a co-applicant to continue joint application processing</p>
+                  ) : !hasCoApplicants ? (
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                          <Users className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900">No co-applicants added yet</p>
+                          <p className="text-xs text-gray-500">Add a co-applicant to continue joint application processing</p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => router.push('/lead/co-applicant-info')}
+                        className={tileButtonClass}
+                      >
+                        Manage
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                            <Users className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900">
+                              {coApplicantCount} co-applicant{coApplicantCount > 1 ? 's' : ''} added
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Manage details and documents for each co-applicant.
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push('/lead/co-applicant-info')}
+                          className={tileButtonClass}
+                        >
+                          Manage
+                        </Button>
+                      </div>
+                      <div className="space-y-3">
+                        {detailedInfo?.participants
+                          ?.filter((p: Participant) => p.participant_type === 'co-applicant')
+                          .map((participant: Participant) => {
+                            const fullName = participant?.personal_info?.full_name;
+                            const name = fullName?.value || (typeof fullName === 'string' ? fullName : 'Unnamed Co-applicant');
+                            const index = participant?.co_applicant_index ?? -1;
+                            const key = `coapplicant_${index}`;
+                            const status = aaStatus[key];
+                            const isCompleted = status?.status === 'COMPLETED' || status?.status === 'COMPLETE' || status?.status === 'SUCCESS';
+                            const isPending = status?.status === 'PENDING';
+
+                            return (
+                              <div
+                                key={`co-applicant-${index}`}
+                                className="rounded-lg border border-gray-200 bg-white p-4"
+                              >
+                                <div className="flex items-center justify-between mb-3">
+                                  <span className="text-sm font-medium text-gray-900">{`Co-Applicant ${index + 1} – ${name}`}</span>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                                  <div className="flex items-center gap-2">
+                                    <Database className="w-4 h-4 text-gray-400" />
+                                    <div className="flex flex-col">
+                                      <span className="text-xs text-gray-600">Account Aggregator</span>
+                                      {isCompleted && <span className="text-[10px] text-green-600">Fetched successfully</span>}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    {isCompleted ? (
+                                      <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">Completed</Badge>
+                                    ) : isPending ? (
+                                      <>
+                                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAaAction('resend', 'coapplicant', index)} disabled={status?.loading}>Resend</Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleAaAction('refresh', 'coapplicant', index)} disabled={status?.loading}>
+                                          <RefreshCw className={cn("w-3 h-3", status?.loading && "animate-spin")} />
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      <Button variant="outline" size="sm" className="h-7 text-xs border-blue-600 text-blue-600" onClick={() => handleAaAction('initiate', 'coapplicant', index)} disabled={status?.loading}>
+                                        {status?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Initiate'}
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        {apiCoApplicants.length > 0 && !detailedInfo?.participants && (
+                          // Fallback to simple list if detailed info not available
+                          apiCoApplicants.map((coApp) => {
+                            const key = `coapplicant_${coApp.index}`;
+                            const status = aaStatus[key];
+                            const isCompleted = status?.status === 'COMPLETED' || status?.status === 'COMPLETE' || status?.status === 'SUCCESS';
+                            const isPending = status?.status === 'PENDING';
+
+                            return (
+                              <div
+                                key={`co-applicant-${coApp.index}`}
+                                className="rounded-lg border border-gray-200 bg-white p-4"
+                              >
+                                <div className="flex items-center justify-between mb-3">
+                                  <span className="text-sm font-medium text-gray-900">{`Co-Applicant ${coApp.index + 1} – ${coApp.name}`}</span>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                                  <div className="flex items-center gap-2">
+                                    <Database className="w-4 h-4 text-gray-400" />
+                                    <div className="flex flex-col">
+                                      <span className="text-xs text-gray-600">Account Aggregator</span>
+                                      {isCompleted && <span className="text-[10px] text-green-600">Fetched successfully</span>}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    {isCompleted ? (
+                                      <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">Completed</Badge>
+                                    ) : isPending ? (
+                                      <>
+                                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAaAction('resend', 'coapplicant', coApp.index)} disabled={status?.loading}>Resend</Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleAaAction('refresh', 'coapplicant', coApp.index)} disabled={status?.loading}>
+                                          <RefreshCw className={cn("w-3 h-3", status?.loading && "animate-spin")} />
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      <Button variant="outline" size="sm" className="h-7 text-xs border-blue-600 text-blue-600" onClick={() => handleAaAction('initiate', 'coapplicant', coApp.index)} disabled={status?.loading}>
+                                        {status?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Initiate'}
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  <p className="text-xs text-gray-400">Each co-applicant requires PAN & Aadhaar verification</p>
+                </CardContent>
+              </Card>
+
+              {/* Collateral Card */}
+              <Card className={cn(
+                "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+                collateralStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+              )}>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Collateral Details</h3>
+                    <div className="flex items-center gap-2">
+                      {getStatusBadge(collateralStatus)}
                     </div>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => router.push('/lead/co-applicant-info')}
-                    className={tileButtonClass}
-                  >
-                    Manage
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3 flex-1 min-w-0">
+
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
                       <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                        <Users className="w-5 h-5 text-blue-600" />
+                        <Home className="w-5 h-5 text-blue-600" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-900">
-                          {coApplicantCount} co-applicant{coApplicantCount > 1 ? 's' : ''} added
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Manage details and documents for each co-applicant.
-                        </p>
+                        {collateralStatus !== 'incomplete' && (detailedInfo?.collateral_details || currentLead?.formData?.step6) ? (
+                          <div className="space-y-1">
+                            {(() => {
+                              const collateral = detailedInfo?.collateral_details;
+                              const step6 = currentLead?.formData?.step6;
+
+                              const collateralType = collateral?.collateral_type || step6?.collateralType || '';
+                              const typeLabel = collateralType === 'ready-property' ? 'Apartment' :
+                                collateralType === 'builder-property-under-construction' ? 'Builder Property' :
+                                  collateralType === 'construction-on-land' ? 'Construction on Land' :
+                                    collateralType === 'plot-self-construction' ? 'Plot + Self Construction' :
+                                      collateralType === 'purchase-plot' ? 'Plot' :
+                                        collateralType || 'Property';
+                              const value = collateral?.estimated_property_value || step6?.propertyValue || 0;
+                              const formattedValue = typeof value === 'string'
+                                ? parseFloat(value).toLocaleString('en-IN')
+                                : value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+                              return (
+                                <p className="text-sm font-semibold text-gray-900">
+                                  {typeLabel} ₹{formattedValue}
+                                </p>
+                              );
+                            })()}
+                            {detailedInfo?.collateral_details?.ownership_type && (
+                              <p className="text-xs text-gray-600">
+                                <span className="font-medium">Ownership:</span> {
+                                  detailedInfo.collateral_details.ownership_type === 'self_ownership' ? 'Self Ownership' :
+                                    detailedInfo.collateral_details.ownership_type === 'joint_ownership' ? 'Joint Ownership' :
+                                      detailedInfo.collateral_details.ownership_type
+                                }
+                              </p>
+                            )}
+                            {detailedInfo?.collateral_details?.address && (
+                              <div className="mt-2 space-y-0.5">
+                                <p className="text-xs text-gray-600">
+                                  <span className="font-medium">Address:</span> {[
+                                    detailedInfo.collateral_details.address.address_line_1,
+                                    detailedInfo.collateral_details.address.address_line_2,
+                                    detailedInfo.collateral_details.address.address_line_3
+                                  ].filter(Boolean).join(', ')}
+                                </p>
+                                <p className="text-xs text-gray-600">
+                                  <span className="font-medium">Location:</span> {[
+                                    detailedInfo.collateral_details.address.city,
+                                    detailedInfo.collateral_details.address.state,
+                                    detailedInfo.collateral_details.address.pincode
+                                  ].filter(Boolean).join(', ')}
+                                </p>
+                                {detailedInfo.collateral_details.address.landmark && (
+                                  <p className="text-xs text-gray-600">
+                                    <span className="font-medium">Landmark:</span> {detailedInfo.collateral_details.address.landmark}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                            {detailedInfo?.collateral_details?.collateral_description && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                {detailedInfo.collateral_details.collateral_description}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">No property document uploaded</p>
+                            <p className="text-xs text-gray-500 mt-0.5">Upload or add property details manually</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => router.push('/lead/co-applicant-info')}
-                      className={tileButtonClass}
+                      onClick={() => router.push('/lead/collateral')}
+                      className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
                     >
-                      Manage
+                      Edit
                     </Button>
                   </div>
-                  <div className="space-y-3">
-                    {detailedInfo?.participants
-                      ?.filter((p: Participant) => p.participant_type === 'co-applicant')
-                      .map((participant: Participant) => {
-                        const fullName = participant?.personal_info?.full_name;
-                        const name = fullName?.value || (typeof fullName === 'string' ? fullName : 'Unnamed Co-applicant');
-                        const index = participant?.co_applicant_index ?? -1;
-                        const key = `coapplicant_${index}`;
-                        const status = aaStatus[key];
-                        const isCompleted = status?.status === 'COMPLETED' || status?.status === 'COMPLETE' || status?.status === 'SUCCESS';
-                        const isPending = status?.status === 'PENDING';
 
-                        return (
-                          <div
-                            key={`co-applicant-${index}`}
-                            className="rounded-lg border border-gray-200 bg-white p-4"
-                          >
-                            <div className="flex items-center justify-between mb-3">
-                              <span className="text-sm font-medium text-gray-900">{`Co-Applicant ${index + 1} – ${name}`}</span>
-                            </div>
-
-                            <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                              <div className="flex items-center gap-2">
-                                <Database className="w-4 h-4 text-gray-400" />
-                                <div className="flex flex-col">
-                                  <span className="text-xs text-gray-600">Account Aggregator</span>
-                                  {isCompleted && <span className="text-[10px] text-green-600">Fetched successfully</span>}
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                {isCompleted ? (
-                                  <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">Completed</Badge>
-                                ) : isPending ? (
-                                  <>
-                                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAaAction('resend', 'coapplicant', index)} disabled={status?.loading}>Resend</Button>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleAaAction('refresh', 'coapplicant', index)} disabled={status?.loading}>
-                                      <RefreshCw className={cn("w-3 h-3", status?.loading && "animate-spin")} />
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <Button variant="outline" size="sm" className="h-7 text-xs border-blue-600 text-blue-600" onClick={() => handleAaAction('initiate', 'coapplicant', index)} disabled={status?.loading}>
-                                    {status?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Initiate'}
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    {apiCoApplicants.length > 0 && !detailedInfo?.participants && (
-                      // Fallback to simple list if detailed info not available
-                      apiCoApplicants.map((coApp) => {
-                        const key = `coapplicant_${coApp.index}`;
-                        const status = aaStatus[key];
-                        const isCompleted = status?.status === 'COMPLETED' || status?.status === 'COMPLETE' || status?.status === 'SUCCESS';
-                        const isPending = status?.status === 'PENDING';
-
-                        return (
-                          <div
-                            key={`co-applicant-${coApp.index}`}
-                            className="rounded-lg border border-gray-200 bg-white p-4"
-                          >
-                            <div className="flex items-center justify-between mb-3">
-                              <span className="text-sm font-medium text-gray-900">{`Co-Applicant ${coApp.index + 1} – ${coApp.name}`}</span>
-                            </div>
-
-                            <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                              <div className="flex items-center gap-2">
-                                <Database className="w-4 h-4 text-gray-400" />
-                                <div className="flex flex-col">
-                                  <span className="text-xs text-gray-600">Account Aggregator</span>
-                                  {isCompleted && <span className="text-[10px] text-green-600">Fetched successfully</span>}
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                {isCompleted ? (
-                                  <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">Completed</Badge>
-                                ) : isPending ? (
-                                  <>
-                                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAaAction('resend', 'coapplicant', coApp.index)} disabled={status?.loading}>Resend</Button>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleAaAction('refresh', 'coapplicant', coApp.index)} disabled={status?.loading}>
-                                      <RefreshCw className={cn("w-3 h-3", status?.loading && "animate-spin")} />
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <Button variant="outline" size="sm" className="h-7 text-xs border-blue-600 text-blue-600" onClick={() => handleAaAction('initiate', 'coapplicant', coApp.index)} disabled={status?.loading}>
-                                    {status?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Initiate'}
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })
-                    )}
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <p className="text-xs text-gray-400">No document linked</p>
                   </div>
-                </>
-              )}
+                </CardContent>
+              </Card>
 
-              <p className="text-xs text-gray-400">Each co-applicant requires PAN & Aadhaar verification</p>
-            </CardContent>
-          </Card>
-
-          {/* Collateral Card */}
-          <Card className={cn(
-            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
-            collateralStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
-          )}>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Collateral Details</h3>
-                <div className="flex items-center gap-2">
-                  {getStatusBadge(collateralStatus)}
-                </div>
-              </div>
-
-              <div className="flex items-start justify-between gap-4 mb-4">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                    <Home className="w-5 h-5 text-blue-600" />
+              {/* Loan Requirement Card */}
+              <Card className={cn(
+                "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+                loanStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+              )}>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Loan Requirement</h3>
+                    <div className="flex items-center gap-2">
+                      {getStatusBadge(loanStatus)}
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    {collateralStatus !== 'incomplete' && (detailedInfo?.collateral_details || currentLead?.formData?.step6) ? (
-                      <div className="space-y-1">
-                        {(() => {
-                          const collateral = detailedInfo?.collateral_details;
-                          const step6 = currentLead?.formData?.step6;
 
-                          const collateralType = collateral?.collateral_type || step6?.collateralType || '';
-                          const typeLabel = collateralType === 'ready-property' ? 'Apartment' :
-                            collateralType === 'builder-property-under-construction' ? 'Builder Property' :
-                              collateralType === 'construction-on-land' ? 'Construction on Land' :
-                                collateralType === 'plot-self-construction' ? 'Plot + Self Construction' :
-                                  collateralType === 'purchase-plot' ? 'Plot' :
-                                    collateralType || 'Property';
-                          const value = collateral?.estimated_property_value || step6?.propertyValue || 0;
-                          const formattedValue = typeof value === 'string'
-                            ? parseFloat(value).toLocaleString('en-IN')
-                            : value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                        <IndianRupee className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        {loanStatus !== 'incomplete' && (detailedInfo?.loan_details || currentLead?.formData?.step7) ? (
+                          <div className="space-y-1">
+                            {(() => {
+                              const loanDetails = detailedInfo?.loan_details;
+                              const step7 = currentLead?.formData?.step7;
 
-                          return (
-                            <p className="text-sm font-semibold text-gray-900">
-                              {typeLabel} ₹{formattedValue}
-                            </p>
-                          );
-                        })()}
-                        {detailedInfo?.collateral_details?.ownership_type && (
-                          <p className="text-xs text-gray-600">
-                            <span className="font-medium">Ownership:</span> {
-                              detailedInfo.collateral_details.ownership_type === 'self_ownership' ? 'Self Ownership' :
-                                detailedInfo.collateral_details.ownership_type === 'joint_ownership' ? 'Joint Ownership' :
-                                  detailedInfo.collateral_details.ownership_type
-                            }
+                              const amount = loanDetails?.loan_amount_requested || step7?.loanAmount || currentLead?.loanAmount || 0;
+                              const formattedAmount = typeof amount === 'string'
+                                ? parseFloat(amount).toLocaleString('en-IN')
+                                : amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+                              const tenureMonths = loanDetails?.tenure_months || step7?.tenure || 0;
+                              const tenureYears = Math.floor(Number(tenureMonths) / 12);
+                              const tenureMonthsRemainder = Number(tenureMonths) % 12;
+
+                              const purpose = loanDetails?.loan_purpose || step7?.loanPurpose || currentLead?.loanPurpose || '';
+                              const purposeLabel = getLoanPurposeLabel(purpose);
+
+                              return (
+                                <>
+                                  <p className="text-sm font-semibold text-gray-900">
+                                    ₹{formattedAmount}
+                                    {tenureYears > 0 && ` · ${tenureYears} Year${tenureYears > 1 ? 's' : ''}`}
+                                    {tenureMonthsRemainder > 0 && ` ${tenureMonthsRemainder} Month${tenureMonthsRemainder > 1 ? 's' : ''}`}
+                                    {tenureYears === 0 && tenureMonthsRemainder > 0 && ` · ${tenureMonthsRemainder} Month${tenureMonthsRemainder > 1 ? 's' : ''}`}
+                                    {purposeLabel && ` · ${purposeLabel}`}
+                                  </p>
+                                  {loanDetails?.interest_rate && (
+                                    <p className="text-xs text-gray-600">
+                                      <span className="font-medium">Interest Rate:</span> {loanDetails.interest_rate}%
+                                    </p>
+                                  )}
+                                  {loanDetails?.product_code && (
+                                    <p className="text-xs text-gray-600">
+                                      <span className="font-medium">Product:</span> {loanDetails.product_code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                    </p>
+                                  )}
+                                  {loanDetails?.loan_purpose_description && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      {loanDetails.loan_purpose_description}
+                                    </p>
+                                  )}
+                                  {loanDetails?.sourcing_channel && (
+                                    <p className="text-xs text-gray-600">
+                                      <span className="font-medium">Sourcing Channel:</span> {loanDetails.sourcing_channel.charAt(0).toUpperCase() + loanDetails.sourcing_channel.slice(1)}
+                                    </p>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">No loan requirement details available</p>
+                            <p className="text-xs text-gray-500 mt-0.5">Upload supporting docs or start manually</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push('/lead/loan-requirement')}
+                      className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Risk & Eligibility Card */}
+              <Card className={cn(
+                "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600"
+              )}>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Risk & Eligibility</h3>
+                    <div className="flex items-center gap-2">
+                      <Badge className="rounded-full bg-gray-100 border border-gray-200 text-gray-600">
+                        Pending
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                        <AlertTriangle className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold text-gray-900">
+                            Pending Assessment
                           </p>
-                        )}
-                        {detailedInfo?.collateral_details?.address && (
-                          <div className="mt-2 space-y-0.5">
-                            <p className="text-xs text-gray-600">
-                              <span className="font-medium">Address:</span> {[
-                                detailedInfo.collateral_details.address.address_line_1,
-                                detailedInfo.collateral_details.address.address_line_2,
-                                detailedInfo.collateral_details.address.address_line_3
-                              ].filter(Boolean).join(', ')}
-                            </p>
-                            <p className="text-xs text-gray-600">
-                              <span className="font-medium">Location:</span> {[
-                                detailedInfo.collateral_details.address.city,
-                                detailedInfo.collateral_details.address.state,
-                                detailedInfo.collateral_details.address.pincode
-                              ].filter(Boolean).join(', ')}
-                            </p>
-                            {detailedInfo.collateral_details.address.landmark && (
-                              <p className="text-xs text-gray-600">
-                                <span className="font-medium">Landmark:</span> {detailedInfo.collateral_details.address.landmark}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        {detailedInfo?.collateral_details?.collateral_description && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            {detailedInfo.collateral_details.collateral_description}
+                          <p className="text-xs text-gray-500">
+                            Complete application to view risk assessment
                           </p>
-                        )}
+                        </div>
                       </div>
-                    ) : (
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push('/lead/risk-eligibility')}
+                      className={tileButtonClass}
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+
+
+              {/* Documents Added Card */}
+              <Card className={cn(
+                "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
+                documentsStepStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
+              )}>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Documents Added</h3>
+                    <div className="flex items-center gap-2">
+                      <Badge className={cn(
+                        "rounded-full border text-xs font-medium px-3 py-1",
+                        uploadedDocuments.length === 0 ? "bg-gray-50 border-gray-200 text-gray-600" : "bg-green-100 border-green-200 text-green-700"
+                      )}>
+                        {uploadedDocuments.length === 0 ? 'No Files' : `${uploadedDocuments.length} File(s)`}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  {isDocsLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      <span className="text-sm text-gray-500">Loading documents...</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Applicant Section */}
                       <div>
-                        <p className="text-sm font-semibold text-gray-900">No property document uploaded</p>
-                        <p className="text-xs text-gray-500 mt-0.5">Upload or add property details manually</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => router.push('/lead/collateral')}
-                  className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
-                >
-                  Edit
-                </Button>
-              </div>
-
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <p className="text-xs text-gray-400">No document linked</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Loan Requirement Card */}
-          <Card className={cn(
-            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
-            loanStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
-          )}>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Loan Requirement</h3>
-                <div className="flex items-center gap-2">
-                  {getStatusBadge(loanStatus)}
-                </div>
-              </div>
-
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                    <IndianRupee className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    {loanStatus !== 'incomplete' && (detailedInfo?.loan_details || currentLead?.formData?.step7) ? (
-                      <div className="space-y-1">
-                        {(() => {
-                          const loanDetails = detailedInfo?.loan_details;
-                          const step7 = currentLead?.formData?.step7;
-
-                          const amount = loanDetails?.loan_amount_requested || step7?.loanAmount || currentLead?.loanAmount || 0;
-                          const formattedAmount = typeof amount === 'string'
-                            ? parseFloat(amount).toLocaleString('en-IN')
-                            : amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-
-                          const tenureMonths = loanDetails?.tenure_months || step7?.tenure || 0;
-                          const tenureYears = Math.floor(Number(tenureMonths) / 12);
-                          const tenureMonthsRemainder = Number(tenureMonths) % 12;
-
-                          const purpose = loanDetails?.loan_purpose || step7?.loanPurpose || currentLead?.loanPurpose || '';
-                          const purposeLabel = getLoanPurposeLabel(purpose);
-
-                          return (
-                            <>
-                              <p className="text-sm font-semibold text-gray-900">
-                                ₹{formattedAmount}
-                                {tenureYears > 0 && ` · ${tenureYears} Year${tenureYears > 1 ? 's' : ''}`}
-                                {tenureMonthsRemainder > 0 && ` ${tenureMonthsRemainder} Month${tenureMonthsRemainder > 1 ? 's' : ''}`}
-                                {tenureYears === 0 && tenureMonthsRemainder > 0 && ` · ${tenureMonthsRemainder} Month${tenureMonthsRemainder > 1 ? 's' : ''}`}
-                                {purposeLabel && ` · ${purposeLabel}`}
-                              </p>
-                              {loanDetails?.interest_rate && (
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">Interest Rate:</span> {loanDetails.interest_rate}%
-                                </p>
-                              )}
-                              {loanDetails?.product_code && (
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">Product:</span> {loanDetails.product_code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                                </p>
-                              )}
-                              {loanDetails?.loan_purpose_description && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  {loanDetails.loan_purpose_description}
-                                </p>
-                              )}
-                              {loanDetails?.sourcing_channel && (
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">Sourcing Channel:</span> {loanDetails.sourcing_channel.charAt(0).toUpperCase() + loanDetails.sourcing_channel.slice(1)}
-                                </p>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </div>
-                    ) : (
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">No loan requirement details available</p>
-                        <p className="text-xs text-gray-500 mt-0.5">Upload supporting docs or start manually</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => router.push('/lead/loan-requirement')}
-                  className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
-                >
-                  Edit
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Risk & Eligibility Card */}
-          <Card className={cn(
-            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600"
-          )}>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Risk & Eligibility</h3>
-                <div className="flex items-center gap-2">
-                  <Badge className="rounded-full bg-gray-100 border border-gray-200 text-gray-600">
-                    Pending
-                  </Badge>
-                </div>
-              </div>
-
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                    <AlertTriangle className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold text-gray-900">
-                        Pending Assessment
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Complete application to view risk assessment
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => router.push('/lead/risk-eligibility')}
-                  className={tileButtonClass}
-                >
-                  Edit
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-
-
-          {/* Documents Added Card */}
-          <Card className={cn(
-            "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
-            documentsStepStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
-          )}>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Documents Added</h3>
-                <div className="flex items-center gap-2">
-                  <Badge className={cn(
-                    "rounded-full border text-xs font-medium px-3 py-1",
-                    uploadedDocuments.length === 0 ? "bg-gray-50 border-gray-200 text-gray-600" : "bg-green-100 border-green-200 text-green-700"
-                  )}>
-                    {uploadedDocuments.length === 0 ? 'No Files' : `${uploadedDocuments.length} File(s)`}
-                  </Badge>
-                </div>
-              </div>
-
-              {isDocsLoading ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                  <span className="text-sm text-gray-500">Loading documents...</span>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Applicant Section */}
-                  <div>
-                    <h4 className="text-sm font-bold text-gray-800 mb-2">Applicant</h4>
-                    <div className="space-y-1">
-                      {applicantDocs && Object.entries(applicantDocs)
-                        .filter(([key, status]) => status.uploaded && !key.startsWith('collateral_'))
-                        .map(([key]) => (
-                          <div key={key} className="flex items-center justify-between py-1 px-1">
-                            <p className="text-sm text-gray-700">{DOC_LABELS[key] || key.replace(/_/g, ' ')}</p>
-                            <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
-                          </div>
-                        ))}
-                      {(!applicantDocs || !Object.entries(applicantDocs).some(([key, status]) => status.uploaded && !key.startsWith('collateral_'))) && (
-                        <p className="text-xs text-gray-500 italic pl-1">No documents uploaded</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Co-Applicants Section */}
-                  {Object.keys(coApplicantDocs).length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-bold text-gray-800 mb-2 mt-4">Co-Applicant(s)</h4>
-                      {Object.entries(coApplicantDocs).map(([indexStr, docs]) => {
-                        const index = parseInt(indexStr);
-                        const coAppName = detailedInfo?.participants?.find((p: any) => p.co_applicant_index === index)?.personal_info?.full_name?.value || `Co-Applicant ${index + 1}`;
-                        const uploaded = Object.entries(docs).filter(([_, status]) => status.uploaded);
-
-                        if (uploaded.length === 0) return null;
-
-                        return (
-                          <div key={index} className="mb-3 last:mb-0">
-                            <p className="text-xs font-semibold text-gray-600 mb-1">{coAppName}</p>
-                            <div className="space-y-1 pl-2 border-l-2 border-gray-100">
-                              {uploaded.map(([key]) => (
-                                <div key={key} className="flex items-center justify-between py-1 px-1">
-                                  <p className="text-sm text-gray-700">{DOC_LABELS[key] || key.replace(/_/g, ' ')}</p>
-                                  <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Collateral Section */}
-                  <div>
-                    <h4 className="text-sm font-bold text-gray-800 mb-2 mt-4">Collateral</h4>
-                    <div className="space-y-1">
-                      {(() => {
-                        const collateralDocs = applicantDocs ? Object.entries(applicantDocs).filter(([key, status]) => status.uploaded && key.startsWith('collateral_')) : [];
-
-                        const COLLATERAL_IMAGE_KEYS = [
-                          'collateral_images_front',
-                          'collateral_images_inside',
-                          'collateral_images_road',
-                          'collateral_images_selfie',
-                          'collateral_images_side',
-                          'collateral_images_surrounding'
-                        ];
-
-                        const hasAllImages = COLLATERAL_IMAGE_KEYS.every(key => applicantDocs?.[key]?.uploaded);
-
-                        const otherCollateralDocs = collateralDocs.filter(([key]) => !COLLATERAL_IMAGE_KEYS.includes(key));
-
-                        const hasAnyCollateral = hasAllImages || otherCollateralDocs.length > 0;
-
-                        if (!hasAnyCollateral) {
-                          return <p className="text-xs text-gray-500 italic pl-1">No collateral documents uploaded</p>;
-                        }
-
-                        return (
-                          <>
-                            {hasAllImages && (
-                              <div className="flex items-center justify-between py-1 px-1">
-                                <p className="text-sm text-gray-700">Property Images</p>
-                                <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
-                              </div>
-                            )}
-                            {otherCollateralDocs.map(([key]) => (
+                        <h4 className="text-sm font-bold text-gray-800 mb-2">Applicant</h4>
+                        <div className="space-y-1">
+                          {applicantDocs && Object.entries(applicantDocs)
+                            .filter(([key, status]) => status.uploaded && !key.startsWith('collateral_'))
+                            .map(([key]) => (
                               <div key={key} className="flex items-center justify-between py-1 px-1">
                                 <p className="text-sm text-gray-700">{DOC_LABELS[key] || key.replace(/_/g, ' ')}</p>
                                 <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
                               </div>
                             ))}
-                          </>
-                        );
-                      })()}
+                          {(!applicantDocs || !Object.entries(applicantDocs).some(([key, status]) => status.uploaded && !key.startsWith('collateral_'))) && (
+                            <p className="text-xs text-gray-500 italic pl-1">No documents uploaded</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Co-Applicants Section */}
+                      {Object.keys(coApplicantDocs).length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-bold text-gray-800 mb-2 mt-4">Co-Applicant(s)</h4>
+                          {Object.entries(coApplicantDocs).map(([indexStr, docs]) => {
+                            const index = parseInt(indexStr);
+                            const coAppName = detailedInfo?.participants?.find((p: any) => p.co_applicant_index === index)?.personal_info?.full_name?.value || `Co-Applicant ${index + 1}`;
+                            const uploaded = Object.entries(docs).filter(([_, status]) => status.uploaded);
+
+                            if (uploaded.length === 0) return null;
+
+                            return (
+                              <div key={index} className="mb-3 last:mb-0">
+                                <p className="text-xs font-semibold text-gray-600 mb-1">{coAppName}</p>
+                                <div className="space-y-1 pl-2 border-l-2 border-gray-100">
+                                  {uploaded.map(([key]) => (
+                                    <div key={key} className="flex items-center justify-between py-1 px-1">
+                                      <p className="text-sm text-gray-700">{DOC_LABELS[key] || key.replace(/_/g, ' ')}</p>
+                                      <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Collateral Section */}
+                      <div>
+                        <h4 className="text-sm font-bold text-gray-800 mb-2 mt-4">Collateral</h4>
+                        <div className="space-y-1">
+                          {(() => {
+                            const collateralDocs = applicantDocs ? Object.entries(applicantDocs).filter(([key, status]) => status.uploaded && key.startsWith('collateral_')) : [];
+
+                            const COLLATERAL_IMAGE_KEYS = [
+                              'collateral_images_front',
+                              'collateral_images_inside',
+                              'collateral_images_road',
+                              'collateral_images_selfie',
+                              'collateral_images_side',
+                              'collateral_images_surrounding'
+                            ];
+
+                            const hasAllImages = COLLATERAL_IMAGE_KEYS.every(key => applicantDocs?.[key]?.uploaded);
+
+                            const otherCollateralDocs = collateralDocs.filter(([key]) => !COLLATERAL_IMAGE_KEYS.includes(key));
+
+                            const hasAnyCollateral = hasAllImages || otherCollateralDocs.length > 0;
+
+                            if (!hasAnyCollateral) {
+                              return <p className="text-xs text-gray-500 italic pl-1">No collateral documents uploaded</p>;
+                            }
+
+                            return (
+                              <>
+                                {hasAllImages && (
+                                  <div className="flex items-center justify-between py-1 px-1">
+                                    <p className="text-sm text-gray-700">Property Images</p>
+                                    <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
+                                  </div>
+                                )}
+                                {otherCollateralDocs.map(([key]) => (
+                                  <div key={key} className="flex items-center justify-between py-1 px-1">
+                                    <p className="text-sm text-gray-700">{DOC_LABELS[key] || key.replace(/_/g, ' ')}</p>
+                                    <CheckCircle className="w-5 h-5 text-green-600 fill-green-50" />
+                                  </div>
+                                ))}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
+                </CardContent>
+              </Card>
+
+
+
+              {showDocsWarning && (
+                <div className="mt-5 text-sm font-semibold text-red-600">
+                  Please upload all required documents to submit
                 </div>
               )}
-            </CardContent>
-          </Card>
 
-
-
-          {showDocsWarning && (
-            <div className="mt-5 text-sm font-semibold text-red-600">
-              Please upload all required documents to submit
             </div>
-          )}
 
-        </div>
-
-        {/* Fixed Submit Button Footer */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
-          <div className="flex gap-3 max-w-2xl mx-auto">
-            <Button
-              onClick={handleSubmit}
-              className="flex-1 h-12 rounded-lg font-medium text-white bg-[#0072CE] hover:bg-[#005a9e]"
-            >
-              Submit Application
-            </Button>
-          </div>
-        </div>
+            {/* Fixed Submit Button Footer */}
+            <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
+              <div className="flex gap-3 max-w-2xl mx-auto">
+                <Button
+                  onClick={handleSubmit}
+                  className="flex-1 h-12 rounded-lg font-medium text-white bg-[#0072CE] hover:bg-[#005a9e]"
+                >
+                  Submit Application
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* KYC Modal */}
       <Dialog open={showKycModal} onOpenChange={setShowKycModal}>
-        <DialogContent className="sm:max-w-md p-6 gap-0">
-          <DialogHeader className="hidden">
-            <DialogTitle>Start Applicant KYC</DialogTitle>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-sm p-0 overflow-hidden border-0 shadow-2xl rounded-2xl">
+          <div className="bg-gradient-to-b from-blue-50 to-white p-5 pb-6">
+            <div className="flex flex-col items-center text-center space-y-3">
+              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-1 shadow-inner">
+                <FileText className="w-6 h-6 text-blue-600" />
+              </div>
 
-          <div className="space-y-3 py-2">
-            {!applicantDocs?.aadhaar_card?.uploaded && (
-              <Button
-                onClick={() => handleKycModalAction('aadhaar')}
-                className="w-full h-12 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-sm"
-              >
-                <CreditCard className="w-5 h-5" />
-                Upload Aadhaar
-              </Button>
-            )}
+              <div className="space-y-1.5">
+                <h2 className="text-lg font-bold text-gray-900">Complete Your KYC</h2>
+                <p className="text-xs text-gray-500 max-w-[240px] mx-auto leading-relaxed">
+                  Upload your PAN card to verify your identity and speed up the application process.
+                </p>
+              </div>
+            </div>
 
-            {!applicantDocs?.pan_card?.uploaded && (
-              <Button
-                onClick={() => handleKycModalAction('pan')}
-                variant="secondary"
-                className="w-full h-12 bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold rounded-xl flex items-center justify-center gap-2 border border-gray-200"
-              >
-                <FileText className="w-5 h-5" />
-                Upload PAN
-              </Button>
-            )}
+            <div className="mt-6 space-y-3 px-2">
+              {!applicantDocs?.pan_card?.uploaded && (
+                <Button
+                  onClick={() => handleKycModalAction('pan')}
+                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-200 transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 text-sm"
+                >
+                  <Upload className="w-4 h-4" />
+                  Upload PAN Card
+                </Button>
+              )}
 
-            <div className="pt-4 text-center">
               <button
                 onClick={() => handleKycModalAction('skip')}
-                className="text-sm font-semibold text-gray-500 hover:text-gray-700 transition-colors"
+                className="w-full py-2 text-xs font-medium text-gray-500 hover:text-gray-800 transition-colors"
               >
-                Skip to Manual Entry
+                I'll do this later
               </button>
             </div>
           </div>
-          <div className="text-center pt-6">
-            <p className="text-[11px] text-gray-400">
-              You can update these details later from Applicant Details.
-            </p>
-          </div>
         </DialogContent>
       </Dialog>
-    </DashboardLayout>
+    </DashboardLayout >
   );
 }
+
