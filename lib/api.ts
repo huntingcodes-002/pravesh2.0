@@ -133,67 +133,45 @@ async function apiFetch<T = any>(
     // Get auth token if available
     let authToken = getAuthToken();
 
-    // 1. CACHE FIX: Add headers to force network fetch
-    const noCacheHeaders = {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-    };
-
-    // Build fetch options
+    // Build fetch options ensuring method from options takes precedence
     const buildOptions = (token: string | null): RequestInit => ({
-      ...options,
-      cache: 'no-store', // 2. CACHE FIX: Explicitly disable fetch caching
+      ...options, // Spread options first (includes method if specified)
       headers: {
         'Content-Type': 'application/json',
-        ...noCacheHeaders, // Inject no-cache headers
         ...(token && { 'Authorization': `Bearer ${token}` }),
-        ...options.headers,
+        ...options.headers, // Allow custom headers to override
       },
     });
 
     let fetchOptions = buildOptions(authToken);
 
+    // If no method specified, default to GET (but POST should be specified in options)
     if (!fetchOptions.method) {
       fetchOptions.method = 'GET';
     }
 
-    // 3. CACHE FIX: Add timestamp query param to bust aggressive disk caches (Safari/iOS)
-    const separator = endpoint.includes('?') ? '&' : '?';
-    const cacheBuster = `_t=${new Date().getTime()}`;
-    const finalUrl = `${API_BASE_URL}${endpoint}${separator}${cacheBuster}`;
+    let response = await fetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
 
-    let response = await fetch(finalUrl, fetchOptions);
-
-    // 4. LOGIC FIX: Handle 410 (Gone) same as 401 (Unauthorized)
-    // Your backend returns 410 for expired tokens, so we MUST catch it here.
-    if (response.status === 401 || response.status === 410) {
-      // Optional: Check if the 410 message actually says "expired" to be safe
-      // const errorData = await response.clone().json().catch(() => ({}));
-      // if (response.status === 401 || (response.status === 410 && errorData.message === 'Token expired')) {
-
+    // Handle 401 Unauthorized - Attempt Refresh Token
+    if (response.status === 401) {
       const refreshed = await handleTokenRefresh();
-
       if (refreshed) {
         // Retry original request with new token
         authToken = getAuthToken();
         fetchOptions = buildOptions(authToken);
         if (!fetchOptions.method) fetchOptions.method = 'GET';
-
-        // Re-generate URL with NEW timestamp to ensure retry isn't cached
-        const retryCacheBuster = `_t=${new Date().getTime()}`;
-        const retryUrl = `${API_BASE_URL}${endpoint}${separator}${retryCacheBuster}`;
-
-        response = await fetch(retryUrl, fetchOptions);
+        response = await fetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
       }
     }
 
     const data = await response.json();
 
     if (!response.ok) {
+      // Return error response
       return data as ApiError;
     }
 
+    // Return success response
     return data as ApiSuccess<T>;
   } catch (error: any) {
     return handleApiError(error);
@@ -253,43 +231,20 @@ async function apiFetchFormData<T = any>(
   formData: FormData
 ): Promise<ApiResponse<T>> {
   try {
-    let authToken = getAuthToken();
+    // Get auth token if available
+    const authToken = getAuthToken();
 
-    // 1. CACHE FIX: Headers to force network
-    const noCacheHeaders = {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-    };
-
-    const buildOptions = (token: string | null): RequestInit => {
-      const headers: HeadersInit = { ...noCacheHeaders };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      return {
-        method: 'POST',
-        headers,
-        body: formData,
-        cache: 'no-store'
-      };
-    };
-
-    // 2. CACHE FIX: Timestamp to bust cache (even for POSTs, it's safer)
-    const separator = endpoint.includes('?') ? '&' : '?';
-    const getUrl = () => `${API_BASE_URL}${endpoint}${separator}_t=${Date.now()}`;
-
-    let response = await fetch(getUrl(), buildOptions(authToken));
-
-    // 3. LOGIC FIX: Handle 410/401 Retry
-    if (response.status === 401 || response.status === 410) {
-      const refreshed = await handleTokenRefresh();
-      if (refreshed) {
-        authToken = getAuthToken();
-        // Retry with new token and new timestamp
-        response = await fetch(getUrl(), buildOptions(authToken));
-      }
+    const headers: HeadersInit = {};
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
     }
+    // Don't set Content-Type header - browser will set it with boundary
+
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
 
     const data = await response.json();
 
@@ -315,53 +270,34 @@ async function apiFetchAuth<T = any>(
   includeAuth: boolean = false
 ): Promise<ApiResponse<T>> {
   try {
-    let authToken = includeAuth ? getAuthToken() : null;
+    // Get auth token if needed
+    const authToken = includeAuth ? getAuthToken() : null;
 
-    // 1. CACHE FIX: Headers
-    const noCacheHeaders = {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-    };
-
-    const buildOptions = (token: string | null): RequestInit => ({
-      ...options,
-      cache: 'no-store',
+    // Build fetch options ensuring method from options takes precedence
+    const fetchOptions: RequestInit = {
+      ...options, // Spread options first (includes method if specified)
       headers: {
         ...(useUrlEncoded ? { 'Content-Type': 'application/x-www-form-urlencoded' } : { 'Content-Type': 'application/json' }),
-        ...noCacheHeaders,
-        ...(token && { 'Authorization': `Bearer ${token}` }),
-        ...options.headers,
+        ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+        ...options.headers, // Allow custom headers to override
       },
-    });
+    };
 
-    let fetchOptions = buildOptions(authToken);
-    if (!fetchOptions.method) fetchOptions.method = 'GET';
-
-    // 2. CACHE FIX: Timestamp
-    const separator = endpoint.includes('?') ? '&' : '?';
-    const getUrl = () => `${AUTH_API_BASE_URL}${endpoint}${separator}_t=${Date.now()}`;
-
-    let response = await fetch(getUrl(), fetchOptions);
-
-    // 3. LOGIC FIX: Retry ONLY if this was an authenticated request
-    // We strictly avoid retrying login/refresh-token calls to prevent loops
-    if (includeAuth && (response.status === 401 || response.status === 410)) {
-      const refreshed = await handleTokenRefresh();
-      if (refreshed) {
-        authToken = getAuthToken();
-        fetchOptions = buildOptions(authToken);
-        if (!fetchOptions.method) fetchOptions.method = 'GET';
-        response = await fetch(getUrl(), fetchOptions);
-      }
+    // If no method specified, default to GET (but POST should be specified in options)
+    if (!fetchOptions.method) {
+      fetchOptions.method = 'GET';
     }
+
+    const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, fetchOptions);
 
     const data = await response.json();
 
     if (!response.ok) {
+      // Return error response
       return data as ApiError;
     }
 
+    // Return success response
     return data as ApiSuccess<T>;
   } catch (error: any) {
     return handleApiError(error);
@@ -701,42 +637,18 @@ export async function lookupPincode(
   zip_code: string
 ): Promise<PincodeLookupResponse> {
   try {
-    let authToken = getAuthToken();
-    const endpoint = 'https://uatlb.api.saarathifinance.com/api/base/pincode/lookup/';
+    const authToken = getAuthToken();
 
-    // 1. CACHE FIX: Headers
-    const noCacheHeaders = {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-    };
-
-    const buildOptions = (token: string | null): RequestInit => ({
+    const response = await fetch('https://uatlb.api.saarathifinance.com/api/base/pincode/lookup/', {
       method: 'POST',
-      cache: 'no-store',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        ...noCacheHeaders,
-        ...(token && { Authorization: `Bearer ${token}` }),
+        ...(authToken && { Authorization: `Bearer ${authToken}` }),
       },
       body: JSON.stringify({ zip_code }),
       credentials: 'include',
     });
-
-    // 2. CACHE FIX: Timestamp
-    const getUrl = () => `${endpoint}?_t=${Date.now()}`;
-
-    let response = await fetch(getUrl(), buildOptions(authToken));
-
-    // 3. LOGIC FIX: Retry on 410/401
-    if (response.status === 401 || response.status === 410) {
-      const refreshed = await handleTokenRefresh();
-      if (refreshed) {
-        authToken = getAuthToken();
-        response = await fetch(getUrl(), buildOptions(authToken));
-      }
-    }
 
     const data = await response.json();
 
