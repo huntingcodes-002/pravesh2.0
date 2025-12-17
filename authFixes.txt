@@ -1,0 +1,128 @@
+This app is facing a "Deadly Embrace" between a specific backend configuration and browser behavior.
+
+1. **The Backend Issue:** Your backend is returning a **410 Gone** status code for expired tokens. (Standard practice is `401 Unauthorized`).
+2. **The Browser Issue:** Browsers treat **410 Gone** as a "permanent" error. They assume the resource is deleted forever, so they **aggressively cache** this response to save bandwidth.
+3. **The Code Issue:** Your `apiFetch` function only attempts to refresh the token if it sees a **401**. Since it sees a **410**, it assumes it's a fatal error and never tries to refresh.
+
+Here is the robust, end-to-end fix. You primarily need to modify `lib/api.ts`.
+
+### Step 1: Modify `apiFetch` in `lib/api.ts`
+
+You need to do three things in this function:
+
+1. **Force "No Cache":** Tell the browser explicitly "Do not save this response to disk" so it stops serving the old 410 error.
+2. **Handle 410 as 401:** Update the retry logic to treat `410` as a token expiration error so your app automatically refreshes the token.
+3. **Add Timestamp (Cache Buster):** As a failsafe, append a timestamp to the URL to ensure the browser treats it as a unique request.
+
+Replace your existing `apiFetch` function in `lib/api.ts` with this robust version:
+
+```typescript
+/**
+ * Base fetch function with error handling and robust caching fixes
+ */
+async function apiFetch<T = any>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<ApiResponse<T>> {
+  try {
+    // Get auth token if available
+    let authToken = getAuthToken();
+
+    // 1. CACHE FIX: Add headers to force network fetch
+    const noCacheHeaders = {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    };
+
+    // Build fetch options
+    const buildOptions = (token: string | null): RequestInit => ({
+      ...options,
+      cache: 'no-store', // 2. CACHE FIX: Explicitly disable fetch caching
+      headers: {
+        'Content-Type': 'application/json',
+        ...noCacheHeaders, // Inject no-cache headers
+        ...(token && { 'Authorization': `Bearer ${token}` }),
+        ...options.headers, 
+      },
+    });
+
+    let fetchOptions = buildOptions(authToken);
+
+    if (!fetchOptions.method) {
+      fetchOptions.method = 'GET';
+    }
+
+    // 3. CACHE FIX: Add timestamp query param to bust aggressive disk caches (Safari/iOS)
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const cacheBuster = `_t=${new Date().getTime()}`;
+    const finalUrl = `${API_BASE_URL}${endpoint}${separator}${cacheBuster}`;
+
+    let response = await fetch(finalUrl, fetchOptions);
+
+    // 4. LOGIC FIX: Handle 410 (Gone) same as 401 (Unauthorized)
+    // Your backend returns 410 for expired tokens, so we MUST catch it here.
+    if (response.status === 401 || response.status === 410) {
+      // Optional: Check if the 410 message actually says "expired" to be safe
+      // const errorData = await response.clone().json().catch(() => ({}));
+      // if (response.status === 401 || (response.status === 410 && errorData.message === 'Token expired')) {
+
+      const refreshed = await handleTokenRefresh();
+      
+      if (refreshed) {
+        // Retry original request with new token
+        authToken = getAuthToken();
+        fetchOptions = buildOptions(authToken);
+        if (!fetchOptions.method) fetchOptions.method = 'GET';
+        
+        // Re-generate URL with NEW timestamp to ensure retry isn't cached
+        const retryCacheBuster = `_t=${new Date().getTime()}`;
+        const retryUrl = `${API_BASE_URL}${endpoint}${separator}${retryCacheBuster}`;
+        
+        response = await fetch(retryUrl, fetchOptions);
+      }
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return data as ApiError;
+    }
+
+    return data as ApiSuccess<T>;
+  } catch (error: any) {
+    return handleApiError(error);
+  }
+}
+
+```
+
+### Step 2: Verify `getAuthToken` (Minor Tweak)
+
+In `lib/api.ts`, ensure `getAuthToken` is prioritizing `localStorage` correctly. Your current code is actually fine, but strictly speaking, we want to ensure we aren't accidentally reading a stale `access_token` if you intend to use `id_token`.
+
+Your current code explicitly selects `id_token`:
+
+```typescript
+// Current code in lib/api.ts
+const token = parsed.id_token; 
+
+```
+
+**Keep this.** Since you confirmed your APIs require the ID token, do not change this to `access_token` unless you are absolutely sure the requirement has changed. The `410` error was the main blocker, not the token type itself (Swagger proved the ID token works).
+
+### Step 3: Hard Reload & Test
+
+Since the "410 Gone" error is likely stuck in your browser's disk cache right now:
+
+1. **Open Developer Tools (F12).**
+2. Go to the **Network** tab.
+3. Check **"Disable cache"** (at the top).
+4. Right-click the browser "Refresh" button and choose **"Empty Cache and Hard Reload"**.
+5. **Log in again.**
+
+### Summary of Changes
+
+1. **`cache: 'no-store'`**: Prevents the browser from saving the response.
+2. **`_t=${timestamp}`**: Forces the browser to treat every request as a new URL, bypassing any "Disk Cache" that ignores headers.
+3. **`response.status === 410`**: Teaches your frontend that "410 Gone" means "Token Expired" for this specific backend, triggering the auto-refresh logic that was previously being skipped.

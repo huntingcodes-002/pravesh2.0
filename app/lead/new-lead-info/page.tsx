@@ -225,23 +225,22 @@ export default function NewLeadInfoPage() {
   }, [currentLead?.appId, detailedInfo?.payment_result]);
 
   useEffect(() => {
-    // Show KYC modal if payment is completed (or waived) and required documents (PAN & Aadhaar) are missing
-    const isPaymentDone = paymentStatus === 'Paid' || paymentStatus === 'Waived';
+    // Show KYC modal if required documents (PAN & Aadhaar) are missing, regardless of payment status
 
     // Only proceed if applicantDocs is loaded
-    if (isPaymentDone && currentLead && applicantDocs) {
+    if (currentLead && applicantDocs) {
       const hasPan = applicantDocs.pan_card?.uploaded;
       const hasAadhaar = applicantDocs.aadhaar_card?.uploaded;
 
       if (!hasPan || !hasAadhaar) {
-        // Small delay to ensure smooth transition after payment or page load
+        // Small delay to ensure smooth transition after page load
         const timer = setTimeout(() => setShowKycModal(true), 1000);
         return () => clearTimeout(timer);
       } else {
         setShowKycModal(false);
       }
     }
-  }, [paymentStatus, currentLead, applicantDocs]);
+  }, [currentLead, applicantDocs]);
 
   // Check for pending waiver in session storage
   useEffect(() => {
