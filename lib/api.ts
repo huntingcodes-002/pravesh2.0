@@ -1473,3 +1473,49 @@ export async function getCoApplicantAccountAggregatorStatus(applicationId: strin
     method: 'GET',
   });
 }
+
+/**
+ * Endpoint: Submit Employment Info
+ * POST /api/lead-collection/applications/employment-info/
+ */
+export interface EmploymentInfoRequest {
+  application_id: string;
+  occupation_type: string;
+  nature_of_occupation: string;
+  organization_name?: string;
+  designation?: string;
+  industry?: string;
+  employment_status?: string;
+  monthly_income: string;
+  employed_from?: string | null;
+  employed_to?: string | null;
+  official_email?: string;
+  registration_number?: string;
+}
+
+export interface EmploymentInfoResponse {
+  success: boolean;
+  message: string;
+  application_id: string;
+  next_step: string;
+  data: EmploymentInfoRequest;
+}
+
+export async function submitEmploymentInfo(data: EmploymentInfoRequest): Promise<ApiResponse<EmploymentInfoResponse>> {
+  return apiFetch<EmploymentInfoResponse>('applications/employment-info/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export interface CoApplicantEmploymentInfoRequest extends EmploymentInfoRequest {
+  co_applicant_index: number;
+}
+
+export async function submitCoApplicantEmploymentInfo(data: CoApplicantEmploymentInfoRequest): Promise<ApiResponse<EmploymentInfoResponse>> {
+  const { application_id, co_applicant_index, ...payload } = data;
+  return apiFetch<EmploymentInfoResponse>(`applications/${application_id}/co-applicant-employment-info/${co_applicant_index}/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}

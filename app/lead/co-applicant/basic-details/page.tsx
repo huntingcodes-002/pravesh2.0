@@ -14,7 +14,8 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { MaskedDateInput } from '@/components/MaskedDateInput';
-import { submitCoApplicantPersonalInfo, isApiError, type CoApplicantPersonalInfoResponse } from '@/lib/api';
+import { submitCoApplicantPersonalInfo, isApiError, getDetailedInfo, type CoApplicantPersonalInfoResponse } from '@/lib/api';
+import { CheckCircle } from 'lucide-react';
 
 type ValidationStatus = 'pending' | 'valid' | 'invalid';
 
@@ -57,12 +58,111 @@ function CoApplicantBasicDetailsContent() {
   const [isValidated, setIsValidated] = useState(
     coApplicant?.data?.basicDetails?.panValidated === true
   );
+  const [isBackendVerified, setIsBackendVerified] = useState(false);
 
   useEffect(() => {
     setIsValidated(coApplicant?.data?.basicDetails?.panValidated === true);
   }, [coApplicant?.data?.basicDetails?.panValidated]);
 
-  const isReadOnly = isValidated && formData.hasPan === 'yes';
+  // Fetch detailed info to check for backend verification
+  useEffect(() => {
+    const fetchBackendData = async () => {
+      if (!currentLead?.appId || typeof coApplicant?.workflowIndex !== 'number') return;
+
+      if (isBackendVerified) return;
+
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+        if (isApiError(response) || !response.success) return;
+
+        const participants = response.data?.application_details?.participants || [];
+        const apiCoApp = participants.find((p: any) =>
+          p.participant_type === 'co-applicant' && p.co_applicant_index === coApplicant.workflowIndex
+        );
+
+        if (apiCoApp?.personal_info) {
+          const { pan_number, date_of_birth, gender, email } = apiCoApp.personal_info;
+
+          let hasUpdates = false;
+          let isVerified = false;
+
+          setFormData(prev => {
+            const updates: any = { ...prev };
+
+            // 1. PAN Logic
+            if (pan_number?.value) {
+              updates.pan = pan_number.value;
+              updates.hasPan = 'yes';
+              hasUpdates = true;
+            }
+
+            if (pan_number?.verified) {
+              isVerified = true;
+            }
+
+            // 2. Date of Birth
+            if (date_of_birth?.value) {
+              // Convert DD/MM/YYYY to YYYY-MM-DD
+              const parts = date_of_birth.value.split('/');
+              if (parts.length === 3) {
+                updates.dob = `${parts[2]}-${parts[1]}-${parts[0]}`;
+                setDobFormatted(date_of_birth.value);
+
+                // Calculate age
+                const birthDate = new Date(updates.dob);
+                const today = new Date();
+                let age = today.getFullYear() - birthDate.getFullYear();
+                const m = today.getMonth() - birthDate.getMonth();
+                if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                  age--;
+                }
+                updates.age = age;
+                hasUpdates = true;
+              }
+            }
+
+            // 3. Gender
+            if (gender) {
+              const g = gender.toLowerCase();
+              if (g === 'male' || g === 'm') updates.gender = 'male';
+              else if (g === 'female' || g === 'f') updates.gender = 'female';
+              else if (g === 'other' || g === 'o') updates.gender = 'other';
+              hasUpdates = true;
+            }
+
+            // 4. Email
+            if (email) {
+              updates.email = email;
+              hasUpdates = true;
+            }
+
+            return updates;
+          });
+
+          if (isVerified) {
+            setIsBackendVerified(true);
+            setIsValidated(true);
+          } else {
+            setIsBackendVerified(false);
+          }
+
+          if (hasUpdates) {
+            toast({
+              title: 'Data Fetched',
+              description: 'Personal details have been fetched from the application.',
+              className: 'bg-blue-50 border-blue-200',
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch detailed info', error);
+      }
+    };
+
+    fetchBackendData();
+  }, [currentLead?.appId, coApplicant?.workflowIndex]);
+
+  const isReadOnly = isBackendVerified;
 
   useEffect(() => {
     if (!currentLead || !coApplicant || !coApplicantId) {
@@ -348,9 +448,17 @@ function CoApplicantBasicDetailsContent() {
           {formData.hasPan === 'yes' && (
             <div className="space-y-3">
               <div>
-                <Label htmlFor="pan" className="text-sm font-medium text-[#003366] mb-2 block">
-                  PAN Number <span className="text-[#DC2626]">*</span>
-                </Label>
+                <div className="flex items-center justify-between mb-2">
+                  <Label htmlFor="pan" className="text-sm font-medium text-[#003366]">
+                    PAN Number <span className="text-[#DC2626]">*</span>
+                  </Label>
+                  {isBackendVerified && (
+                    <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-green-200 gap-1">
+                      <CheckCircle className="w-3 h-3" />
+                      Verified via PAN
+                    </Badge>
+                  )}
+                </div>
                 <Input
                   id="pan"
                   value={formData.pan}
@@ -359,7 +467,7 @@ function CoApplicantBasicDetailsContent() {
                   className={cn(
                     'h-12 uppercase tracking-wide',
                     panValidationStatus === 'invalid' && 'border-red-500',
-                    isReadOnly && 'bg-gray-100 cursor-not-allowed text-gray-600'
+                    isReadOnly ? 'bg-gray-100 cursor-not-allowed text-gray-600' : 'bg-white'
                   )}
                   disabled={isReadOnly}
                   onChange={e => {

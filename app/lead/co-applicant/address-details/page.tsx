@@ -4,17 +4,15 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, CoApplicant } from '@/contexts/LeadContext';
+import { submitCoApplicantAddressDetails, isApiError, lookupPincode } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent } from '@/components/ui/card';
+import { ChevronDown, ChevronUp, CheckCircle2, Loader, AlertTriangle, Edit2, Save, MapPin } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
-import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
-import { isApiError, submitCoApplicantAddressDetails, lookupPincode } from '@/lib/api';
-import { Loader, AlertTriangle } from 'lucide-react';
+import { cn } from "@/lib/utils";
 import { useGeolocation } from '@uidotdev/usehooks';
 import {
   AlertDialog,
@@ -29,35 +27,68 @@ import {
 
 interface Address {
   id: string;
-  addressType: string;
+  addressType: 'residential' | 'permanent' | 'correspondence';
   addressLine1: string;
   addressLine2: string;
   addressLine3: string;
-  landmark: string;
   postalCode: string;
-  isPrimary: boolean;
+  landmark: string;
   city: string;
   stateCode: string;
   stateName: string;
   latitude: string;
   longitude: string;
+  isComplete: boolean;
+  sameAs?: 'residential' | 'permanent' | 'correspondence';
 }
 
-const createEmptyAddress = (): Address => ({
-  id: Date.now().toString(),
-  addressType: 'residential',
-  addressLine1: '',
-  addressLine2: '',
-  addressLine3: '',
-  landmark: '',
-  postalCode: '',
-  isPrimary: false,
-  city: '',
-  stateCode: '',
-  stateName: '',
-  latitude: '',
-  longitude: '',
-});
+const INITIAL_ADDRESSES: Address[] = [
+  {
+    id: 'addr_current',
+    addressType: 'residential',
+    addressLine1: '',
+    addressLine2: '',
+    addressLine3: '',
+    postalCode: '',
+    landmark: '',
+    city: '',
+    stateCode: '',
+    stateName: '',
+    latitude: '',
+    longitude: '',
+    isComplete: false
+  },
+  {
+    id: 'addr_permanent',
+    addressType: 'permanent',
+    addressLine1: '',
+    addressLine2: '',
+    addressLine3: '',
+    postalCode: '',
+    landmark: '',
+    city: '',
+    stateCode: '',
+    stateName: '',
+    latitude: '',
+    longitude: '',
+    isComplete: false
+  },
+  {
+    id: 'addr_correspondence',
+    addressType: 'correspondence',
+    addressLine1: '',
+    addressLine2: '',
+    addressLine3: '',
+    postalCode: '',
+    landmark: '',
+    city: '',
+    stateCode: '',
+    stateName: '',
+    latitude: '',
+    longitude: '',
+    isComplete: false
+  }
+];
 
 function CoApplicantAddressDetailsPageContent() {
   const { currentLead, updateCoApplicant } = useLead();
@@ -71,346 +102,228 @@ function CoApplicantAddressDetailsPageContent() {
     return currentLead.formData?.coApplicants?.find((ca: CoApplicant) => ca.id === coApplicantId);
   }, [currentLead, coApplicantId]);
 
-  const existingAddresses =
-    (coApplicant?.data?.addressDetails?.addresses as Address[]) ||
-    (coApplicant?.data?.step3?.addresses as Address[]) ||
-    [];
+  // Check if this section is already completed (checking if addresses exist in co-applicant data)
+  const isCompleted = false; // Co-applicant flow usually allows editing until final submission, or we can check a specific flag if needed.
 
-  const [addresses, setAddresses] = useState<Address[]>(
-    existingAddresses.length > 0
-      ? existingAddresses.map(addr => ({ ...createEmptyAddress(), ...addr }))
-      : [{ ...createEmptyAddress(), isPrimary: true }]
-  );
-
-  const [collapsedAddresses, setCollapsedAddresses] = useState<Set<string>>(new Set());
-  const [pincodeLookupId, setPincodeLookupId] = useState<string | null>(null);
+  const [addresses, setAddresses] = useState<Address[]>(INITIAL_ADDRESSES);
+  const [expandedAddressId, setExpandedAddressId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pincodeLookupId, setPincodeLookupId] = useState<string | null>(null);
   const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
+  const suppressModalAutoOpenRef = useRef(false);
+
   const geolocation = useGeolocation({
     enableHighAccuracy: true,
     timeout: 20000,
     maximumAge: 0,
   });
-  const suppressModalAutoOpenRef = useRef(false);
 
   const locationCoords = useMemo(() => {
-    const latitude =
-      typeof geolocation.latitude === 'number' ? geolocation.latitude.toFixed(6) : '';
-    const longitude =
-      typeof geolocation.longitude === 'number' ? geolocation.longitude.toFixed(6) : '';
-
+    const latitude = typeof geolocation.latitude === 'number' ? geolocation.latitude.toFixed(6) : '';
+    const longitude = typeof geolocation.longitude === 'number' ? geolocation.longitude.toFixed(6) : '';
     return { latitude, longitude };
   }, [geolocation.latitude, geolocation.longitude]);
 
-  const locationErrorMessage = useMemo(() => {
-    if (!geolocation.error) return null;
+  const locationStatus = geolocation.loading ? 'pending' : geolocation.error ? 'error' : locationCoords.latitude ? 'success' : 'pending';
+  const isLocationReady = locationStatus === 'success';
+  const isInteractionDisabled = isCompleted;
 
-    if (typeof geolocation.error === 'string') {
-      return geolocation.error;
+  // Initialize addresses from co-applicant data
+  useEffect(() => {
+    if (coApplicant?.data?.addressDetails?.addresses) {
+      const existingAddresses = coApplicant.data.addressDetails.addresses;
+      setAddresses(prev => {
+        const newAddresses = [...prev];
+        existingAddresses.forEach((apiAddr: any) => {
+          let targetType: 'residential' | 'permanent' | 'correspondence' | null = null;
+          // Map API types to our types
+          if (apiAddr.addressType === 'residential' || apiAddr.addressType === 'current') targetType = 'residential';
+          else if (apiAddr.addressType === 'permanent') targetType = 'permanent';
+          else if (apiAddr.addressType === 'correspondence') targetType = 'correspondence';
+
+          if (targetType) {
+            const index = newAddresses.findIndex(a => a.addressType === targetType);
+            if (index !== -1) {
+              newAddresses[index] = {
+                ...newAddresses[index],
+                addressLine1: apiAddr.addressLine1 || '',
+                addressLine2: apiAddr.addressLine2 || '',
+                addressLine3: apiAddr.addressLine3 || '',
+                postalCode: apiAddr.postalCode || '',
+                landmark: apiAddr.landmark || '',
+                city: apiAddr.city || '',
+                stateCode: apiAddr.stateCode || '',
+                stateName: apiAddr.stateName || '',
+                latitude: apiAddr.latitude || '',
+                longitude: apiAddr.longitude || '',
+                isComplete: true // Assume fetched addresses are complete
+              };
+            }
+          }
+        });
+        return newAddresses;
+      });
     }
+  }, [coApplicant]);
 
-    if (
-      typeof geolocation.error === 'object' &&
-      geolocation.error !== null &&
-      'message' in geolocation.error &&
-      typeof (geolocation.error as { message?: string }).message === 'string'
-    ) {
-      return (geolocation.error as { message: string }).message;
-    }
-
-    if (
-      typeof geolocation.error === 'object' &&
-      geolocation.error !== null &&
-      'code' in geolocation.error &&
-      typeof (geolocation.error as { code?: number }).code === 'number'
-    ) {
-      const code = (geolocation.error as { code: number }).code;
-      switch (code) {
-        case 1:
-          return 'Location permission is required. Please allow access from your browser settings.';
-        case 2:
-          return 'Location information is unavailable. Please ensure GPS or precise location is enabled.';
-        case 3:
-          return 'Fetching location timed out. Please try again.';
-        default:
-          break;
-      }
-    }
-
-    return 'Unable to fetch your current location. Please allow access and try again.';
-  }, [geolocation.error]);
-
-  const applyCoordsToAddresses = useCallback((latitude: string, longitude: string) => {
-    if (!latitude || !longitude) return;
-
+  // Sync addresses when "Same As" source changes
+  useEffect(() => {
     setAddresses(prev => {
       let changed = false;
-
-      const updated = prev.map(addr => {
-        if (addr.latitude === latitude && addr.longitude === longitude) {
-          return addr;
+      const newAddresses = prev.map(addr => {
+        if (addr.sameAs) {
+          const sourceAddr = prev.find(a => a.addressType === addr.sameAs);
+          if (sourceAddr) {
+            // Check if values are different
+            if (
+              addr.addressLine1 !== sourceAddr.addressLine1 ||
+              addr.addressLine2 !== sourceAddr.addressLine2 ||
+              addr.addressLine3 !== sourceAddr.addressLine3 ||
+              addr.postalCode !== sourceAddr.postalCode ||
+              addr.landmark !== sourceAddr.landmark ||
+              addr.city !== sourceAddr.city ||
+              addr.stateCode !== sourceAddr.stateCode ||
+              addr.stateName !== sourceAddr.stateName
+            ) {
+              changed = true;
+              return {
+                ...addr,
+                addressLine1: sourceAddr.addressLine1,
+                addressLine2: sourceAddr.addressLine2,
+                addressLine3: sourceAddr.addressLine3,
+                postalCode: sourceAddr.postalCode,
+                landmark: sourceAddr.landmark,
+                city: sourceAddr.city,
+                stateCode: sourceAddr.stateCode,
+                stateName: sourceAddr.stateName,
+                latitude: sourceAddr.latitude,
+                longitude: sourceAddr.longitude,
+                isComplete: sourceAddr.isComplete
+              };
+            }
+          }
         }
+        return addr;
+      });
+      return changed ? newAddresses : prev;
+    });
+  }, [addresses]);
 
-        changed = true;
+  // Apply location coords to current address if empty
+  useEffect(() => {
+    if (isLocationReady && !isCompleted) {
+      setAddresses(prev => prev.map(addr => {
+        if (addr.addressType === 'residential' && !addr.latitude) {
+          return { ...addr, latitude: locationCoords.latitude, longitude: locationCoords.longitude };
+        }
+        return addr;
+      }));
+    }
+  }, [isLocationReady, locationCoords, isCompleted]);
+
+  const handleAddressChange = (id: string, field: keyof Address, value: any) => {
+    if (isInteractionDisabled) return;
+    setAddresses(prev => prev.map(addr => {
+      if (addr.id === id) {
+        return { ...addr, [field]: value, isComplete: false };
+      }
+      return addr;
+    }));
+  };
+
+  const handlePostalCodeChange = (id: string, rawValue: string) => {
+    if (isInteractionDisabled) return;
+    const numeric = rawValue.replace(/[^0-9]/g, '').slice(0, 6);
+
+    setAddresses(prev => prev.map(addr => {
+      if (addr.id === id) {
         return {
           ...addr,
-          latitude,
-          longitude,
+          postalCode: numeric,
+          city: numeric.length === 6 ? addr.city : '',
+          stateCode: numeric.length === 6 ? addr.stateCode : '',
+          stateName: numeric.length === 6 ? addr.stateName : '',
+          isComplete: false
         };
-      });
-
-      return changed ? updated : prev;
-    });
-  }, []);
-
-  const locationStatus = geolocation.loading
-    ? 'pending'
-    : geolocation.error
-      ? 'error'
-      : locationCoords.latitude && locationCoords.longitude
-        ? 'success'
-        : 'pending';
-
-  const isLocationReady = locationStatus === 'success';
-  const isInteractionDisabled = !isLocationReady;
-  const lastLocationErrorRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!currentLead || !coApplicant || !coApplicantId) {
-      router.replace('/lead/co-applicant-info');
-    }
-  }, [currentLead, coApplicant, coApplicantId, router]);
-
-  useEffect(() => {
-    if (locationStatus !== 'error') {
-      lastLocationErrorRef.current = null;
-      return;
-    }
-
-    const description =
-      locationErrorMessage ?? 'Unable to fetch your current location. Please allow access to continue.';
-
-    if (lastLocationErrorRef.current === description) {
-      return;
-    }
-
-    toast({
-      title: 'Location Required',
-      description,
-      variant: 'destructive',
-    });
-
-    lastLocationErrorRef.current = description;
-  }, [locationStatus, locationErrorMessage, toast]);
-
-  useEffect(() => {
-    if (locationStatus === 'error') {
-      if (!suppressModalAutoOpenRef.current) {
-        setIsPermissionModalOpen(true);
       }
-    } else {
-      setIsPermissionModalOpen(false);
-      suppressModalAutoOpenRef.current = false;
+      return addr;
+    }));
+
+    if (numeric.length === 6) {
+      void performPincodeLookup(id, numeric);
     }
-  }, [locationStatus]);
+  };
 
-  useEffect(() => {
-    if (!isLocationReady) {
-      return;
-    }
+  const performPincodeLookup = async (id: string, zip: string) => {
+    setPincodeLookupId(id);
+    try {
+      const response = await lookupPincode(zip);
+      if (isApiError(response) || !response.success) throw new Error('Zipcode not found');
 
-    applyCoordsToAddresses(locationCoords.latitude, locationCoords.longitude);
-  }, [isLocationReady, locationCoords.latitude, locationCoords.longitude, applyCoordsToAddresses]);
-
-  const setPrimaryAddress = (id: string) => {
-    if (isInteractionDisabled) return;
-    setAddresses(prev =>
-      prev.map(addr => ({
+      setAddresses(prev => prev.map(addr => addr.id === id ? {
         ...addr,
-        isPrimary: addr.id === id,
-      }))
-    );
-  };
-
-  const handleAddressChange = <K extends keyof Address>(id: string, field: K, value: Address[K]) => {
-    if (isInteractionDisabled) return;
-    setAddresses(prev => prev.map(addr => (addr.id === id ? { ...addr, [field]: value } : addr)));
-  };
-
-const handlePostalCodeChange = (id: string, rawValue: string) => {
-  if (isInteractionDisabled) return;
-  const numeric = rawValue.replace(/[^0-9]/g, '').slice(0, 6);
-  setAddresses(prev =>
-    prev.map(addr =>
-      addr.id === id
-        ? {
-            ...addr,
-            postalCode: numeric,
-            city: numeric.length === 6 ? addr.city : '',
-            stateCode: numeric.length === 6 ? addr.stateCode : '',
-            stateName: numeric.length === 6 ? addr.stateName : '',
-          }
-        : addr
-    )
-  );
-
-  if (numeric.length === 6) {
-    void performPincodeLookup(id, numeric);
-  } else if (pincodeLookupId === id) {
-    setPincodeLookupId(null);
-  }
-};
-
-const performPincodeLookup = async (id: string, zip: string) => {
-  setPincodeLookupId(id);
-  try {
-    const response = await lookupPincode(zip);
-    if (isApiError(response) || !response.success) {
-      throw new Error('Zipcode not found');
+        city: response.city ?? '',
+        stateCode: response.state_code ?? '',
+        stateName: response.state ?? ''
+      } : addr));
+    } catch {
+      toast({ title: 'Zipcode not found', description: 'Please check the pincode and try again.', variant: 'destructive' });
+    } finally {
+      setPincodeLookupId(null);
     }
-
-    const data = response;
-    setAddresses(prev =>
-      prev.map(addr =>
-        addr.id === id
-          ? {
-              ...addr,
-              city: data.city ?? '',
-              stateCode: data.state_code ?? '',
-              stateName: data.state ?? '',
-            }
-          : addr
-      )
-    );
-  } catch {
-    setAddresses(prev =>
-      prev.map(addr =>
-        addr.id === id
-          ? {
-              ...addr,
-              city: '',
-              stateCode: '',
-              stateName: '',
-            }
-          : addr
-      )
-    );
-    toast({
-      title: 'Zipcode not found',
-      description: 'Please check the pincode and try again.',
-      variant: 'destructive',
-    });
-  } finally {
-    setPincodeLookupId(null);
-  }
-};
-
-  const handleAddAddress = () => {
-    if (isInteractionDisabled) return;
-    setCollapsedAddresses(new Set(addresses.map((addr: Address) => addr.id)));
-    setAddresses(prev => [
-      ...prev,
-      {
-        ...createEmptyAddress(),
-        isPrimary: prev.length === 0,
-        latitude: locationCoords.latitude || '',
-        longitude: locationCoords.longitude || '',
-      },
-    ]);
   };
 
-  const handleRetryPermission = useCallback(() => {
-    if (typeof window === 'undefined' || !navigator?.geolocation) {
-      toast({
-        title: 'Location Unsupported',
-        description: 'Geolocation is not supported on this device. Please try a different browser or device.',
-        variant: 'destructive',
-      });
+  const handleSameAsChange = (id: string, source: string) => {
+    if (source === 'none') {
+      setAddresses(prev => prev.map(addr => addr.id === id ? { ...addr, sameAs: undefined } : addr));
       return;
     }
 
-    suppressModalAutoOpenRef.current = true;
-    setIsPermissionModalOpen(false);
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const latitude = typeof position.coords.latitude === 'number' ? position.coords.latitude.toFixed(6) : '';
-        const longitude = typeof position.coords.longitude === 'number' ? position.coords.longitude.toFixed(6) : '';
-
-        applyCoordsToAddresses(latitude, longitude);
-        suppressModalAutoOpenRef.current = false;
-      },
-      (error) => {
-        suppressModalAutoOpenRef.current = false;
-
-        const description =
-          error?.message || 'Unable to fetch your current location. Please allow access in your browser settings.';
-
-        toast({
-          title: 'Location Required',
-          description,
-          variant: 'destructive',
-        });
-
-        setIsPermissionModalOpen(true);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 0,
-      }
-    );
-  }, [applyCoordsToAddresses, toast]);
-
-  const handleRemoveAddress = (id: string) => {
-    if (isInteractionDisabled) return;
-    setAddresses(prev => {
-      const remaining = prev.filter(addr => addr.id !== id);
-      if (remaining.length === 0) {
-        return [{ ...createEmptyAddress(), isPrimary: true, latitude: locationCoords.latitude || '', longitude: locationCoords.longitude || '' }];
-      }
-      if (!remaining.some((addr: Address) => addr.isPrimary)) {
-        remaining[0] = { ...remaining[0], isPrimary: true };
-      }
-      return remaining;
-    });
+    const sourceAddr = addresses.find(a => a.addressType === source);
+    if (sourceAddr) {
+      setAddresses(prev => prev.map(addr => addr.id === id ? {
+        ...addr,
+        sameAs: source as any,
+        addressLine1: sourceAddr.addressLine1,
+        addressLine2: sourceAddr.addressLine2,
+        addressLine3: sourceAddr.addressLine3,
+        postalCode: sourceAddr.postalCode,
+        landmark: sourceAddr.landmark,
+        city: sourceAddr.city,
+        stateCode: sourceAddr.stateCode,
+        stateName: sourceAddr.stateName,
+        latitude: sourceAddr.latitude,
+        longitude: sourceAddr.longitude,
+        isComplete: sourceAddr.isComplete
+      } : addr));
+    }
   };
 
-  const requiredFieldsFilled = isLocationReady && addresses.every(
-    addr =>
-      addr.addressType &&
-      addr.addressLine1 &&
-      addr.landmark &&
-      addr.postalCode &&
-      addr.postalCode.length === 6
-  );
+  const handleSaveAddress = (id: string) => {
+    const address = addresses.find(a => a.id === id);
+    if (!address) return;
 
-  const handleSave = async () => {
-    if (!currentLead || !coApplicantId || !coApplicant) return;
+    // Validation
+    if (!address.addressLine1 || !address.postalCode || !address.city || !address.stateCode || !address.landmark) {
+      toast({ title: 'Missing Fields', description: 'Please fill all required fields (Address Line 1, Pincode, Landmark).', variant: 'destructive' });
+      return;
+    }
+
+    setAddresses(prev => prev.map(addr => addr.id === id ? { ...addr, isComplete: true } : addr));
+    setExpandedAddressId(null); // Collapse after save
+    toast({ title: 'Address Saved', description: 'Address details saved locally.', className: 'bg-green-50 border-green-200' });
+  };
+
+  const handleSaveInformation = async () => {
+    if (!currentLead?.appId || !coApplicantId || !coApplicant) return;
     if (!isLocationReady) {
-      toast({
-        title: 'Location Required',
-        description: 'Please allow location access so we can capture your current coordinates.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    if (!requiredFieldsFilled) {
-      toast({
-        title: 'Missing Information',
-        description: 'Please fill required address fields before saving.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Location Required', description: 'Please allow location access.', variant: 'destructive' });
       return;
     }
 
-    const applicationId = currentLead.appId;
-    if (!applicationId) {
-      toast({
-        title: 'Application not found',
-        description: 'Unable to determine the application ID. Please try again.',
-        variant: 'destructive',
-      });
+    const allComplete = addresses.every(a => a.isComplete);
+    if (!allComplete) {
+      toast({ title: 'Incomplete', description: 'Please complete and save all 3 addresses.', variant: 'destructive' });
       return;
     }
 
@@ -418,39 +331,34 @@ const performPincodeLookup = async (id: string, zip: string) => {
     const coApplicantIndex = coApplicants.findIndex(ca => ca.id === coApplicantId);
 
     if (coApplicantIndex < 0) {
-      toast({
-        title: 'Co-applicant missing',
-        description: 'Could not determine the co-applicant index. Please try again.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Co-applicant missing', description: 'Could not determine the co-applicant index.', variant: 'destructive' });
       return;
     }
 
-    const payloadAddresses = addresses.map(addr => ({
-      address_type: addr.addressType || 'residential',
-      address_line_1: addr.addressLine1 || '',
-      address_line_2: addr.addressLine2 || '',
-      address_line_3: addr.addressLine3 || '',
-      landmark: addr.landmark || '',
-      pincode: addr.postalCode || '',
-      latitude: addr.latitude || locationCoords.latitude || '90',
-      longitude: addr.longitude || locationCoords.longitude || '90',
-      is_primary: addr.isPrimary,
-      city: addr.city || undefined,
-      state_code: addr.stateCode || undefined,
-    }));
-
     setIsSaving(true);
     try {
+      const backendAddresses = addresses.map(addr => ({
+        address_type: addr.addressType,
+        address_line_1: addr.addressLine1,
+        address_line_2: addr.addressLine2,
+        address_line_3: addr.addressLine3,
+        landmark: addr.landmark,
+        pincode: addr.postalCode,
+        latitude: addr.latitude || locationCoords.latitude || '-90',
+        longitude: addr.longitude || locationCoords.longitude || '90',
+        city: addr.city,
+        state: addr.stateName,
+        state_code: addr.stateCode,
+        is_primary: addr.addressType === 'residential'
+      }));
+
       const response = await submitCoApplicantAddressDetails({
-        application_id: applicationId,
+        application_id: currentLead.appId,
         co_applicant_index: coApplicantIndex,
-        addresses: payloadAddresses,
+        addresses: backendAddresses,
       });
 
-      if (isApiError(response)) {
-        throw new Error(response.error || 'Failed to save co-applicant address details.');
-      }
+      if (isApiError(response)) throw new Error(response.error);
 
       updateCoApplicant(currentLead.id, coApplicantId, {
         relationship: coApplicant.relationship,
@@ -458,290 +366,247 @@ const performPincodeLookup = async (id: string, zip: string) => {
           ...coApplicant.data,
           addressDetails: {
             ...(coApplicant.data?.addressDetails ?? {}),
-            addresses: addresses.map(({ latitude, longitude, ...rest }) => rest),
+            addresses: addresses
           },
         },
       });
 
-      toast({
-        title: 'Address details saved',
-        description: response.message || 'Co-applicant address details submitted successfully.',
-        className: 'bg-green-50 border-green-200',
-      });
+      toast({ title: 'Success', description: 'Co-applicant address details saved successfully.', className: 'bg-green-50 border-green-200' });
       router.push('/lead/co-applicant-info');
     } catch (error: any) {
-      toast({
-        title: 'Failed to save address details',
-        description: error?.message || 'Something went wrong while saving address information. Please try again.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Save Failed', description: error.message, variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const getAddressTitle = (type: string) => {
+    switch (type) {
+      case 'residential': return 'Current Address';
+      case 'permanent': return 'Permanent Address';
+      case 'correspondence': return 'Correspondence Address';
+      default: return type;
+    }
+  };
+
+  const isAddressEditable = (type: string) => {
+    if (type === 'residential') return true;
+    const currentAddr = addresses.find(a => a.addressType === 'residential');
+    return currentAddr?.isComplete;
+  };
+
+  const getAddressSummary = (address: Address) => {
+    if (!address.addressLine1) return "No Address added Yet";
+    const parts = [
+      address.addressLine1,
+      address.addressLine2,
+      address.addressLine3,
+      address.landmark,
+      address.city,
+      address.stateName,
+      address.postalCode
+    ].filter(Boolean);
+    return parts.join(', ');
   };
 
   if (!currentLead || !coApplicant) {
     return null;
   }
 
-  const handlePermissionModalChange = useCallback(
-    (open: boolean) => {
-      if (!open && locationStatus === 'error' && !suppressModalAutoOpenRef.current) {
-        setIsPermissionModalOpen(true);
-        return;
-      }
-
-      setIsPermissionModalOpen(open);
-    },
-    [locationStatus]
-  );
-
   return (
     <DashboardLayout
       title="Co-Applicant Address Details"
       showNotifications={false}
-      showExitButton
+      showExitButton={true}
       onExit={() => router.push('/lead/co-applicant-info')}
     >
-      <AlertDialog open={isPermissionModalOpen} onOpenChange={handlePermissionModalChange}>
-        <AlertDialogContent className="max-w-sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-[#003366]">
-              <AlertTriangle className="h-5 w-5 text-[#F59E0B]" />
-              Location Access Required
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-sm text-[#4B5563]">
-              Please allow location access in your browser settings so we can capture accurate address coordinates for this co-applicant.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-end sm:space-x-3">
-            <AlertDialogAction
-              onClick={handleRetryPermission}
-              className="w-full sm:w-auto bg-[#0072CE] hover:bg-[#005a9e]"
-            >
-              Try Again
-            </AlertDialogAction>
-            <AlertDialogCancel className="w-full sm:w-auto">
-              Close
-            </AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <div className="max-w-2xl mx-auto pb-28 px-4">
+        <div className="space-y-4">
+          {addresses.map((address) => {
+            const isExpanded = expandedAddressId === address.id;
+            const isEditable = isAddressEditable(address.addressType);
+            const isLocked = address.sameAs !== undefined;
 
-      <div className="max-w-2xl mx-auto pb-24">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Co-Applicant</p>
-              <h2 className="text-xl font-semibold text-[#003366]">
-                {coApplicant?.data?.basicDetails?.fullName ||
-                  [coApplicant?.data?.basicDetails?.firstName, coApplicant?.data?.basicDetails?.lastName]
-                    .filter(Boolean)
-                    .join(' ') ||
-                  'Unnamed Co-applicant'}
-              </h2>
-            </div>
-            <Badge variant="outline">{coApplicant.relationship || 'Relation not set'}</Badge>
-          </div>
+            let statusText = 'No Data';
+            let statusColor = 'bg-gray-100 text-gray-600 border-gray-200';
 
-          <div className="space-y-5">
-            {addresses.map((address, index) => {
-              const isCollapsed = collapsedAddresses.has(address.id);
-              return (
-                <Card key={address.id} className="border border-gray-200 rounded-xl shadow-sm">
-                  <CardContent className="p-0">
-                    <button
-                      type="button"
-                      className={cn(
-                        'w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-all text-left rounded-t-xl',
-                        isCollapsed ? 'rounded-xl' : 'rounded-t-xl'
-                      )}
-                      onClick={() => {
-                        setCollapsedAddresses(prev => {
-                          const next = new Set(prev);
-                          if (next.has(address.id)) next.delete(address.id);
-                          else next.add(address.id);
-                          return next;
-                        });
-                      }}
-                    >
-                      <div className="flex flex-col">
-                        <p className="text-sm font-semibold text-[#003366]">Address {index + 1}</p>
-                        {address.addressLine1 && (
-                          <span className="text-xs text-gray-500 truncate max-w-[220px]">
-                            {address.addressLine1}, {address.postalCode}
-                          </span>
-                        )}
-                        {address.isPrimary && (
-                          <span className="mt-1 text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full w-fit font-medium">
-                            Primary
-                          </span>
-                        )}
+            if (address.isComplete) {
+              statusText = 'Completed';
+              statusColor = 'bg-green-50 text-green-700 border-green-200';
+            } else if (address.addressLine1) {
+              statusText = 'In Progress';
+              statusColor = 'bg-yellow-50 text-yellow-700 border-yellow-200';
+            }
+
+            return (
+              <div key={address.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-4">
+                  {/* Row 1: Icon, Title, Badge, Edit Button */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-shrink-0 text-gray-500">
+                        <MapPin className="w-5 h-5" />
                       </div>
-                      <span className="text-sm text-gray-500">{isCollapsed ? 'Expand' : 'Collapse'}</span>
-                    </button>
+                      <h3 className="font-medium text-gray-900">{getAddressTitle(address.addressType)}</h3>
+                    </div>
 
-                    {!isCollapsed && (
-                      <div className="p-5 space-y-4 border-t border-gray-100">
-                        <div>
-                          <Label className="text-sm font-medium text-[#003366] mb-2 block">
-                            Address Type <span className="text-[#DC2626]">*</span>
-                          </Label>
-                          <Select
-                            value={address.addressType}
-                            onValueChange={value => handleAddressChange(address.id, 'addressType', value)}
-                            disabled={isInteractionDisabled}
-                          >
-                            <SelectTrigger className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
-                              <SelectValue placeholder="Select address type" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="residential">Residential</SelectItem>
-                              <SelectItem value="office">Office</SelectItem>
-                              <SelectItem value="permanent">Permanent</SelectItem>
-                              <SelectItem value="additional">Additional</SelectItem>
-                              <SelectItem value="property">Property</SelectItem>
-                              <SelectItem value="current">Current</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                    <div className="flex items-center gap-3">
+                      <Badge variant="outline" className={cn("text-[10px] h-6 px-2", statusColor)}>
+                        {statusText}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!isEditable || isCompleted}
+                        onClick={() => setExpandedAddressId(isExpanded ? null : address.id)}
+                        className="h-8 w-8 p-0 text-gray-500 hover:text-gray-700"
+                      >
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
+                      </Button>
+                    </div>
+                  </div>
 
-                        <div>
-                          <Label className="text-sm font-medium text-[#003366] mb-2 block">
-                            Address Line 1 <span className="text-[#DC2626]">*</span>
-                          </Label>
-                          <Input
-                            value={address.addressLine1}
-                            onChange={e => handleAddressChange(address.id, 'addressLine1', e.target.value)}
-                            placeholder="House/Flat No., Building Name"
-                            disabled={isInteractionDisabled}
-                            className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
-                            maxLength={255}
+                  {/* Row 2: Address Summary (only if collapsed) */}
+                  {!isExpanded && (
+                    <div className="pl-8">
+                      <p className="text-sm text-gray-500">
+                        {getAddressSummary(address)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {isExpanded && (
+                  <div className="p-4 border-t border-gray-100 space-y-4">
+                    {/* Same As Dropdown */}
+                    {address.addressType !== 'residential' && (
+                      <div className="mb-4">
+                        <Label className="text-sm font-medium text-gray-700 mb-2 block">Same As</Label>
+                        <Select
+                          value={address.sameAs || 'none'}
+                          onValueChange={(val) => handleSameAsChange(address.id, val)}
+                          disabled={isCompleted}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select address to copy" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">None (Enter manually)</SelectItem>
+                            <SelectItem value="residential">Current Address</SelectItem>
+                            {address.addressType === 'permanent' && addresses.find(a => a.addressType === 'correspondence')?.isComplete && (
+                              <SelectItem value="correspondence">Correspondence Address</SelectItem>
+                            )}
+                            {address.addressType === 'correspondence' && addresses.find(a => a.addressType === 'permanent')?.isComplete && (
+                              <SelectItem value="permanent">Permanent Address</SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-sm font-medium text-[#003366] mb-2 block">Address Line 1 *</Label>
+                        <Input
+                          value={address.addressLine1}
+                          onChange={(e) => handleAddressChange(address.id, 'addressLine1', e.target.value)}
+                          placeholder="House No., Building Name"
+                          disabled={isLocked || isCompleted}
+                          className={cn(isLocked && "bg-gray-50")}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-[#003366] mb-2 block">Address Line 2</Label>
+                        <Input
+                          value={address.addressLine2}
+                          onChange={(e) => handleAddressChange(address.id, 'addressLine2', e.target.value)}
+                          placeholder="Street, Area"
+                          disabled={isLocked || isCompleted}
+                          className={cn(isLocked && "bg-gray-50")}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-[#003366] mb-2 block">Address Line 3</Label>
+                        <Input
+                          value={address.addressLine3}
+                          onChange={(e) => handleAddressChange(address.id, 'addressLine3', e.target.value)}
+                          placeholder="Additional details"
+                          disabled={isLocked || isCompleted}
+                          className={cn(isLocked && "bg-gray-50")}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-[#003366] mb-2 block">Landmark *</Label>
+                        <Input
+                          value={address.landmark}
+                          onChange={(e) => handleAddressChange(address.id, 'landmark', e.target.value)}
+                          placeholder="Near..."
+                          disabled={isLocked || isCompleted}
+                          className={cn(isLocked && "bg-gray-50")}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-[#003366] mb-2 block">Pincode *</Label>
+                        <div className={cn(
+                          "flex items-center h-10 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-blue-600 focus-within:border-transparent transition-all",
+                          (isLocked || isCompleted) && "bg-gray-50 opacity-50 cursor-not-allowed"
+                        )}>
+                          <input
+                            value={address.postalCode}
+                            onChange={(e) => handlePostalCodeChange(address.id, e.target.value)}
+                            placeholder="000000"
+                            maxLength={6}
+                            disabled={isLocked || isCompleted}
+                            className="flex-1 bg-transparent border-none outline-none placeholder:text-gray-400 w-full min-w-0"
                           />
-                        </div>
-
-                        <div>
-                          <Label className="text-sm font-medium text-[#003366] mb-2 block">Address Line 2</Label>
-                          <Input
-                            value={address.addressLine2}
-                            onChange={e => handleAddressChange(address.id, 'addressLine2', e.target.value)}
-                            placeholder="Street Name, Area"
-                            disabled={isInteractionDisabled}
-                            className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
-                            maxLength={255}
-                          />
-                        </div>
-
-                        <div>
-                          <Label className="text-sm font-medium text-[#003366] mb-2 block">Address Line 3</Label>
-                          <Input
-                            value={address.addressLine3}
-                            onChange={e => handleAddressChange(address.id, 'addressLine3', e.target.value)}
-                            placeholder="Block / Locality"
-                            disabled={isInteractionDisabled}
-                            className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
-                            maxLength={255}
-                          />
-                        </div>
-
-                        <div>
-                          <Label className="text-sm font-medium text-[#003366] mb-2 block">
-                            Landmark <span className="text-[#DC2626]">*</span>
-                          </Label>
-                          <Input
-                            value={address.landmark}
-                            onChange={e => handleAddressChange(address.id, 'landmark', e.target.value)}
-                            placeholder="Nearby landmark"
-                            disabled={isInteractionDisabled}
-                            className={cn("h-12 rounded-lg", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}
-                            maxLength={255}
-                          />
-                        </div>
-
-                        <div>
-                          <Label className="text-sm font-medium text-[#003366] mb-2 block">
-                            Postal Code <span className="text-[#DC2626]">*</span>
-                          </Label>
-                          <div className="relative">
-                            <Input
-                              value={address.postalCode}
-                              onChange={(e) => handlePostalCodeChange(address.id, e.target.value)}
-                              placeholder="Enter 6-digit postal code"
-                              disabled={isInteractionDisabled}
-                              className={cn(
-                                'h-12 rounded-lg',
-                                (pincodeLookupId === address.id || address.city || address.stateCode) && 'pr-28',
-                                isInteractionDisabled && 'bg-gray-50 cursor-not-allowed'
-                              )}
-                              maxLength={6}
-                            />
-                            {(pincodeLookupId === address.id || address.city || address.stateCode) && (
-                              <div className="absolute inset-y-0 right-3 flex items-center gap-2 pointer-events-none">
-                                {pincodeLookupId === address.id && (
-                                  <Loader className="w-4 h-4 animate-spin text-[#0072CE]" />
-                                )}
-                                {address.city && (
-                                  <span className="text-sm font-medium text-gray-600 whitespace-nowrap">
-                                    {address.city} {address.stateCode}
-                                  </span>
-                                )}
-                              </div>
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                            {pincodeLookupId === address.id && (
+                              <Loader className="w-4 h-4 animate-spin text-blue-600" />
+                            )}
+                            {(address.city || address.stateCode) && (
+                              <span className="text-green-600 font-medium whitespace-nowrap">
+                                {address.city}, {address.stateCode}
+                              </span>
                             )}
                           </div>
                         </div>
-
-                        <div className={cn("flex items-center justify-between p-4 bg-gray-50 rounded-lg border", isInteractionDisabled && "opacity-60")}>
-                          <Label className="text-base font-medium">Mark as Primary Address</Label>
-                          <Switch checked={address.isPrimary} onCheckedChange={() => setPrimaryAddress(address.id)} disabled={isInteractionDisabled} />
-                        </div>
-
-                        {addresses.length > 1 && !isInteractionDisabled && (
-                          <div className="pt-2">
-                            <Button
-                              variant="outline"
-                              className="w-full h-11 border-red-200 text-red-600 hover:bg-red-50"
-                              onClick={() => handleRemoveAddress(address.id)}
-                            >
-                              Remove Address
-                            </Button>
-                          </div>
-                        )}
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
+                    </div>
 
-            <div className="pt-2">
-              <Button
-                variant="outline"
-              className={cn(
-                "w-full h-12 text-[#0072CE] border-dashed border-[#0072CE]/50 hover:bg-[#E6F0FA] rounded-lg font-medium",
-                isInteractionDisabled && "text-gray-400 border-gray-300 hover:bg-white cursor-not-allowed"
-              )}
-                onClick={handleAddAddress}
-              disabled={isInteractionDisabled}
-              >
-                + Add Another Address
-              </Button>
-            </div>
-          </div>
+                    <div className="pt-4">
+                      <Button
+                        onClick={() => handleSaveAddress(address.id)}
+                        disabled={isLocked || isCompleted}
+                        className="w-full bg-[#0072CE] hover:bg-[#005a9e]"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Address
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
+      </div>
 
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] p-4">
-          <div className="max-w-2xl mx-auto">
-            <Button
-              onClick={handleSave}
-              disabled={isInteractionDisabled || !requiredFieldsFilled || isSaving}
-              className={cn(
-                "w-full h-12 rounded-lg bg-[#0072CE] hover:bg-[#005a9e] font-medium text-white",
-                (isInteractionDisabled || !requiredFieldsFilled || isSaving) && "opacity-80 cursor-not-allowed"
-              )}
-            >
-              {isSaving ? 'Saving...' : 'Save Information'}
-            </Button>
-          </div>
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-10">
+        <div className="max-w-2xl mx-auto">
+          <Button
+            onClick={handleSaveInformation}
+            disabled={!addresses.every(a => a.isComplete) || isSaving || isCompleted}
+            className="w-full h-12 rounded-xl bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold shadow-lg shadow-blue-200 disabled:shadow-none"
+          >
+            {isSaving ? (
+              <>
+                <Loader className="w-5 h-5 mr-2 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              'Save Information'
+            )}
+          </Button>
         </div>
       </div>
     </DashboardLayout>
@@ -755,4 +620,3 @@ export default function CoApplicantAddressDetailsPage() {
     </Suspense>
   );
 }
-

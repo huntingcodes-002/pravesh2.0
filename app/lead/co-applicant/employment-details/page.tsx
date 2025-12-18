@@ -14,54 +14,153 @@ import { CalendarIcon } from 'lucide-react';
 import { format, parse } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { submitEmploymentInfo, submitCoApplicantEmploymentInfo, isApiError, getDetailedInfo } from '@/lib/api';
+
+// ... imports ...
 
 function EmploymentDetailsContent() {
-  const { currentLead, updateLead } = useLead();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  const { currentLead, updateLead } = useLead();
 
-  const coApplicantId = searchParams.get('coApplicantId');
+  const coApplicantId = searchParams.get('id');
 
   const coApplicant = currentLead?.formData?.coApplicants?.find(
     (ca: any) => ca.id === coApplicantId
   );
 
   const [formData, setFormData] = useState({
-    occupationType: coApplicant?.data?.step5?.occupationType || '',
-    monthlyIncome: coApplicant?.data?.step5?.monthlyIncome || '',
-    // Others
-    natureOfOccupation: coApplicant?.data?.step5?.natureOfOccupation || '',
-    // Salaried & Shared for SENP/SEP
-    employerName: coApplicant?.data?.step5?.employerName || '',
-    natureOfBusiness: coApplicant?.data?.step5?.natureOfBusiness || '',
-    industry: coApplicant?.data?.step5?.industry || '',
-    employmentStatus: coApplicant?.data?.step5?.employmentStatus || '',
-    employedFrom: coApplicant?.data?.step5?.employedFrom || '',
-    employedTo: coApplicant?.data?.step5?.employedTo || '',
-    officialEmail: coApplicant?.data?.step5?.officialEmail || '',
-    // Self Employed Non-Professional
-    orgNameSENP: coApplicant?.data?.step5?.orgNameSENP || '',
-    natureOfBusinessSENP: coApplicant?.data?.step5?.natureOfBusinessSENP || '',
-    industrySENP: coApplicant?.data?.step5?.industrySENP || '',
-    officialEmailSENP: coApplicant?.data?.step5?.officialEmailSENP || '',
-    // Self Employed Professional
-    orgNameSEP: coApplicant?.data?.step5?.orgNameSEP || '',
-    natureOfProfession: coApplicant?.data?.step5?.natureOfProfession || '',
-    industrySEP: coApplicant?.data?.step5?.industrySEP || '',
-    registrationNumber: coApplicant?.data?.step5?.registrationNumber || '',
-    officialEmailSEP: coApplicant?.data?.step5?.officialEmailSEP || '',
+    occupationType: '',
+    monthlyIncome: '',
+    employmentStatus: '',
+    employedFrom: '',
+    employedTo: '',
+    employerName: '',
+    designation: '',
+    natureOfBusiness: '',
+    industry: '',
+    officialEmail: '',
+    orgNameSENP: '',
+    natureOfBusinessSENP: '',
+    industrySENP: '',
+    officialEmailSENP: '',
+    orgNameSEP: '',
+    natureOfProfession: '',
+    industrySEP: '',
+    registrationNumber: '',
+    officialEmailSEP: '',
+    natureOfOccupation: '',
   });
 
   useEffect(() => {
-    if (coApplicant?.data?.step5) {
-      setFormData(coApplicant.data.step5);
-    }
-  }, [coApplicant]);
+    const fetchCoApplicantEmploymentDetails = async () => {
+      if (!currentLead?.appId || !coApplicantId) {
+        if (coApplicant?.data?.step5) {
+          setFormData(coApplicant.data.step5);
+        }
+        return;
+      }
 
-  const setField = (key: string, value: string) => setFormData({ ...formData, [key]: value });
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+        if (isApiError(response) || !response.success) {
+          if (coApplicant?.data?.step5) {
+            setFormData(coApplicant.data.step5);
+          }
+          return;
+        }
 
-  const handleSave = () => {
+        const participants = response.data?.application_details?.participants || [];
+        const targetIndex = coApplicant?.workflowIndex;
+
+        if (typeof targetIndex !== 'number') {
+          if (coApplicant?.data?.step5) {
+            setFormData(coApplicant.data.step5);
+          }
+          return;
+        }
+
+        const apiCoApp = participants.find((p: any) =>
+          p.participant_type === 'co-applicant' && p.co_applicant_index === targetIndex
+        );
+
+        if (apiCoApp?.employment_details) {
+          const apiData = apiCoApp.employment_details;
+
+          const formatDate = (dateStr: string | null) => {
+            if (!dateStr) return '';
+            try {
+              const date = parse(dateStr, 'yyyy-MM-dd', new Date());
+              return format(date, 'dd-MM-yyyy');
+            } catch {
+              return '';
+            }
+          };
+
+          const occTypeMap: Record<string, string> = {
+            'self_employed_non_professional': 'self-employed-non-professional',
+            'self_employed_professional': 'self-employed-professional',
+          };
+
+          const mappedData: any = {
+            occupationType: occTypeMap[apiData.occupation_type] || apiData.occupation_type || '',
+            monthlyIncome: apiData.monthly_income ? String(apiData.monthly_income) : '',
+            employmentStatus: apiData.employment_status || '',
+            employedFrom: formatDate(apiData.employed_from),
+            employedTo: formatDate(apiData.employed_to),
+          };
+
+          if (mappedData.occupationType === 'salaried') {
+            mappedData.employerName = apiData.organization_name || '';
+            mappedData.designation = apiData.designation || '';
+            mappedData.natureOfBusiness = apiData.nature_of_occupation || '';
+            mappedData.industry = apiData.industry || '';
+            mappedData.officialEmail = apiData.official_email || '';
+          } else if (mappedData.occupationType === 'self-employed-non-professional') {
+            mappedData.orgNameSENP = apiData.organization_name || '';
+            mappedData.natureOfBusinessSENP = apiData.nature_of_occupation || '';
+            mappedData.industrySENP = apiData.industry || '';
+            mappedData.officialEmailSENP = apiData.official_email || '';
+          } else if (mappedData.occupationType === 'self-employed-professional') {
+            mappedData.orgNameSEP = apiData.organization_name || '';
+            mappedData.natureOfProfession = apiData.nature_of_occupation || '';
+            mappedData.industrySEP = apiData.industry || '';
+            mappedData.registrationNumber = apiData.registration_number || '';
+            mappedData.officialEmailSEP = apiData.official_email || '';
+          } else if (mappedData.occupationType === 'others') {
+            mappedData.natureOfOccupation = apiData.nature_of_occupation || '';
+          }
+
+          setFormData(prev => ({ ...prev, ...mappedData }));
+
+        } else if (coApplicant?.data?.step5) {
+          setFormData(coApplicant.data.step5);
+        }
+
+      } catch (error) {
+        console.error('Failed to fetch co-applicant employment details', error);
+        if (coApplicant?.data?.step5) {
+          setFormData(coApplicant.data.step5);
+        }
+        toast({
+          title: 'Error',
+          description: 'An unexpected error occurred.',
+          variant: 'destructive',
+        });
+      }
+    };
+
+    fetchCoApplicantEmploymentDetails();
+  }, [currentLead?.appId, coApplicantId, coApplicant]);
+
+  const setField = (key: string, value: string) => setFormData(prev => ({ ...prev, [key]: value }));
+
+  const handleExit = () => {
+    router.push('/lead/co-applicant-info');
+  };
+
+  const handleSave = async () => {
     if (!currentLead || !coApplicantId || !coApplicant) {
       toast({
         title: 'Error',
@@ -71,36 +170,119 @@ function EmploymentDetailsContent() {
       return;
     }
 
-    const updatedCoApplicants = currentLead.formData?.coApplicants?.map((ca: any) => {
-      if (ca.id === coApplicantId) {
-        return {
-          ...ca,
-          data: {
-            ...ca.data,
-            step5: formData,
-          },
-        };
+    // Map form data to API payload
+    let occupationType = formData.occupationType;
+    if (occupationType === 'self-employed-non-professional') occupationType = 'self_employed_non_professional';
+    if (occupationType === 'self-employed-professional') occupationType = 'self_employed_professional';
+
+    let natureOfOccupation = '';
+    let organizationName = '';
+    let designation = '';
+    let industry = '';
+    let officialEmail = '';
+    let registrationNumber = '';
+
+    if (formData.occupationType === 'salaried') {
+      natureOfOccupation = formData.natureOfBusiness;
+      organizationName = formData.employerName;
+      designation = formData.designation;
+      industry = formData.industry;
+      officialEmail = formData.officialEmail;
+    } else if (formData.occupationType === 'self-employed-non-professional') {
+      natureOfOccupation = formData.natureOfBusinessSENP;
+      organizationName = formData.orgNameSENP;
+      industry = formData.industrySENP;
+      officialEmail = formData.officialEmailSENP;
+    } else if (formData.occupationType === 'self-employed-professional') {
+      natureOfOccupation = formData.natureOfProfession;
+      organizationName = formData.orgNameSEP;
+      industry = formData.industrySEP;
+      registrationNumber = formData.registrationNumber;
+      officialEmail = formData.officialEmailSEP;
+    } else if (formData.occupationType === 'others') {
+      natureOfOccupation = formData.natureOfOccupation;
+    }
+
+    const formatDate = (dateStr: string) => {
+      if (!dateStr) return null;
+      try {
+        const date = parse(dateStr, 'dd-MM-yyyy', new Date());
+        return format(date, 'yyyy-MM-dd');
+      } catch (e) {
+        return null;
       }
-      return ca;
-    });
+    };
 
-    updateLead(currentLead.id, {
-      formData: {
-        ...currentLead.formData,
-        coApplicants: updatedCoApplicants,
-      },
-    });
+    if (typeof coApplicant.workflowIndex !== 'number') {
+      toast({
+        title: 'Error',
+        description: 'Co-applicant index not found.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-    toast({
-      title: 'Success',
-      description: 'Employment details saved successfully.',
-    });
+    const payload = {
+      application_id: currentLead.id,
+      co_applicant_index: coApplicant.workflowIndex,
+      occupation_type: occupationType,
+      nature_of_occupation: natureOfOccupation,
+      organization_name: organizationName,
+      designation: designation,
+      industry: industry || undefined,
+      employment_status: formData.employmentStatus || undefined,
+      monthly_income: formData.monthlyIncome,
+      employed_from: formatDate(formData.employedFrom),
+      employed_to: formatDate(formData.employedTo),
+      official_email: officialEmail,
+      registration_number: registrationNumber,
+    };
 
-    router.push('/lead/co-applicant-info');
-  };
+    try {
+      const response = await submitCoApplicantEmploymentInfo(payload);
 
-  const handleExit = () => {
-    router.push('/lead/co-applicant-info');
+      if (isApiError(response)) {
+        toast({
+          title: 'Error',
+          description: response.error || 'Failed to save employment details.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const updatedCoApplicants = currentLead.formData?.coApplicants?.map((ca: any) => {
+        if (ca.id === coApplicantId) {
+          return {
+            ...ca,
+            data: {
+              ...ca.data,
+              step5: formData,
+            },
+          };
+        }
+        return ca;
+      });
+
+      updateLead(currentLead.id, {
+        formData: {
+          ...currentLead.formData,
+          coApplicants: updatedCoApplicants,
+        },
+      });
+
+      toast({
+        title: 'Success',
+        description: 'Employment details saved successfully.',
+      });
+
+      router.push('/lead/co-applicant-info');
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const canProceed = () => {
@@ -309,6 +491,18 @@ function EmploymentDetailsContent() {
                   />
                 </div>
                 <div>
+                  <Label htmlFor="designation">
+                    Designation <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="designation"
+                    value={formData.designation}
+                    onChange={(e) => setField('designation', e.target.value)}
+                    placeholder="Enter designation"
+                    className="h-12"
+                  />
+                </div>
+                <div>
                   <Label htmlFor="natureOfBusiness">
                     Nature of Business <span className="text-red-500">*</span>
                   </Label>
@@ -347,11 +541,11 @@ function EmploymentDetailsContent() {
                       <SelectItem value="entertainment">Entertainment</SelectItem>
                       <SelectItem value="finance">Finance</SelectItem>
                       <SelectItem value="food">Food</SelectItem>
-                      <SelectItem value="gems-jewellery">Gems & Jewellery</SelectItem>
+                      <SelectItem value="gems_and_jewellery">Gems & Jewellery</SelectItem>
                       <SelectItem value="health">Health</SelectItem>
                       <SelectItem value="hospitality">Hospitality</SelectItem>
-                      <SelectItem value="other-services">Other Services</SelectItem>
-                      <SelectItem value="personal-care">Personal Care</SelectItem>
+                      <SelectItem value="other_services">Other Services</SelectItem>
+                      <SelectItem value="personal_care">Personal Care</SelectItem>
                       <SelectItem value="retail">Retail</SelectItem>
                       <SelectItem value="transportation">Transportation</SelectItem>
                     </SelectContent>
@@ -427,11 +621,11 @@ function EmploymentDetailsContent() {
                       <SelectItem value="entertainment">Entertainment</SelectItem>
                       <SelectItem value="finance">Finance</SelectItem>
                       <SelectItem value="food">Food</SelectItem>
-                      <SelectItem value="gems-jewellery">Gems & Jewellery</SelectItem>
+                      <SelectItem value="gems_and_jewellery">Gems & Jewellery</SelectItem>
                       <SelectItem value="health">Health</SelectItem>
                       <SelectItem value="hospitality">Hospitality</SelectItem>
-                      <SelectItem value="other-services">Other Services</SelectItem>
-                      <SelectItem value="personal-care">Personal Care</SelectItem>
+                      <SelectItem value="other_services">Other Services</SelectItem>
+                      <SelectItem value="personal_care">Personal Care</SelectItem>
                       <SelectItem value="retail">Retail</SelectItem>
                       <SelectItem value="transportation">Transportation</SelectItem>
                     </SelectContent>
@@ -509,11 +703,11 @@ function EmploymentDetailsContent() {
                       <SelectItem value="entertainment">Entertainment</SelectItem>
                       <SelectItem value="finance">Finance</SelectItem>
                       <SelectItem value="food">Food</SelectItem>
-                      <SelectItem value="gems-jewellery">Gems & Jewellery</SelectItem>
+                      <SelectItem value="gems_and_jewellery">Gems & Jewellery</SelectItem>
                       <SelectItem value="health">Health</SelectItem>
                       <SelectItem value="hospitality">Hospitality</SelectItem>
-                      <SelectItem value="other-services">Other Services</SelectItem>
-                      <SelectItem value="personal-care">Personal Care</SelectItem>
+                      <SelectItem value="other_services">Other Services</SelectItem>
+                      <SelectItem value="personal_care">Personal Care</SelectItem>
                       <SelectItem value="retail">Retail</SelectItem>
                       <SelectItem value="transportation">Transportation</SelectItem>
                     </SelectContent>

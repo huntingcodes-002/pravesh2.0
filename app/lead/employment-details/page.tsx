@@ -14,47 +14,128 @@ import { CalendarIcon } from 'lucide-react';
 import { format, parse } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { submitEmploymentInfo, isApiError, getDetailedInfo } from '@/lib/api';
 
 export default function EmploymentDetailsPage() {
-  const { currentLead, updateLead } = useLead();
   const router = useRouter();
   const { toast } = useToast();
+  const { currentLead, updateLead } = useLead();
 
   const [formData, setFormData] = useState({
-    occupationType: currentLead?.formData?.step5?.occupationType || '',
-    monthlyIncome: currentLead?.formData?.step5?.monthlyIncome || '',
-    // Others
-    natureOfOccupation: currentLead?.formData?.step5?.natureOfOccupation || '',
-    // Salaried & Shared for SENP/SEP
-    employerName: currentLead?.formData?.step5?.employerName || '',
-    natureOfBusiness: currentLead?.formData?.step5?.natureOfBusiness || '',
-    industry: currentLead?.formData?.step5?.industry || '',
-    employmentStatus: currentLead?.formData?.step5?.employmentStatus || '',
-    employedFrom: currentLead?.formData?.step5?.employedFrom || '',
-    employedTo: currentLead?.formData?.step5?.employedTo || '',
-    officialEmail: currentLead?.formData?.step5?.officialEmail || '',
-    // Self Employed Non-Professional
-    orgNameSENP: currentLead?.formData?.step5?.orgNameSENP || '',
-    natureOfBusinessSENP: currentLead?.formData?.step5?.natureOfBusinessSENP || '',
-    industrySENP: currentLead?.formData?.step5?.industrySENP || '',
-    officialEmailSENP: currentLead?.formData?.step5?.officialEmailSENP || '',
-    // Self Employed Professional
-    orgNameSEP: currentLead?.formData?.step5?.orgNameSEP || '',
-    natureOfProfession: currentLead?.formData?.step5?.natureOfProfession || '',
-    industrySEP: currentLead?.formData?.step5?.industrySEP || '',
-    registrationNumber: currentLead?.formData?.step5?.registrationNumber || '',
-    officialEmailSEP: currentLead?.formData?.step5?.officialEmailSEP || '',
+    occupationType: '',
+    monthlyIncome: '',
+    employmentStatus: '',
+    employedFrom: '',
+    employedTo: '',
+    employerName: '',
+    designation: '',
+    natureOfBusiness: '',
+    industry: '',
+    officialEmail: '',
+    orgNameSENP: '',
+    natureOfBusinessSENP: '',
+    industrySENP: '',
+    officialEmailSENP: '',
+    orgNameSEP: '',
+    natureOfProfession: '',
+    industrySEP: '',
+    registrationNumber: '',
+    officialEmailSEP: '',
+    natureOfOccupation: '',
   });
 
   useEffect(() => {
-    if (currentLead?.formData?.step5) {
-      setFormData(currentLead.formData.step5);
-    }
-  }, [currentLead]);
+    const fetchEmploymentDetails = async () => {
+      if (!currentLead?.appId) {
+        if (currentLead?.formData?.step5) {
+          setFormData(currentLead.formData.step5);
+        }
+        return;
+      }
+
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+        if (isApiError(response) || !response.success) {
+          if (currentLead?.formData?.step5) {
+            setFormData(currentLead.formData.step5);
+          }
+          return;
+        }
+
+        const participants = response.data?.application_details?.participants || [];
+        const primaryParticipant = participants.find((p: any) => p.participant_type === 'primary_participant');
+
+        if (primaryParticipant?.employment_details) {
+          const apiData = primaryParticipant.employment_details;
+
+          // Map API data to form structure
+          const newFormData = { ...formData };
+
+          // Helper to format date YYYY-MM-DD to DD-MM-YYYY
+          const formatDate = (dateStr: string | null) => {
+            if (!dateStr) return '';
+            try {
+              const date = parse(dateStr, 'yyyy-MM-dd', new Date());
+              return format(date, 'dd-MM-yyyy');
+            } catch {
+              return '';
+            }
+          };
+
+          // Occupation Type
+          const occTypeMap: Record<string, string> = {
+            'self_employed_non_professional': 'self-employed-non-professional',
+            'self_employed_professional': 'self-employed-professional',
+          };
+          newFormData.occupationType = occTypeMap[apiData.occupation_type] || apiData.occupation_type || '';
+
+          // Common fields
+          newFormData.monthlyIncome = apiData.monthly_income ? String(apiData.monthly_income) : '';
+          newFormData.employmentStatus = apiData.employment_status || '';
+          newFormData.employedFrom = formatDate(apiData.employed_from);
+          newFormData.employedTo = formatDate(apiData.employed_to);
+
+          // Specific fields based on occupation type
+          if (newFormData.occupationType === 'salaried') {
+            newFormData.employerName = apiData.organization_name || '';
+            newFormData.designation = apiData.designation || '';
+            newFormData.natureOfBusiness = apiData.nature_of_occupation || '';
+            newFormData.industry = apiData.industry || '';
+            newFormData.officialEmail = apiData.official_email || '';
+          } else if (newFormData.occupationType === 'self-employed-non-professional') {
+            newFormData.orgNameSENP = apiData.organization_name || '';
+            newFormData.natureOfBusinessSENP = apiData.nature_of_occupation || '';
+            newFormData.industrySENP = apiData.industry || '';
+            newFormData.officialEmailSENP = apiData.official_email || '';
+          } else if (newFormData.occupationType === 'self-employed-professional') {
+            newFormData.orgNameSEP = apiData.organization_name || '';
+            newFormData.natureOfProfession = apiData.nature_of_occupation || '';
+            newFormData.industrySEP = apiData.industry || '';
+            newFormData.registrationNumber = apiData.registration_number || '';
+            newFormData.officialEmailSEP = apiData.official_email || '';
+          } else if (newFormData.occupationType === 'others') {
+            newFormData.natureOfOccupation = apiData.nature_of_occupation || '';
+          }
+
+          setFormData(prev => ({ ...prev, ...newFormData }));
+        } else if (currentLead?.formData?.step5) {
+          setFormData(currentLead.formData.step5);
+        }
+
+      } catch (error) {
+        console.error('Failed to fetch employment details', error);
+        if (currentLead?.formData?.step5) {
+          setFormData(currentLead.formData.step5);
+        }
+      }
+    };
+
+    fetchEmploymentDetails();
+  }, [currentLead?.appId]);
 
   const setField = (key: string, value: string) => setFormData({ ...formData, [key]: value });
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!currentLead) {
       toast({
         title: 'Error',
@@ -64,19 +145,96 @@ export default function EmploymentDetailsPage() {
       return;
     }
 
-    updateLead(currentLead.id, {
-      formData: {
-        ...currentLead.formData,
-        step5: formData,
-      },
-    });
+    // Map form data to API payload
+    let occupationType = formData.occupationType;
+    if (occupationType === 'self-employed-non-professional') occupationType = 'self_employed_non_professional';
+    if (occupationType === 'self-employed-professional') occupationType = 'self_employed_professional';
 
-    toast({
-      title: 'Success',
-      description: 'Employment details saved successfully.',
-    });
+    let natureOfOccupation = '';
+    let organizationName = '';
+    let designation = '';
+    let industry = '';
+    let officialEmail = '';
+    let registrationNumber = '';
 
-    router.push('/lead/new-lead-info');
+    if (formData.occupationType === 'salaried') {
+      natureOfOccupation = formData.natureOfBusiness;
+      organizationName = formData.employerName;
+      designation = formData.designation;
+      industry = formData.industry;
+      officialEmail = formData.officialEmail;
+    } else if (formData.occupationType === 'self-employed-non-professional') {
+      natureOfOccupation = formData.natureOfBusinessSENP;
+      organizationName = formData.orgNameSENP;
+      industry = formData.industrySENP;
+      officialEmail = formData.officialEmailSENP;
+    } else if (formData.occupationType === 'self-employed-professional') {
+      natureOfOccupation = formData.natureOfProfession;
+      organizationName = formData.orgNameSEP;
+      industry = formData.industrySEP;
+      registrationNumber = formData.registrationNumber;
+      officialEmail = formData.officialEmailSEP;
+    } else if (formData.occupationType === 'others') {
+      natureOfOccupation = formData.natureOfOccupation;
+    }
+
+    const formatDate = (dateStr: string) => {
+      if (!dateStr) return null;
+      try {
+        const date = parse(dateStr, 'dd-MM-yyyy', new Date());
+        return format(date, 'yyyy-MM-dd');
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const payload = {
+      application_id: currentLead.id,
+      occupation_type: occupationType,
+      nature_of_occupation: natureOfOccupation,
+      organization_name: organizationName,
+      designation: designation,
+      industry: industry || undefined,
+      employment_status: formData.employmentStatus || undefined,
+      monthly_income: formData.monthlyIncome,
+      employed_from: formatDate(formData.employedFrom),
+      employed_to: formatDate(formData.employedTo),
+      official_email: officialEmail,
+      registration_number: registrationNumber,
+    };
+
+    try {
+      const response = await submitEmploymentInfo(payload);
+
+      if (isApiError(response)) {
+        toast({
+          title: 'Error',
+          description: response.error || 'Failed to save employment details.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      updateLead(currentLead.id, {
+        formData: {
+          ...currentLead.formData,
+          step5: formData,
+        },
+      });
+
+      toast({
+        title: 'Success',
+        description: 'Employment details saved successfully.',
+      });
+
+      router.push('/lead/new-lead-info');
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleExit = () => {
@@ -272,6 +430,18 @@ export default function EmploymentDetailsPage() {
                   />
                 </div>
                 <div>
+                  <Label htmlFor="designation">
+                    Designation <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="designation"
+                    value={formData.designation}
+                    onChange={(e) => setField('designation', e.target.value)}
+                    placeholder="Enter designation"
+                    className="h-12"
+                  />
+                </div>
+                <div>
                   <Label htmlFor="natureOfBusiness">
                     Nature of Business <span className="text-red-500">*</span>
                   </Label>
@@ -310,11 +480,11 @@ export default function EmploymentDetailsPage() {
                       <SelectItem value="entertainment">Entertainment</SelectItem>
                       <SelectItem value="finance">Finance</SelectItem>
                       <SelectItem value="food">Food</SelectItem>
-                      <SelectItem value="gems-jewellery">Gems & Jewellery</SelectItem>
+                      <SelectItem value="gems_and_jewellery">Gems & Jewellery</SelectItem>
                       <SelectItem value="health">Health</SelectItem>
                       <SelectItem value="hospitality">Hospitality</SelectItem>
-                      <SelectItem value="other-services">Other Services</SelectItem>
-                      <SelectItem value="personal-care">Personal Care</SelectItem>
+                      <SelectItem value="other_services">Other Services</SelectItem>
+                      <SelectItem value="personal_care">Personal Care</SelectItem>
                       <SelectItem value="retail">Retail</SelectItem>
                       <SelectItem value="transportation">Transportation</SelectItem>
                     </SelectContent>
@@ -390,11 +560,11 @@ export default function EmploymentDetailsPage() {
                       <SelectItem value="entertainment">Entertainment</SelectItem>
                       <SelectItem value="finance">Finance</SelectItem>
                       <SelectItem value="food">Food</SelectItem>
-                      <SelectItem value="gems-jewellery">Gems & Jewellery</SelectItem>
+                      <SelectItem value="gems_and_jewellery">Gems & Jewellery</SelectItem>
                       <SelectItem value="health">Health</SelectItem>
                       <SelectItem value="hospitality">Hospitality</SelectItem>
-                      <SelectItem value="other-services">Other Services</SelectItem>
-                      <SelectItem value="personal-care">Personal Care</SelectItem>
+                      <SelectItem value="other_services">Other Services</SelectItem>
+                      <SelectItem value="personal_care">Personal Care</SelectItem>
                       <SelectItem value="retail">Retail</SelectItem>
                       <SelectItem value="transportation">Transportation</SelectItem>
                     </SelectContent>
@@ -472,11 +642,11 @@ export default function EmploymentDetailsPage() {
                       <SelectItem value="entertainment">Entertainment</SelectItem>
                       <SelectItem value="finance">Finance</SelectItem>
                       <SelectItem value="food">Food</SelectItem>
-                      <SelectItem value="gems-jewellery">Gems & Jewellery</SelectItem>
+                      <SelectItem value="gems_and_jewellery">Gems & Jewellery</SelectItem>
                       <SelectItem value="health">Health</SelectItem>
                       <SelectItem value="hospitality">Hospitality</SelectItem>
-                      <SelectItem value="other-services">Other Services</SelectItem>
-                      <SelectItem value="personal-care">Personal Care</SelectItem>
+                      <SelectItem value="other_services">Other Services</SelectItem>
+                      <SelectItem value="personal_care">Personal Care</SelectItem>
                       <SelectItem value="retail">Retail</SelectItem>
                       <SelectItem value="transportation">Transportation</SelectItem>
                     </SelectContent>

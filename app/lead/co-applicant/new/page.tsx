@@ -17,9 +17,14 @@ import { CheckCircle, Edit, Loader, Send } from 'lucide-react';
 
 const RELATIONSHIPS = [
   { value: 'spouse', label: 'Spouse' },
-  { value: 'parent', label: 'Parent' },
-  { value: 'child', label: 'Child' },
-  { value: 'sibling', label: 'Sibling' },
+  { value: 'father', label: 'Father' },
+  { value: 'mother', label: 'Mother' },
+  { value: 'son', label: 'Son' },
+  { value: 'daughter', label: 'Daughter' },
+  { value: 'brother', label: 'Brother' },
+  { value: 'sister', label: 'Sister' },
+  { value: 'friend', label: 'Friend' },
+  { value: 'business_partner', label: 'Business Partner' },
   { value: 'other', label: 'Other' },
 ];
 
@@ -442,6 +447,40 @@ function CoApplicantNewPageContent() {
         description: 'Co-applicant mobile verified.',
         className: 'bg-green-100 border-green-200',
       });
+
+      // Update co-applicant data and redirect
+      if (currentLead && activeCoApplicantId && coApplicant) {
+        const parts = deriveNameParts(formData.fullName);
+        const relationLabel = RELATIONSHIP_LABELS_MAP[formData.relation] ?? formData.relation;
+
+        updateCoApplicant(currentLead.id, activeCoApplicantId, {
+          relationship: formData.relation,
+          data: {
+            ...coApplicant.data,
+            step1: {
+              ...(coApplicant.data?.step1 ?? {}),
+              firstName: parts.firstName,
+              lastName: parts.lastName,
+              relation: relationLabel,
+              fullName: formData.fullName.trim(),
+              mobile: formData.mobile,
+              isMobileVerified: true,
+            },
+            basicDetails: {
+              ...(coApplicant.data?.basicDetails ?? {}),
+              firstName: parts.firstName,
+              lastName: parts.lastName,
+              relation: relationLabel,
+              fullName: formData.fullName.trim(),
+              mobile: formData.mobile,
+              isMobileVerified: true,
+            }
+          }
+        });
+
+        router.push('/lead/co-applicant-info');
+      }
+
     } catch (error: any) {
       toast({
         title: 'Verification Failed',
@@ -617,7 +656,7 @@ function CoApplicantNewPageContent() {
       });
     }
 
-    router.push('/lead/co-applicant-info');
+    router.push(`/lead/co-applicant/basic-details?coApplicantId=${targetId}`);
   };
 
   if (!currentLead) {
