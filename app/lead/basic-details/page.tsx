@@ -636,6 +636,7 @@ export default function Step2Page() {
         date_of_birth: formData.dob,
         gender: formData.gender,
         email: formData.email || undefined,
+        marital_status: formData.maritalStatus || undefined,
       });
 
       if (isApiError(response)) {
@@ -1038,14 +1039,16 @@ export default function Step2Page() {
                       <SelectValue placeholder="Select reason" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="not-handy">Not handy</SelectItem>
-                      <SelectItem value="not-allotted">Not allotted</SelectItem>
-                      <SelectItem value="name-change">Name change in progress</SelectItem>
+                      <SelectItem value="not_applied">Not Applied</SelectItem>
+                      <SelectItem value="application_pending">Application Pending</SelectItem>
+                      <SelectItem value="document_lost">Document Lost</SelectItem>
+                      <SelectItem value="document_damaged">Document Damaged</SelectItem>
+                      <SelectItem value="name_mismatch">Name Mismatch</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                {(formData.panUnavailabilityReason === 'other' || formData.panUnavailabilityReason === 'name-change') && (
+                {formData.panUnavailabilityReason === 'other' && (
                   <div>
                     <Label className="text-sm font-medium text-[#003366] mb-2 block">Notes</Label>
                     <Textarea
@@ -1074,9 +1077,9 @@ export default function Step2Page() {
                       <SelectValue placeholder="Select ID Type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Passport">Passport</SelectItem>
-                      <SelectItem value="Voter ID">Voter ID</SelectItem>
-                      <SelectItem value="Driving License">Driving License</SelectItem>
+                      <SelectItem value="voter_id">Voter ID</SelectItem>
+                      <SelectItem value="driving_license">Driving License</SelectItem>
+                      <SelectItem value="passport">Passport</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard, Check, AlertTriangle, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard, Check, AlertTriangle, RefreshCw, ShieldCheck, Info } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult, getRequiredDocuments, getCoApplicantRequiredDocuments, type DocumentStatus, initiateAccountAggregator, resendAccountAggregatorConsent, getAccountAggregatorStatus, initiateCoApplicantAccountAggregator, resendCoApplicantAccountAggregatorConsent, getCoApplicantAccountAggregatorStatus, uploadDocument } from '@/lib/api';
+import { fetchPaymentStatus, getDetailedInfo, isApiError, type ApiSuccess, type ApplicationDetails, type Participant, type CollateralDetails, type LoanDetails, type PaymentResult, getRequiredDocuments, getCoApplicantRequiredDocuments, type DocumentStatus, initiateAccountAggregator, resendAccountAggregatorConsent, getAccountAggregatorStatus, initiateCoApplicantAccountAggregator, resendCoApplicantAccountAggregatorConsent, getCoApplicantAccountAggregatorStatus, uploadDocument, getBreQuestions, type BreQuestion } from '@/lib/api';
 
 const DOC_LABELS: Record<string, string> = {
   aadhaar_card: 'Aadhaar Card',
@@ -66,6 +66,7 @@ export default function NewLeadInfoPage() {
   const [isAadhaarUploading, setIsAadhaarUploading] = useState(false);
   const [aaStatus, setAaStatus] = useState<Record<string, { status: string; loading: boolean }>>({});
   const [locationCoords, setLocationCoords] = useState<{ latitude: string; longitude: string } | null>(null);
+  const [breQuestions, setBreQuestions] = useState<BreQuestion[]>([]);
 
   // Get location for upload
   useEffect(() => {
@@ -327,6 +328,32 @@ export default function NewLeadInfoPage() {
     fetchDocs();
   }, [currentLead?.appId, detailedInfo]);
 
+  // Fetch BRE questions to determine Risk & Eligibility status
+  useEffect(() => {
+    if (!currentLead?.appId) {
+      setBreQuestions([]);
+      return;
+    }
+
+    const fetchBreQuestions = async () => {
+      try {
+        const response = await getBreQuestions(currentLead.appId);
+        if (!isApiError(response) && response.success) {
+          const responseData = (response as any).data || response;
+          const questionsData = Array.isArray(responseData) ? responseData : (responseData.data || []);
+          setBreQuestions(questionsData);
+        } else {
+          setBreQuestions([]);
+        }
+      } catch (error) {
+        console.error('Failed to fetch BRE questions', error);
+        setBreQuestions([]);
+      }
+    };
+
+    fetchBreQuestions();
+  }, [currentLead?.appId]);
+
   useEffect(() => {
     if (!currentLead?.appId) return;
 
@@ -484,6 +511,27 @@ export default function NewLeadInfoPage() {
   const uploadedDocuments = useMemo(() => {
     return currentLead?.formData?.step8?.files || [];
   }, [currentLead?.formData?.step8?.files]);
+
+  // Count uploaded documents from required-documents API
+  const uploadedDocumentsCount = useMemo(() => {
+    let count = 0;
+    
+    // Count applicant documents
+    if (applicantDocs) {
+      count += Object.entries(applicantDocs).filter(([_, status]) => status.uploaded === true).length;
+    }
+    
+    // Count co-applicant documents
+    if (coApplicantDocs) {
+      Object.values(coApplicantDocs).forEach((docs) => {
+        if (docs) {
+          count += Object.entries(docs).filter(([_, status]) => status.uploaded === true).length;
+        }
+      });
+    }
+    
+    return count;
+  }, [applicantDocs, coApplicantDocs]);
 
   const getDocumentOwnerLabel = useCallback(
     (file: any) => {
@@ -657,21 +705,38 @@ export default function NewLeadInfoPage() {
   };
 
   // Calculate Applicant Details overall status
-  // Both sections must be completed (via API) for this to be marked as completed
+  // All four sections (Basic Details, Address Details, Employment Details, Account Aggregator) must be completed
   const getApplicantDetailsStatus = (): SectionStatus => {
     if (!currentLead) return 'incomplete';
 
-    // Check completion flags - both must be true
-    if (currentLead.step2Completed === true && currentLead.step3Completed === true) {
+    // Get status for each section
+    const step2Status = getStep2Status();
+    const step3Status = getStep3Status();
+    const employmentStatus = getEmploymentStatus();
+    
+    // Check Account Aggregator status
+    const isAACompleted = aaStatus.primary?.status === 'COMPLETED' || 
+                         aaStatus.primary?.status === 'COMPLETE' || 
+                         aaStatus.primary?.status === 'SUCCESS' || 
+                         aaStatus.primary?.status === 'FAILED';
+
+    // All four sections must be completed
+    if (step2Status === 'completed' && 
+        step3Status === 'completed' && 
+        employmentStatus === 'completed' && 
+        isAACompleted) {
       return 'completed';
     }
 
-    // Check if either section has been submitted
-    const step2Status = getStep2Status();
-    const step3Status = getStep3Status();
-
-    if (step2Status === 'incomplete' && step3Status === 'incomplete') return 'incomplete';
+    // If any section has been started, mark as in-progress
+    if (step2Status !== 'incomplete' || 
+        step3Status !== 'incomplete' || 
+        employmentStatus !== 'incomplete' || 
+        isAACompleted) {
     return 'in-progress';
+    }
+
+    return 'incomplete';
   };
 
   const getCoApplicantStatus = (): SectionStatus => {
@@ -746,6 +811,23 @@ export default function NewLeadInfoPage() {
 
     if (hasRequiredFields) return 'in-progress';
     if (step7.loanAmount > 0 || step7.loanPurpose || step7.sourcingChannel || step7.interestRate || step7.tenure) return 'in-progress';
+    return 'incomplete';
+  };
+
+  const getRiskEligibilityStatus = (): SectionStatus => {
+    if (!currentLead?.appId) return 'incomplete';
+
+    // If we have BRE questions, check if all are answered
+    if (breQuestions.length > 0) {
+      const allAnswered = breQuestions.every(q => q.status === 'answered');
+      if (allAnswered) {
+        return 'completed';
+      }
+      // If there are questions but not all answered, it's in progress
+      return 'in-progress';
+    }
+
+    // If no questions exist, it's incomplete
     return 'incomplete';
   };
 
@@ -890,7 +972,7 @@ export default function NewLeadInfoPage() {
   const paymentStepStatus: SectionStatus = isPaymentCompleted ? 'completed' : paymentStatus === 'Failed' ? 'in-progress' : 'in-progress';
   const documentsStepStatus: SectionStatus = areAllDocumentsUploaded
     ? 'completed'
-    : uploadedDocuments.length > 0
+    : uploadedDocumentsCount > 0
       ? 'in-progress'
       : 'incomplete';
   const isDocumentsCompleted = documentsStepStatus === 'completed';
@@ -1001,19 +1083,25 @@ export default function NewLeadInfoPage() {
     const hasDetails = step2Status !== 'incomplete' && (primaryParticipant || currentLead);
     const showPanVerifiedPill =
       hasDetails &&
-      (currentLead?.formData?.step2?.autoFilledViaPAN ||
+      (applicantDocs?.pan_card?.uploaded ||
+        currentLead?.formData?.step2?.autoFilledViaPAN ||
         Boolean(primaryParticipant?.personal_info?.pan_number?.verified));
 
     return (
-      <div className={cn(tileWrapperClass, "flex-col !items-stretch h-auto")}>
-        <div className="flex w-full justify-between items-start gap-3">
-          <div className="flex items-start gap-3 flex-1 min-w-0">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
-              <UserCheck className="w-5 h-5" />
+      <div className="border-b border-gray-300 pb-4 mb-4 last:border-0 last:mb-0">
+        {/* Title with Badge */}
+        <div className="flex items-center gap-2 mb-4">
+          <h3 className="text-base font-semibold text-gray-900">Basic Details</h3>
+          {showPanVerifiedPill && (
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+              Verified via PAN
+            </Badge>
+          )}
             </div>
-            <div className="flex-1 min-w-0">
+
+        {/* Fields */}
               {hasDetails ? (
-                <div className="space-y-2.5">
+          <div className="space-y-1 mb-4">
                   {(() => {
                     const fullName = primaryParticipant?.personal_info?.full_name;
                     const nameValue = fullName?.value || (typeof fullName === 'string' ? fullName : null);
@@ -1026,12 +1114,12 @@ export default function NewLeadInfoPage() {
 
                     if (!displayName) return null;
                     return (
-                      <div className="flex items-start gap-2">
-                        {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
-                        <p className="text-sm leading-relaxed">
-                          <span className="font-semibold text-gray-700">Full Name:</span>{' '}
-                          <span className="text-gray-900">{displayName}</span>
-                        </p>
+                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                  <div className="w-5 flex items-center justify-start">
+                    {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                  </div>
+                  <span className="font-semibold text-gray-700 text-sm">Name:</span>
+                  <span className="text-gray-900 text-sm">{displayName}</span>
                       </div>
                     );
                   })()}
@@ -1047,12 +1135,12 @@ export default function NewLeadInfoPage() {
                       : dobDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
                     return (
-                      <div className="flex items-start gap-2">
-                        {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
-                        <p className="text-sm leading-relaxed">
-                          <span className="font-semibold text-gray-700">Date of Birth:</span>{' '}
-                          <span className="text-gray-900">{formatted}</span>
-                        </p>
+                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                  <div className="w-5 flex items-center justify-start">
+                    {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                  </div>
+                  <span className="font-semibold text-gray-700 text-sm">Date of Birth:</span>
+                  <span className="text-gray-900 text-sm">{formatted}</span>
                       </div>
                     );
                   })()}
@@ -1063,12 +1151,12 @@ export default function NewLeadInfoPage() {
 
                     if (panValue) {
                       return (
-                        <div className="flex items-start gap-2">
-                          {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
-                          <p className="text-sm leading-relaxed">
-                            <span className="font-semibold text-gray-700">PAN Number:</span>{' '}
-                            <span className="text-gray-900">{panValue}</span>
-                          </p>
+                  <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                    <div className="w-5 flex items-center justify-start">
+                      {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                    </div>
+                    <span className="font-semibold text-gray-700 text-sm">PAN Number:</span>
+                    <span className="text-gray-900 text-sm">{panValue}</span>
                         </div>
                       );
                     }
@@ -1076,10 +1164,10 @@ export default function NewLeadInfoPage() {
                     const step2 = currentLead?.formData?.step2;
                     if (step2?.hasPan === 'no' && step2?.alternateIdType && step2?.documentNumber) {
                       return (
-                        <p className="text-sm leading-relaxed">
-                          <span className="font-semibold text-gray-700">{step2.alternateIdType}:</span>{' '}
-                          <span className="text-gray-900">{step2.documentNumber}</span>
-                        </p>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-700 text-sm">{step2.alternateIdType}</span>
+                    <span className="text-gray-900 text-sm">{step2.documentNumber}</span>
+                  </div>
                       );
                     }
                     return null;
@@ -1091,12 +1179,12 @@ export default function NewLeadInfoPage() {
 
                     if (!mobileValue) return null;
                     return (
-                      <div className="flex items-start gap-2">
-                        {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
-                        <p className="text-sm leading-relaxed">
-                          <span className="font-semibold text-gray-700">Mobile:</span>{' '}
-                          <span className="text-gray-900">{mobileValue}</span>
-                        </p>
+                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                  <div className="w-5 flex items-center justify-start">
+                    {isVerified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                  </div>
+                  <span className="font-semibold text-gray-700 text-sm">Mobile Number:</span>
+                  <span className="text-gray-900 text-sm">{mobileValue}</span>
                       </div>
                     );
                   })()}
@@ -1104,29 +1192,30 @@ export default function NewLeadInfoPage() {
                     const gender = primaryParticipant?.personal_info?.gender || currentLead?.gender;
                     if (!gender) return null;
                     return (
-                      <p className="text-sm leading-relaxed">
-                        <span className="font-semibold text-gray-700">Gender:</span>{' '}
-                        <span className="text-gray-900">{gender.charAt(0).toUpperCase() + gender.slice(1)}</span>
-                      </p>
+                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                  <div className="w-5"></div>
+                  <span className="font-semibold text-gray-700 text-sm">Gender:</span>
+                  <span className="text-gray-900 text-sm">{gender.charAt(0).toUpperCase() + gender.slice(1)}</span>
+                </div>
                     );
                   })()}
                 </div>
               ) : (
-                <div className="space-y-1">
+          <div className="space-y-1 mb-4">
                   <p className="font-semibold text-gray-900 text-sm">No basic details added yet</p>
                   <p className="text-xs text-gray-500">Upload PAN to auto-fill Name, DOB & PAN Number</p>
                 </div>
               )}
-            </div>
-          </div>
-          <div className="flex flex-col items-end gap-2 flex-shrink-0">
 
-            {applicantDocs?.pan_card?.uploaded && (
-              <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
-                Verified via PAN
-              </Badge>
-            )}
-            {renderSectionStatusPill(step2Status)}
+        {/* Information Box */}
+        {hasDetails && (currentLead?.formData?.step2?.autoFilledViaPAN || primaryParticipant?.personal_info?.pan_number?.verified) && (
+          <div className="bg-blue-50 rounded-lg p-3 flex gap-3 mb-4">
+            <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-gray-500 leading-relaxed">Auto-filled and verified via PAN & NSDL workflow</p>
+          </div>
+        )}
+
+        {/* Edit Button */}
             <Button
               variant="outline"
               size="sm"
@@ -1135,19 +1224,6 @@ export default function NewLeadInfoPage() {
             >
               Edit
             </Button>
-          </div>
-        </div>
-        {
-          hasDetails && (
-            <div className="pt-3 mt-3 border-t border-gray-100 w-full">
-              {currentLead?.step2Completed === true ? (
-                <p className="text-xs text-gray-500 leading-relaxed w-full">Submitted by RM</p>
-              ) : (currentLead?.formData?.step2?.autoFilledViaPAN || primaryParticipant?.personal_info?.pan_number?.verified) ? (
-                <p className="text-xs text-gray-500 leading-relaxed w-full">Auto-filled and verified via PAN & NSDL workflow.</p>
-              ) : null}
-            </div>
-          )
-        }
       </div>
     );
   };
@@ -1160,87 +1236,96 @@ export default function NewLeadInfoPage() {
     const apiAddresses = primaryParticipant?.addresses || [];
     const formAddresses = currentLead?.formData?.step3?.addresses || [];
     const showAadhaarVerifiedPill = Boolean(
+      applicantDocs?.aadhaar_card?.uploaded ||
       currentLead?.formData?.step3?.autoFilledViaAadhaar ||
       formAddresses.some((addr: any) => addr?.autoFilledViaAadhaar) ||
       apiAddresses.some((addr: any) => addr?.autoFilledViaAadhaar || addr?.auto_filled_via_aadhaar)
     );
 
-    return (
-      <div className={tileWrapperClass}>
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
-            <MapPin className="w-5 h-5" />
-          </div>
-          <div className="flex-1 min-w-0">
-            {hasDetails ? (
-              <div className="space-y-2.5">
-                {(() => {
+    // Get primary address (residential/current address)
                   const addressesToShow =
                     apiAddresses.length > 0
                       ? apiAddresses.map((addr) => ({
                         address_line_1: addr.address_line_1,
-                        city: addr.city,
+          address_line_2: addr.address_line_2,
+          address_line_3: addr.address_line_3,
                         pincode: addr.pincode,
                         is_primary: addr.is_primary,
+          address_type: addr.address_type,
                       }))
                       : formAddresses.map((addr: any) => ({
                         address_line_1: addr.addressLine1,
-                        city: addr.city,
+          address_line_2: addr.addressLine2,
+          address_line_3: addr.addressLine3,
                         pincode: addr.postalCode,
                         is_primary: addr.isPrimary,
+          address_type: addr.addressType,
                       }));
 
-                  if (addressesToShow.length === 0) return null;
-                  const primaryAddress = addressesToShow.find((addr: any) => addr.is_primary) || addressesToShow[0];
+    const primaryAddress = addressesToShow.find((addr: any) => 
+      addr.is_primary || addr.address_type === 'residential' || addr.address_type === 'current'
+    ) || addressesToShow[0];
 
                   return (
-                    <>
-                      {primaryAddress.address_line_1 && (
-                        <div className="flex items-start gap-2">
-                          {showAadhaarVerifiedPill && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
-                          <p className="text-sm leading-relaxed">
-                            <span className="font-semibold text-gray-700">Address:</span>{' '}
-                            <span className="text-gray-900">{primaryAddress.address_line_1}</span>
-                          </p>
-                        </div>
-                      )}
-                      {primaryAddress.city && (
-                        <div className="flex items-start gap-2">
-                          {showAadhaarVerifiedPill && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
-                          <p className="text-sm leading-relaxed">
-                            <span className="font-semibold text-gray-700">City:</span>{' '}
-                            <span className="text-gray-900">{primaryAddress.city}</span>
-                          </p>
-                        </div>
-                      )}
-                      {primaryAddress.pincode && (
-                        <div className="flex items-start gap-2">
-                          {showAadhaarVerifiedPill && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />}
-                          <p className="text-sm leading-relaxed">
-                            <span className="font-semibold text-gray-700">Pincode:</span>{' '}
-                            <span className="text-gray-900">{primaryAddress.pincode}</span>
-                          </p>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <p className="font-semibold text-gray-900 text-sm">Address details</p>
-                <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill address</p>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          {(showAadhaarVerifiedPill || applicantDocs?.aadhaar_card?.uploaded) && (
+      <div className="border-b border-gray-300 pb-4 mb-4 last:border-0 last:mb-0">
+        {/* Title with Badge */}
+        <div className="flex items-center gap-2 mb-4">
+          <h3 className="text-base font-semibold text-gray-900">Address Details</h3>
+          {showAadhaarVerifiedPill && (
             <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
               Verified via Aadhaar
             </Badge>
           )}
-          {renderSectionStatusPill(step3Status)}
+        </div>
+
+        {/* Fields */}
+        {hasDetails && primaryAddress ? (
+          <div className="space-y-1 mb-4">
+                      {primaryAddress.address_line_1 && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Address Line 1:</span>
+                <span className="text-gray-900 text-sm">{primaryAddress.address_line_1}</span>
+                        </div>
+                      )}
+            {primaryAddress.address_line_2 && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Address Line 2:</span>
+                <span className="text-gray-900 text-sm">{primaryAddress.address_line_2}</span>
+              </div>
+            )}
+            {primaryAddress.address_line_3 && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Address Line 3:</span>
+                <span className="text-gray-900 text-sm">{primaryAddress.address_line_3}</span>
+                        </div>
+                      )}
+                      {primaryAddress.pincode && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Pincode:</span>
+                <span className="text-gray-900 text-sm">{primaryAddress.pincode}</span>
+                        </div>
+                      )}
+              </div>
+            ) : (
+          <div className="space-y-1 mb-4">
+                <p className="font-semibold text-gray-900 text-sm">Address details</p>
+                <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill address</p>
+              </div>
+            )}
+
+        {/* Information Box */}
+        {hasDetails && showAadhaarVerifiedPill && (
+          <div className="bg-blue-50 rounded-lg p-3 flex gap-3 mb-4">
+            <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-gray-500 leading-relaxed">Auto-filled and verified via Aadhaar OCR workflow</p>
+          </div>
+        )}
+
+        {/* Edit Button */}
           <Button
             variant="outline"
             size="sm"
@@ -1249,7 +1334,6 @@ export default function NewLeadInfoPage() {
           >
             Edit
           </Button>
-        </div>
       </div>
     );
   };
@@ -1261,25 +1345,10 @@ export default function NewLeadInfoPage() {
     const formEmploymentDetails = currentLead?.formData?.step5;
 
     const hasDetails = employmentStatus !== 'incomplete' && (apiEmploymentDetails || formEmploymentDetails);
+    const isCompleted = employmentStatus === 'completed';
 
-    return (
-      <div className={tileWrapperClass}>
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 flex-shrink-0">
-            <Briefcase className="w-5 h-5" />
-          </div>
-          <div className="flex-1 min-w-0">
-            {hasDetails ? (
-              <div className="space-y-2">
-                {(() => {
                   // Prioritize API data
                   const data = apiEmploymentDetails || formEmploymentDetails;
-                  if (!data) return null;
-
-                  // Map API fields to display labels if needed, or use existing logic
-                  // API structure: occupation_type, organization_name, etc.
-                  // Form structure: occupationType, employerName, etc.
-
                   const occupationType = apiEmploymentDetails ? apiEmploymentDetails.occupation_type : formEmploymentDetails?.occupationType;
 
                   const occupationTypeLabels: Record<string, string> = {
@@ -1289,63 +1358,106 @@ export default function NewLeadInfoPage() {
                     others: 'Others',
                   };
 
-                  const displayOccupation = occupationTypeLabels[occupationType] || occupationType;
+    const displayOccupation = occupationType ? (occupationTypeLabels[occupationType] || occupationType) : null;
+
+    // Format monthly income
+    const formatMonthlyIncome = (income: string | number | undefined): string => {
+      if (!income) return '';
+      const numValue = typeof income === 'string' ? parseFloat(income) : income;
+      if (isNaN(numValue)) return '';
+      return `₹${numValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
+    const monthlyIncome = apiEmploymentDetails?.monthly_income || formEmploymentDetails?.monthlyIncome;
+    const formattedIncome = formatMonthlyIncome(monthlyIncome);
+
+    // Format date
+    const formatDate = (dateStr: string | undefined): string => {
+      if (!dateStr) return '';
+      try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return dateStr;
+        return date.toISOString().split('T')[0];
+      } catch {
+        return dateStr;
+      }
+    };
+
+    const employedFrom = apiEmploymentDetails?.employed_from || formEmploymentDetails?.employedFrom;
+    const formattedEmployedFrom = formatDate(employedFrom);
 
                   return (
-                    <>
-                      <p className="text-sm leading-relaxed">
-                        <span className="font-semibold text-gray-700">Occupation Type:</span>{' '}
-                        <span className="text-gray-900">{displayOccupation}</span>
-                      </p>
+      <div className="border-b border-gray-300 pb-4 mb-4 last:border-0 last:mb-0">
+        {/* Title with Badge */}
+        <div className="flex items-center gap-2 mb-4">
+          <h3 className="text-base font-semibold text-gray-900">Employment Details</h3>
+          {isCompleted && (
+            <Badge className="rounded-full bg-green-100 border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+              Completed
+            </Badge>
+          )}
+        </div>
 
-                      {occupationType === 'salaried' && (
-                        <>
-                          {(apiEmploymentDetails?.organization_name || formEmploymentDetails?.employerName) && (
-                            <p className="text-sm leading-relaxed">
-                              <span className="font-semibold text-gray-700">Employer:</span>{' '}
-                              <span className="text-gray-900">{apiEmploymentDetails?.organization_name || formEmploymentDetails?.employerName}</span>
-                            </p>
-                          )}
-                          {(apiEmploymentDetails?.employment_status || formEmploymentDetails?.employmentStatus) && (
-                            <p className="text-sm leading-relaxed">
-                              <span className="font-semibold text-gray-700">Status:</span>{' '}
-                              <span className="text-gray-900">{(apiEmploymentDetails?.employment_status || formEmploymentDetails?.employmentStatus) === 'present' ? 'Present' : 'Past'}</span>
-                            </p>
-                          )}
-                        </>
-                      )}
-
-                      {(occupationType === 'self-employed-non-professional' || occupationType === 'self-employed-professional') && (
-                        (apiEmploymentDetails?.organization_name || formEmploymentDetails?.orgNameSENP || formEmploymentDetails?.orgNameSEP) && (
-                          <p className="text-sm leading-relaxed">
-                            <span className="font-semibold text-gray-700">Organization:</span>{' '}
-                            <span className="text-gray-900">{apiEmploymentDetails?.organization_name || formEmploymentDetails?.orgNameSENP || formEmploymentDetails?.orgNameSEP}</span>
-                          </p>
-                        )
-                      )}
-
-                      {occupationType === 'others' && (apiEmploymentDetails?.nature_of_occupation || formEmploymentDetails?.natureOfOccupation) && (
-                        <p className="text-sm leading-relaxed">
-                          <span className="font-semibold text-gray-700">Nature:</span>{' '}
-                          <span className="text-gray-900">{(apiEmploymentDetails?.nature_of_occupation || formEmploymentDetails?.natureOfOccupation).charAt(0).toUpperCase() + (apiEmploymentDetails?.nature_of_occupation || formEmploymentDetails?.natureOfOccupation).slice(1)}</span>
-                        </p>
-                      )}
-
-                      <p className="text-xs text-gray-500 leading-relaxed pt-1">Submitted by RM</p>
-                    </>
-                  );
-                })()}
+        {/* Fields */}
+        {hasDetails && data ? (
+          <div className="space-y-1 mb-4">
+            {displayOccupation && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Occupation:</span>
+                <span className="text-gray-900 text-sm">{displayOccupation}</span>
+              </div>
+            )}
+            {(apiEmploymentDetails?.organization_name || formEmploymentDetails?.employerName || formEmploymentDetails?.orgNameSENP || formEmploymentDetails?.orgNameSEP) && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Company:</span>
+                <span className="text-gray-900 text-sm">
+                  {apiEmploymentDetails?.organization_name || formEmploymentDetails?.employerName || formEmploymentDetails?.orgNameSENP || formEmploymentDetails?.orgNameSEP}
+                </span>
+              </div>
+            )}
+            {(apiEmploymentDetails?.designation || formEmploymentDetails?.designation) && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Designation:</span>
+                <span className="text-gray-900 text-sm">
+                  {apiEmploymentDetails?.designation || formEmploymentDetails?.designation}
+                </span>
+              </div>
+            )}
+            {formattedIncome && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Monthly Income:</span>
+                <span className="text-gray-900 text-sm">{formattedIncome}</span>
+              </div>
+            )}
+            {formattedEmployedFrom && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Employed From:</span>
+                <span className="text-gray-900 text-sm">{formattedEmployedFrom}</span>
+              </div>
+            )}
+            {(apiEmploymentDetails?.nature_of_occupation || formEmploymentDetails?.natureOfOccupation) && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Nature:</span>
+                <span className="text-gray-900 text-sm">
+                  {(apiEmploymentDetails?.nature_of_occupation || formEmploymentDetails?.natureOfOccupation).charAt(0).toUpperCase() + (apiEmploymentDetails?.nature_of_occupation || formEmploymentDetails?.natureOfOccupation).slice(1)}
+                </span>
+              </div>
+            )}
               </div>
             ) : (
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-gray-900">Employment details</p>
+          <div className="space-y-1 mb-4">
+            <p className="font-semibold text-gray-900 text-sm">Employment details</p>
                 <p className="text-xs text-gray-500">Enter employment details</p>
               </div>
             )}
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          {renderSectionStatusPill(employmentStatus)}
+
+        {/* Edit Button */}
           <Button
             variant="outline"
             size="sm"
@@ -1354,7 +1466,6 @@ export default function NewLeadInfoPage() {
           >
             Edit
           </Button>
-        </div>
       </div>
     );
   };
@@ -1366,25 +1477,65 @@ export default function NewLeadInfoPage() {
     const isPending = status?.status === 'PENDING';
 
     return (
-      <div className={tileWrapperClass}>
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-            <Database className="w-5 h-5" />
+      <div className="border-b border-gray-300 pb-4 mb-4 last:border-0 last:mb-0">
+        {/* Title with Badge */}
+        <div className="flex items-center gap-2 mb-4">
+          <h3 className="text-base font-semibold text-gray-900">Account Aggregator</h3>
+          {isCompleted && (
+            <Badge className="rounded-full bg-green-100 border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+              Fetch Complete
+            </Badge>
+          )}
+          {isFailed && (
+            <Badge className="rounded-full bg-red-100 border border-red-200 text-red-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+              Failed
+            </Badge>
+          )}
+          {isPending && (
+            <Badge className="rounded-full bg-yellow-100 border border-yellow-200 text-yellow-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+              Pending
+            </Badge>
+          )}
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">Account Aggregator</p>
-            <p className="text-xs text-gray-500 mt-1">
-              {isCompleted ? 'Account Aggregator fetched successfully' : isFailed ? 'Account Aggregator verification failed' : isPending ? 'Verification Pending' : 'Initiate to fetch customer\'s bank statements digitally'}
-            </p>
+
+        {/* Success Message Box */}
+        {isCompleted && (
+          <div className="bg-green-50 rounded-lg p-3 flex gap-3 mb-4">
+            <div className="w-5 h-5 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0">
+              <CheckCircle className="w-4 h-4 text-white" />
           </div>
+            <p className="text-sm text-gray-700 leading-relaxed">Bank statement data received via Account Aggregator.</p>
         </div>
-        <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          {isCompleted ? (
-            <Badge className="bg-green-100 text-green-700 border-green-200">Completed</Badge>
-          ) : isFailed ? (
-            <Badge className="bg-red-100 text-red-700 border-red-200">Failed</Badge>
-          ) : isPending ? (
+        )}
+
+        {/* Error Message */}
+        {isFailed && (
+          <div className="bg-red-50 rounded-lg p-3 flex gap-3 mb-4">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <p className="text-sm text-gray-700 leading-relaxed">Account Aggregator verification failed</p>
+          </div>
+        )}
+
+        {/* Pending Message */}
+        {isPending && (
+          <div className="bg-yellow-50 rounded-lg p-3 flex gap-3 mb-4">
+            <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+            <p className="text-sm text-gray-700 leading-relaxed">Verification Pending</p>
+          </div>
+        )}
+
+        {/* No Status Message */}
+        {!isCompleted && !isFailed && !isPending && (
+          <div className="mb-4">
+            <p className="text-xs text-gray-500">Initiate to fetch customer's bank statements digitally</p>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        {!isCompleted && (
             <div className="flex items-center gap-2">
+            {isPending ? (
+              <>
               <Button
                 variant="outline"
                 size="sm"
@@ -1403,7 +1554,7 @@ export default function NewLeadInfoPage() {
               >
                 <RefreshCw className={cn("w-4 h-4", status?.loading && "animate-spin")} />
               </Button>
-            </div>
+              </>
           ) : (
             <Button
               variant="outline"
@@ -1416,6 +1567,7 @@ export default function NewLeadInfoPage() {
             </Button>
           )}
         </div>
+        )}
       </div>
     );
   };
@@ -1615,7 +1767,7 @@ export default function NewLeadInfoPage() {
           </>
         ) : (
           <>
-            <div className="pb-32 px-4 pt-4">
+            <div className="pb-32 px-2 sm:px-3 pt-4">
               {/* Progress Bar */}
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-2">
@@ -1651,10 +1803,13 @@ export default function NewLeadInfoPage() {
                 "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
                 applicantStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
               )}>
-                <CardContent className="p-5">
+                <CardContent className="p-4">
                   {/* Header */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                    <h3 className="text-base sm:text-lg font-semibold text-gray-900">Applicant Details</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <UserCheck className="w-5 h-5 text-blue-600" />
+                      <h3 className="text-lg font-semibold text-gray-900">Applicant Details</h3>
+                    </div>
                     <div className="flex items-center gap-2">
                       {getStatusBadge(applicantStatus)}
                     </div>
@@ -1683,9 +1838,12 @@ export default function NewLeadInfoPage() {
                 hasCoApplicants && coApplicantStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600",
                 shouldHideCards && "hidden"
               )}>
-                <CardContent className="p-5 space-y-5">
+                <CardContent className="p-4 space-y-5">
                   <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-5 h-5 text-blue-600" />
                     <h3 className="text-lg font-semibold text-gray-900">Co-Applicant(s)</h3>
+                    </div>
                     {isCoApplicantsLoading ? (
                       <Badge className="rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
                         Loading...
@@ -1711,14 +1869,9 @@ export default function NewLeadInfoPage() {
                     </div>
                   ) : !hasCoApplicants ? (
                     <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-start gap-3 flex-1 min-w-0">
-                        <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                          <Users className="w-5 h-5 text-blue-600" />
-                        </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-900">No co-applicants added yet</p>
                           <p className="text-xs text-gray-500">Add a co-applicant to continue joint application processing</p>
-                        </div>
                       </div>
                       <Button
                         variant="outline"
@@ -1732,10 +1885,6 @@ export default function NewLeadInfoPage() {
                   ) : (
                     <>
                       <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                            <Users className="w-5 h-5 text-blue-600" />
-                          </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-900">
                               {coApplicantCount} co-applicant{coApplicantCount > 1 ? 's' : ''} added
@@ -1743,7 +1892,6 @@ export default function NewLeadInfoPage() {
                             <p className="text-xs text-gray-500">
                               Manage details and documents for each co-applicant.
                             </p>
-                          </div>
                         </div>
                         <Button
                           variant="outline"
@@ -1865,103 +2013,104 @@ export default function NewLeadInfoPage() {
                 collateralStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600",
                 shouldHideCards && "hidden"
               )}>
-                <CardContent className="p-5">
+                <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Home className="w-5 h-5 text-blue-600" />
                     <h3 className="text-lg font-semibold text-gray-900">Collateral Details</h3>
+                    </div>
                     <div className="flex items-center gap-2">
                       {getStatusBadge(collateralStatus)}
                     </div>
                   </div>
 
-                  <div className="flex items-start justify-between gap-4 mb-4">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                        <Home className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
+                  {/* Fields */}
                         {collateralStatus !== 'incomplete' && (detailedInfo?.collateral_details || currentLead?.formData?.step6) ? (
-                          <div className="space-y-1">
+                      <div className="space-y-1 mb-4">
                             {(() => {
                               const collateral = detailedInfo?.collateral_details;
                               const step6 = currentLead?.formData?.step6;
 
                               const collateralType = collateral?.collateral_type || step6?.collateralType || '';
-                              const typeLabel = collateralType === 'ready-property' ? 'Apartment' :
-                                collateralType === 'builder-property-under-construction' ? 'Builder Property' :
-                                  collateralType === 'construction-on-land' ? 'Construction on Land' :
-                                    collateralType === 'plot-self-construction' ? 'Plot + Self Construction' :
-                                      collateralType === 'purchase-plot' ? 'Plot' :
-                                        collateralType || 'Property';
+                          const ownershipType = collateral?.ownership_type || step6?.ownershipType || '';
                               const value = collateral?.estimated_property_value || step6?.propertyValue || 0;
+                          const description = collateral?.collateral_description || step6?.description || '';
+
+                          // Format value
                               const formattedValue = typeof value === 'string'
-                                ? parseFloat(value).toLocaleString('en-IN')
-                                : value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                            ? parseFloat(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                            : value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                          // Get location
+                          const location = collateral?.location || collateral?.address || step6?.location;
+                          const locationParts = [];
+                          if (location?.address_line_1) locationParts.push(location.address_line_1);
+                          if (location?.address_line_2) locationParts.push(location.address_line_2);
+                          if (location?.address_line_3) locationParts.push(location.address_line_3);
+                          if (location?.pincode) locationParts.push(location.pincode);
+                          const locationString = locationParts.length > 0 ? locationParts.join(', ') : '';
 
                               return (
-                                <p className="text-sm font-semibold text-gray-900">
-                                  {typeLabel} ₹{formattedValue}
-                                </p>
-                              );
-                            })()}
-                            {detailedInfo?.collateral_details?.ownership_type && (
-                              <p className="text-xs text-gray-600">
-                                <span className="font-medium">Ownership:</span> {
-                                  detailedInfo.collateral_details.ownership_type === 'self_ownership' ? 'Self Ownership' :
-                                    detailedInfo.collateral_details.ownership_type === 'joint_ownership' ? 'Joint Ownership' :
-                                      detailedInfo.collateral_details.ownership_type
-                                }
-                              </p>
-                            )}
-                            {detailedInfo?.collateral_details?.address && (
-                              <div className="mt-2 space-y-0.5">
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">Address:</span> {[
-                                    detailedInfo.collateral_details.address.address_line_1,
-                                    detailedInfo.collateral_details.address.address_line_2,
-                                    detailedInfo.collateral_details.address.address_line_3
-                                  ].filter(Boolean).join(', ')}
-                                </p>
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">Location:</span> {[
-                                    detailedInfo.collateral_details.address.city,
-                                    detailedInfo.collateral_details.address.state,
-                                    detailedInfo.collateral_details.address.pincode
-                                  ].filter(Boolean).join(', ')}
-                                </p>
-                                {detailedInfo.collateral_details.address.landmark && (
-                                  <p className="text-xs text-gray-600">
-                                    <span className="font-medium">Landmark:</span> {detailedInfo.collateral_details.address.landmark}
-                                  </p>
-                                )}
+                            <>
+                              {collateralType && (
+                                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                  <div className="w-5"></div>
+                                  <span className="font-semibold text-gray-700 text-sm">Collateral Type:</span>
+                                  <span className="text-gray-900 text-sm">{collateralType}</span>
+                                </div>
+                              )}
+                              {ownershipType && (
+                                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                  <div className="w-5"></div>
+                                  <span className="font-semibold text-gray-700 text-sm">Ownership Type:</span>
+                                  <span className="text-gray-900 text-sm">
+                                    {ownershipType === 'self_ownership' ? 'self_ownership' :
+                                     ownershipType === 'joint_ownership' ? 'joint_ownership' :
+                                     ownershipType}
+                                  </span>
+                                </div>
+                              )}
+                              {locationString && (
+                                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                  <div className="w-5"></div>
+                                  <span className="font-semibold text-gray-700 text-sm">Location:</span>
+                                  <span className="text-gray-900 text-sm">{locationString}</span>
                               </div>
                             )}
-                            {detailedInfo?.collateral_details?.collateral_description && (
-                              <p className="text-xs text-gray-500 mt-1">
-                                {detailedInfo.collateral_details.collateral_description}
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">No property document uploaded</p>
-                            <p className="text-xs text-gray-500 mt-0.5">Upload or add property details manually</p>
+                              {value && (
+                                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                  <div className="w-5"></div>
+                                  <span className="font-semibold text-gray-700 text-sm">Estimated Value:</span>
+                                  <span className="text-gray-900 text-sm">₹ {formattedValue}</span>
+                                </div>
+                              )}
+                              {description && (
+                                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                  <div className="w-5"></div>
+                                  <span className="font-semibold text-gray-700 text-sm">Description:</span>
+                                  <span className="text-gray-900 text-sm">{description}</span>
                           </div>
                         )}
+                            </>
+                          );
+                        })()}
                       </div>
+                    ) : (
+                      <div className="space-y-1 mb-4">
+                        <p className="font-semibold text-gray-900 text-sm">No property document uploaded</p>
+                        <p className="text-xs text-gray-500">Upload or add property details manually</p>
                     </div>
+                    )}
+
+                    {/* Edit Button */}
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => router.push('/lead/collateral')}
-                      className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
+                      className={tileButtonClass}
                     >
                       Edit
                     </Button>
-                  </div>
-
-                  <div className="mt-4 pt-4 border-t border-gray-100">
-                    <p className="text-xs text-gray-400">No document linked</p>
-                  </div>
                 </CardContent>
               </Card>
 
@@ -1971,88 +2120,75 @@ export default function NewLeadInfoPage() {
                 loanStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600",
                 shouldHideCards && "hidden"
               )}>
-                <CardContent className="p-5">
+                <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <IndianRupee className="w-5 h-5 text-blue-600" />
                     <h3 className="text-lg font-semibold text-gray-900">Loan Requirement</h3>
+                    </div>
                     <div className="flex items-center gap-2">
                       {getStatusBadge(loanStatus)}
                     </div>
                   </div>
 
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                        <IndianRupee className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
+                  {/* Fields */}
                         {loanStatus !== 'incomplete' && (detailedInfo?.loan_details || currentLead?.formData?.step7) ? (
-                          <div className="space-y-1">
+                      <div className="space-y-1 mb-4">
                             {(() => {
                               const loanDetails = detailedInfo?.loan_details;
                               const step7 = currentLead?.formData?.step7;
 
                               const amount = loanDetails?.loan_amount_requested || step7?.loanAmount || currentLead?.loanAmount || 0;
                               const formattedAmount = typeof amount === 'string'
-                                ? parseFloat(amount).toLocaleString('en-IN')
-                                : amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                            ? parseFloat(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                            : amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
                               const tenureMonths = loanDetails?.tenure_months || step7?.tenure || 0;
-                              const tenureYears = Math.floor(Number(tenureMonths) / 12);
-                              const tenureMonthsRemainder = Number(tenureMonths) % 12;
-
                               const purpose = loanDetails?.loan_purpose || step7?.loanPurpose || currentLead?.loanPurpose || '';
-                              const purposeLabel = getLoanPurposeLabel(purpose);
 
                               return (
                                 <>
-                                  <p className="text-sm font-semibold text-gray-900">
-                                    ₹{formattedAmount}
-                                    {tenureYears > 0 && ` · ${tenureYears} Year${tenureYears > 1 ? 's' : ''}`}
-                                    {tenureMonthsRemainder > 0 && ` ${tenureMonthsRemainder} Month${tenureMonthsRemainder > 1 ? 's' : ''}`}
-                                    {tenureYears === 0 && tenureMonthsRemainder > 0 && ` · ${tenureMonthsRemainder} Month${tenureMonthsRemainder > 1 ? 's' : ''}`}
-                                    {purposeLabel && ` · ${purposeLabel}`}
-                                  </p>
-                                  {loanDetails?.interest_rate && (
-                                    <p className="text-xs text-gray-600">
-                                      <span className="font-medium">Interest Rate:</span> {loanDetails.interest_rate}%
-                                    </p>
-                                  )}
-                                  {loanDetails?.product_code && (
-                                    <p className="text-xs text-gray-600">
-                                      <span className="font-medium">Product:</span> {loanDetails.product_code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                                    </p>
-                                  )}
-                                  {loanDetails?.loan_purpose_description && (
-                                    <p className="text-xs text-gray-500 mt-1">
-                                      {loanDetails.loan_purpose_description}
-                                    </p>
-                                  )}
-                                  {loanDetails?.sourcing_channel && (
-                                    <p className="text-xs text-gray-600">
-                                      <span className="font-medium">Sourcing Channel:</span> {loanDetails.sourcing_channel.charAt(0).toUpperCase() + loanDetails.sourcing_channel.slice(1)}
-                                    </p>
+                              {amount > 0 && (
+                                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                  <div className="w-5"></div>
+                                  <span className="font-semibold text-gray-700 text-sm">Loan Amount:</span>
+                                  <span className="text-gray-900 text-sm">{formattedAmount}</span>
+                                </div>
+                              )}
+                              {purpose && (
+                                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                  <div className="w-5"></div>
+                                  <span className="font-semibold text-gray-700 text-sm">Loan Purpose:</span>
+                                  <span className="text-gray-900 text-sm">{purpose}</span>
+                                </div>
+                              )}
+                              {tenureMonths > 0 && (
+                                <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                  <div className="w-5"></div>
+                                  <span className="font-semibold text-gray-700 text-sm">Tenure:</span>
+                                  <span className="text-gray-900 text-sm">{tenureMonths} months</span>
+                                </div>
                                   )}
                                 </>
                               );
                             })()}
                           </div>
                         ) : (
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">No loan requirement details available</p>
-                            <p className="text-xs text-gray-500 mt-0.5">Upload supporting docs or start manually</p>
+                      <div className="space-y-1 mb-4">
+                        <p className="font-semibold text-gray-900 text-sm">No loan requirement details available</p>
+                        <p className="text-xs text-gray-500">Upload supporting docs or start manually</p>
                           </div>
                         )}
-                      </div>
-                    </div>
+
+                    {/* Edit Button */}
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => router.push('/lead/loan-requirement')}
-                      className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-shrink-0"
+                      className={tileButtonClass}
                     >
                       Edit
                     </Button>
-                  </div>
                 </CardContent>
               </Card>
 
@@ -2061,21 +2197,18 @@ export default function NewLeadInfoPage() {
                 "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 border-l-blue-600",
                 shouldHideCards && "hidden"
               )}>
-                <CardContent className="p-5">
+                <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Risk & Eligibility</h3>
                     <div className="flex items-center gap-2">
-                      <Badge className="rounded-full bg-gray-100 border border-gray-200 text-gray-600">
-                        Pending
-                      </Badge>
+                      <ShieldCheck className="w-5 h-5 text-blue-600" />
+                    <h3 className="text-lg font-semibold text-gray-900">Risk & Eligibility</h3>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {renderSectionStatusPill(getRiskEligibilityStatus())}
                     </div>
                   </div>
 
                   <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                        <AlertTriangle className="w-5 h-5 text-blue-600" />
-                      </div>
                       <div className="flex-1 min-w-0">
                         <div className="space-y-1">
                           <p className="text-sm font-semibold text-gray-900">
@@ -2084,7 +2217,6 @@ export default function NewLeadInfoPage() {
                           <p className="text-xs text-gray-500">
                             Complete application to view risk assessment
                           </p>
-                        </div>
                       </div>
                     </div>
                     <Button
@@ -2107,24 +2239,19 @@ export default function NewLeadInfoPage() {
                 isPaymentCompleted ? "border-l-green-600" : "border-l-blue-600",
                 !areAllDataCardsCompleted && "hidden"
               )}>
-                <CardContent className="p-5">
+                <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="w-5 h-5 text-blue-600" />
                     <h3 className="text-lg font-semibold text-gray-900">Payment Details</h3>
+                    </div>
+                    <div className="flex items-center gap-2">
                     {renderPaymentStatusBadge()}
+                    </div>
                   </div>
 
                   {isPaymentCompleted || isWaiverPending ? (
                     <div className="mb-4 space-y-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                          {paymentStatus === 'Waived' || isWaiverPending ? (
-                            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
-                              <CheckCircle className="w-4 h-4 text-blue-600" />
-                            </div>
-                          ) : (
-                            <CheckCircle className="w-6 h-6 text-green-600" />
-                          )}
-                        </div>
                         <div>
                           <p className="text-sm font-semibold text-gray-900">
                             {paymentStatus === 'Waived' || isWaiverPending ? 'Payment Waiver Request' : 'Payment received successfully'}
@@ -2136,7 +2263,6 @@ export default function NewLeadInfoPage() {
                                 ? 'Waiver request is in progress.'
                                 : 'Login fee has been confirmed and recorded.'}
                           </p>
-                        </div>
                       </div>
                       <Button
                         onClick={handleGeneratePaymentLink}
@@ -2178,15 +2304,18 @@ export default function NewLeadInfoPage() {
                 "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4",
                 documentsStepStatus === 'completed' ? "border-l-green-600" : "border-l-blue-600"
               )}>
-                <CardContent className="p-5">
+                <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-blue-600" />
                     <h3 className="text-lg font-semibold text-gray-900">Documents Added</h3>
+                    </div>
                     <div className="flex items-center gap-2">
                       <Badge className={cn(
                         "rounded-full border text-xs font-medium px-3 py-1",
-                        uploadedDocuments.length === 0 ? "bg-gray-50 border-gray-200 text-gray-600" : "bg-green-100 border-green-200 text-green-700"
+                        uploadedDocumentsCount === 0 ? "bg-gray-50 border-gray-200 text-gray-600" : "bg-green-100 border-green-200 text-green-700"
                       )}>
-                        {uploadedDocuments.length === 0 ? 'No Files' : `${uploadedDocuments.length} File(s)`}
+                        {uploadedDocumentsCount === 0 ? 'No Files' : `${uploadedDocumentsCount} File(s)`}
                       </Badge>
                     </div>
                   </div>

@@ -762,6 +762,7 @@ export interface PersonalInfoRequest {
   date_of_birth: string; // ISO date string
   gender: string;
   email?: string;
+  marital_status?: string;
 }
 
 export interface PersonalInfoResponse {
@@ -1398,15 +1399,99 @@ export async function triggerBureauCheck(
 }
 
 /**
- * Trigger BRE (Business Rule Engine)
- * GET /api/bre/trigger/?application_number={application_id}
+ * Calculate Risk (Interest Rate)
+ * POST /api/risk-calculator/calculate-risk/?id_type=code
+ * Note: This endpoint uses a different base URL (without /lead-collection/)
  */
+export interface CalculateRiskRequest {
+  branch: string;
+  loan_amount: number | string;
+  bureau_score: string;
+  property_type: string;
+  construction_type: string;
+  occupancy_status: string;
+  assessment_method: string;
+}
+
+export interface CalculateRiskResponse {
+  success: boolean;
+  total_score?: number | string; // This is the interest rate
+  highlight?: string;
+  message?: string;
+  data?: {
+    total_score?: number | string;
+    highlight?: string;
+  };
+}
+
+export async function calculateRisk(
+  data: CalculateRiskRequest
+): Promise<ApiResponse<CalculateRiskResponse>> {
+  try {
+    // This endpoint uses a different base URL (without /lead-collection/)
+    const RISK_CALCULATOR_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/';
+    const endpoint = 'risk-calculator/calculate-risk/?id_type=code';
+    const url = `${RISK_CALCULATOR_BASE_URL}${endpoint}`;
+    
+    const authToken = getAuthToken();
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+      },
+      body: JSON.stringify({
+        branch: data.branch,
+        loan_amount: String(data.loan_amount),
+        bureau_score: data.bureau_score,
+        property_type: data.property_type,
+        construction_type: data.construction_type,
+        occupancy_status: data.occupancy_status,
+        assessment_method: data.assessment_method,
+      }),
+      cache: 'no-store',
+    });
+
+    const responseData = await response.json();
+
+    if (!response.ok) {
+      return responseData as ApiError;
+    }
+
+    // This API returns { total_score, highlight } without a success field
+    // So we wrap it in a success response
+    return {
+      success: true,
+      ...responseData,
+    } as ApiSuccess<CalculateRiskResponse>;
+  } catch (error: any) {
+    return handleApiError(error);
+  }
+}
+
+/**
+ * BRE (Business Rule Engine) APIs
+ * These use a custom base URL: https://uatlb.api.saarathifinance.com/api/
+ */
+
 export interface BreQuestion {
   id: number;
   question_text: string;
-  rule_id: string;
+  answer_text: string | null;
   status: string;
+  rule_id: string;
+  answered_by: string | null;
+  answered_at: string | null;
   created_at: string;
+  application_number: string;
+}
+
+export interface BreDbUpdateResponse {
+  success: boolean;
+  data: BreQuestion[];
+  count: number;
+  application_number: string;
 }
 
 export interface BreTriggerResponse {
@@ -1417,10 +1502,135 @@ export interface BreTriggerResponse {
   saved_questions: BreQuestion[];
 }
 
+export interface BreAnswerRequest {
+  question_id: number;
+  answer_text: string;
+}
+
+/**
+ * Fetch BRE questions from database
+ * GET /api/bre/db-update/?application_number={application_id}
+ */
+export async function getBreQuestions(applicationId: string): Promise<ApiResponse<BreDbUpdateResponse>> {
+  try {
+    const BRE_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/';
+    const endpoint = `bre/db-update/?application_number=${encodeURIComponent(applicationId)}`;
+    const url = `${BRE_BASE_URL}${endpoint}`;
+    
+    const authToken = getAuthToken();
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+      },
+      cache: 'no-store',
+    });
+
+    const responseData = await response.json();
+
+    if (!response.ok) {
+      return responseData as ApiError;
+    }
+
+    return {
+      success: true,
+      ...responseData,
+    } as ApiSuccess<BreDbUpdateResponse>;
+  } catch (error: any) {
+    return handleApiError(error);
+  }
+}
+
+/**
+ * Trigger BRE to create questions
+ * GET /api/bre/trigger/?application_number={application_id}
+ */
 export async function triggerBre(applicationId: string): Promise<ApiResponse<BreTriggerResponse>> {
-  return apiFetch<BreTriggerResponse>(`bre/trigger/?application_number=${encodeURIComponent(applicationId)}`, {
-    method: 'GET',
-  });
+  try {
+    const BRE_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/';
+    const endpoint = `bre/trigger/?application_number=${encodeURIComponent(applicationId)}`;
+    const url = `${BRE_BASE_URL}${endpoint}`;
+    
+    const authToken = getAuthToken();
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+      },
+      cache: 'no-store',
+    });
+
+    const responseData = await response.json();
+
+    if (!response.ok) {
+      return responseData as ApiError;
+    }
+
+    return {
+      success: true,
+      ...responseData,
+    } as ApiSuccess<BreTriggerResponse>;
+  } catch (error: any) {
+    return handleApiError(error);
+  }
+}
+
+/**
+ * Submit BRE answers
+ * POST /api/bre/db-update/
+ * Sends answers one by one (backend expects single answer per request)
+ */
+export async function submitBreAnswers(
+  applicationId: string,
+  answers: BreAnswerRequest[]
+): Promise<ApiResponse<BreDbUpdateResponse>> {
+  try {
+    const BRE_BASE_URL = 'https://uatlb.api.saarathifinance.com/api/';
+    const endpoint = `bre/db-update/`;
+    const url = `${BRE_BASE_URL}${endpoint}`;
+    
+    const authToken = getAuthToken();
+    
+    // Send each answer separately (backend expects single answer per request)
+    // Each request should have question_id and answer_text at root level
+    const results = [];
+    for (const answer of answers) {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({
+          application_number: applicationId,
+          question_id: answer.question_id,
+          answer_text: answer.answer_text,
+        }),
+        cache: 'no-store',
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        // Return error immediately if any request fails
+        return responseData as ApiError;
+      }
+
+      results.push(responseData);
+    }
+
+    // Return success with the last response data
+    return {
+      success: true,
+      ...results[results.length - 1],
+    } as ApiSuccess<BreDbUpdateResponse>;
+  } catch (error: any) {
+    return handleApiError(error);
+  }
 }
 
 // Account Aggregator APIs

@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { RefreshCw, Loader, AlertTriangle } from 'lucide-react';
 import { useGeolocation } from '@uidotdev/usehooks';
-import { lookupPincode, isApiError, getAuthToken } from '@/lib/api';
+import { lookupPincode, isApiError, getAuthToken, getDetailedInfo, type ApiSuccess } from '@/lib/api';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,7 +48,8 @@ export default function CollateralPage() {
 
   const [formData, setFormData] = useState({
     collateralType: currentLead?.formData?.step6?.collateralType || 'property',
-    collateralSubType: currentLead?.formData?.step6?.collateralSubType || '',
+    propertyType: currentLead?.formData?.step6?.propertyType || '',
+    constructionType: currentLead?.formData?.step6?.constructionType || '',
     ownershipType: currentLead?.formData?.step6?.ownershipType || 'self_ownership',
     currency: 'INR',
     propertyValue: currentLead?.formData?.step6?.propertyValue || '',
@@ -64,6 +65,21 @@ export default function CollateralPage() {
   const [city, setCity] = useState(currentLead?.formData?.step6?.city || '');
   const [stateCode, setStateCode] = useState(currentLead?.formData?.step6?.stateCode || '');
   const [stateName, setStateName] = useState(currentLead?.formData?.step6?.stateName || '');
+  const [selectedAddressType, setSelectedAddressType] = useState<string>('');
+  const [availableAddresses, setAvailableAddresses] = useState<Array<{
+    address_type: string;
+    address_line_1: string;
+    address_line_2?: string;
+    address_line_3?: string;
+    landmark?: string;
+    pincode: string;
+    city: string;
+    state: string;
+    state_code?: string;
+    latitude?: string;
+    longitude?: string;
+  }>>([]);
+  const [isLoadingAddresses, setIsLoadingAddresses] = useState(false);
 
   // Geolocation state
   const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
@@ -133,10 +149,13 @@ export default function CollateralPage() {
   const isInteractionDisabled = !isLocationReady;
   const lastLocationErrorRef = useRef<string | null>(null);
 
+  // Fetch collateral details and addresses from detailed-info API
   useEffect(() => {
+    const fetchCollateralDetails = async () => {
+      if (!currentLead?.appId) {
+        // Fallback to local state if no appId
     if (currentLead?.formData?.step6) {
       const step6 = currentLead.formData.step6;
-      // Handle legacy ownership type values for backward compatibility
       let ownershipType = step6.ownershipType || 'self_ownership';
       if (ownershipType === 'selfOwnership') {
         ownershipType = 'self_ownership';
@@ -146,7 +165,8 @@ export default function CollateralPage() {
 
       setFormData({
         collateralType: step6.collateralType || 'property',
-        collateralSubType: step6.collateralSubType || '',
+            propertyType: step6.propertyType || '',
+            constructionType: step6.constructionType || '',
         ownershipType: ownershipType,
         currency: 'INR',
         propertyValue: step6.propertyValue || '',
@@ -161,7 +181,196 @@ export default function CollateralPage() {
       setStateCode(step6.stateCode || '');
       setStateName(step6.stateName || '');
     }
-  }, [currentLead]);
+        return;
+      }
+
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+        if (isApiError(response)) {
+          // Fallback to local state on error
+          if (currentLead?.formData?.step6) {
+            const step6 = currentLead.formData.step6;
+            let ownershipType = step6.ownershipType || 'self_ownership';
+            if (ownershipType === 'selfOwnership') {
+              ownershipType = 'self_ownership';
+            } else if (ownershipType === 'jointOwnership') {
+              ownershipType = 'joint_ownership';
+            }
+
+            setFormData({
+              collateralType: step6.collateralType || 'property',
+              propertyType: step6.propertyType || '',
+              constructionType: step6.constructionType || '',
+              ownershipType: ownershipType,
+              currency: 'INR',
+              propertyValue: step6.propertyValue || '',
+              description: step6.description || '',
+              addressLine1: step6.addressLine1 || step6.location?.address_line_1 || '',
+              addressLine2: step6.addressLine2 || step6.location?.address_line_2 || '',
+              addressLine3: step6.addressLine3 || step6.location?.address_line_3 || '',
+              landmark: step6.landmark || step6.location?.landmark || '',
+              pincode: step6.pincode || step6.location?.pincode || '',
+            });
+            setCity(step6.city || '');
+            setStateCode(step6.stateCode || '');
+            setStateName(step6.stateName || '');
+          }
+          return;
+        }
+
+        // Handle both response structures
+        const successResponse = response as ApiSuccess<any>;
+        const applicationDetails = successResponse.data?.application_details || successResponse.application_details || (response as any).application_details;
+        
+        // Fetch addresses from participants
+        const participants = applicationDetails?.participants || [];
+        const primaryParticipant = participants.find((p: any) => 
+          p.participant_type === 'primary_participant'
+        );
+
+        if (primaryParticipant?.addresses && Array.isArray(primaryParticipant.addresses)) {
+          const addresses = primaryParticipant.addresses.map((addr: any) => ({
+            address_type: addr.address_type || '',
+            address_line_1: addr.address_line_1 || '',
+            address_line_2: addr.address_line_2 || '',
+            address_line_3: addr.address_line_3 || '',
+            landmark: addr.landmark || '',
+            pincode: addr.pincode || '',
+            city: addr.city || '',
+            state: addr.state || '',
+            state_code: addr.state_code || '',
+            latitude: addr.latitude || '',
+            longitude: addr.longitude || '',
+          }));
+
+          setAvailableAddresses(addresses);
+        }
+
+        // Fetch collateral details from application_details.collateral_details
+        const collateralDetails = applicationDetails?.collateral_details;
+
+        if (collateralDetails && Object.keys(collateralDetails).length > 0) {
+          const location = collateralDetails.location || collateralDetails.address;
+          
+          // Initialize form data with all fields
+          const newFormData: typeof formData = {
+            collateralType: collateralDetails.collateral_type || 'property',
+            propertyType: collateralDetails.property_type || '',
+            constructionType: collateralDetails.construction_type || '',
+            ownershipType: collateralDetails.ownership_type || 'self_ownership',
+            currency: 'INR',
+            propertyValue: collateralDetails.estimated_property_value ? String(collateralDetails.estimated_property_value).replace(/\.00$/, '') : '',
+            description: collateralDetails.collateral_description || '',
+            addressLine1: location?.address_line_1 || '',
+            addressLine2: location?.address_line_2 || '',
+            addressLine3: location?.address_line_3 || '',
+            landmark: location?.landmark || '',
+            pincode: location?.pincode || '',
+          };
+
+          setFormData(newFormData);
+
+          // Set city and state from location or address
+          const locationCity = location?.city || collateralDetails.address?.city || '';
+          const locationStateCode = location?.state_code || collateralDetails.address?.state_code || '';
+          const locationStateName = location?.state || collateralDetails.address?.state || '';
+
+          setCity(locationCity);
+          setStateCode(locationStateCode);
+          setStateName(locationStateName);
+
+          // If pincode exists but city/state are missing, trigger lookup
+          if (newFormData.pincode && newFormData.pincode.length === 6 && !locationCity) {
+            // Trigger pincode lookup asynchronously
+            const triggerLookup = async () => {
+              setPincodeLookupId('collateral-pincode');
+              try {
+                const response = await lookupPincode(newFormData.pincode);
+                if (isApiError(response) || !response.success) {
+                  throw new Error('Zipcode not found');
+                }
+
+                const data = response;
+                setCity(data.city ?? '');
+                setStateCode(data.state_code ?? '');
+                setStateName(data.state ?? '');
+              } catch {
+                // Silently fail - user can manually enter or lookup later
+                console.warn('Pincode lookup failed for:', newFormData.pincode);
+              } finally {
+                setPincodeLookupId(null);
+              }
+            };
+            void triggerLookup();
+          }
+        } else if (currentLead?.formData?.step6) {
+          // Fallback to local state if API doesn't have collateral details
+          const step6 = currentLead.formData.step6;
+          let ownershipType = step6.ownershipType || 'self_ownership';
+          if (ownershipType === 'selfOwnership') {
+            ownershipType = 'self_ownership';
+          } else if (ownershipType === 'jointOwnership') {
+            ownershipType = 'joint_ownership';
+          }
+
+          setFormData({
+            collateralType: step6.collateralType || 'property',
+            propertyType: step6.propertyType || '',
+            constructionType: step6.constructionType || '',
+            ownershipType: ownershipType,
+            currency: 'INR',
+            propertyValue: step6.propertyValue || '',
+            description: step6.description || '',
+            addressLine1: step6.addressLine1 || step6.location?.address_line_1 || '',
+            addressLine2: step6.addressLine2 || step6.location?.address_line_2 || '',
+            addressLine3: step6.addressLine3 || step6.location?.address_line_3 || '',
+            landmark: step6.landmark || step6.location?.landmark || '',
+            pincode: step6.pincode || step6.location?.pincode || '',
+          });
+          setCity(step6.city || '');
+          setStateCode(step6.stateCode || '');
+          setStateName(step6.stateName || '');
+        }
+      } catch (error) {
+        console.error('Failed to fetch collateral details', error);
+        // Fallback to local state on error
+        if (currentLead?.formData?.step6) {
+          const step6 = currentLead.formData.step6;
+          let ownershipType = step6.ownershipType || 'self_ownership';
+          if (ownershipType === 'selfOwnership') {
+            ownershipType = 'self_ownership';
+          } else if (ownershipType === 'jointOwnership') {
+            ownershipType = 'joint_ownership';
+          }
+
+          setFormData({
+            collateralType: step6.collateralType || 'property',
+            propertyType: step6.propertyType || '',
+            constructionType: step6.constructionType || '',
+            ownershipType: ownershipType,
+            currency: 'INR',
+            propertyValue: step6.propertyValue || '',
+            description: step6.description || '',
+            addressLine1: step6.addressLine1 || step6.location?.address_line_1 || '',
+            addressLine2: step6.addressLine2 || step6.location?.address_line_2 || '',
+            addressLine3: step6.addressLine3 || step6.location?.address_line_3 || '',
+            landmark: step6.landmark || step6.location?.landmark || '',
+            pincode: step6.pincode || step6.location?.pincode || '',
+          });
+          setCity(step6.city || '');
+          setStateCode(step6.stateCode || '');
+          setStateName(step6.stateName || '');
+        }
+      }
+    };
+
+    if (currentLead?.appId) {
+      fetchCollateralDetails();
+    }
+  }, [currentLead?.appId]);
+
+  // Note: Data hydration from API is now handled in the fetchCollateralDetails useEffect above
+  // This useEffect is kept for backward compatibility but will only run if API fetch hasn't populated data
 
   useEffect(() => {
     if (locationStatus !== 'error') {
@@ -234,6 +443,65 @@ export default function CollateralPage() {
       }
     );
   }, [toast]);
+
+  const handleAddressTypeSelect = (addressType: string) => {
+    if (isInteractionDisabled || addressType === 'none') {
+      setSelectedAddressType('');
+      return;
+    }
+
+    setSelectedAddressType(addressType);
+
+    // Map address type from dropdown to API address_type
+    const apiAddressTypeMap: Record<string, string> = {
+      'current': 'residential',
+      'permanent': 'permanent',
+      'correspondence': 'correspondence',
+    };
+
+    const apiAddressType = apiAddressTypeMap[addressType] || addressType;
+    
+    // Find address that matches residential/current
+    const selectedAddress = availableAddresses.find(addr => {
+      const addrType = addr.address_type?.toLowerCase();
+      if (addressType === 'current') {
+        return addrType === 'residential' || addrType === 'current';
+      }
+      return addrType === apiAddressType;
+    });
+
+    if (selectedAddress) {
+      setFormData(prev => ({
+        ...prev,
+        addressLine1: selectedAddress.address_line_1 || '',
+        addressLine2: selectedAddress.address_line_2 || '',
+        addressLine3: selectedAddress.address_line_3 || '',
+        landmark: selectedAddress.landmark || '',
+        pincode: selectedAddress.pincode || '',
+      }));
+
+      setCity(selectedAddress.city || '');
+      setStateCode(selectedAddress.state_code || '');
+      setStateName(selectedAddress.state || '');
+
+      // If pincode exists but city/state are missing, trigger lookup
+      if (selectedAddress.pincode && selectedAddress.pincode.length === 6 && !selectedAddress.city) {
+        void performPincodeLookup(selectedAddress.pincode);
+      }
+
+      toast({
+        title: 'Address Loaded',
+        description: `${addressType === 'current' ? 'Current' : addressType.charAt(0).toUpperCase() + addressType.slice(1)} address has been loaded.`,
+        className: 'bg-blue-50 border-blue-200',
+      });
+    } else {
+      toast({
+        title: 'Address Not Found',
+        description: `No ${addressType} address found in the application.`,
+        variant: 'destructive',
+      });
+    }
+  };
 
   const handlePincodeChange = (rawValue: string) => {
     if (isInteractionDisabled) return;
@@ -314,6 +582,15 @@ export default function CollateralPage() {
       return;
     }
 
+    if (formData.collateralType === 'property' && (!formData.propertyType || !formData.constructionType)) {
+      toast({
+        title: 'Required fields missing',
+        description: 'Please select Property Type and Construction Type.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (!formData.addressLine1 || !formData.landmark || !formData.pincode || formData.pincode.length !== 6) {
       toast({
         title: 'Incomplete address',
@@ -335,7 +612,7 @@ export default function CollateralPage() {
 
     setIsSaving(true);
 
-    const payload = {
+    const payload: any = {
       application_id: currentLead.appId,
       collateral_type: formData.collateralType || 'property',
       ownership_type: formData.ownershipType || 'self_ownership',
@@ -351,6 +628,12 @@ export default function CollateralPage() {
         longitude: locationCoords.longitude || '90',
       },
     };
+
+    // Add property_type and construction_type only if collateralType is 'property'
+    if (formData.collateralType === 'property') {
+      payload.property_type = formData.propertyType;
+      payload.construction_type = formData.constructionType;
+    }
 
     try {
       const response = await fetch(API_URL, {
@@ -377,6 +660,8 @@ export default function CollateralPage() {
           step6: {
             ...formData,
             collateralType: formData.collateralType || 'property',
+            propertyType: formData.propertyType,
+            constructionType: formData.constructionType,
             ownershipType: formData.ownershipType || 'self_ownership',
             propertyValue: formData.propertyValue,
             description: formData.description,
@@ -448,7 +733,12 @@ export default function CollateralPage() {
                 <Select
                   value={formData.collateralType}
                   onValueChange={(value: string) => {
-                    setFormData({ ...formData, collateralType: value, collateralSubType: '' });
+                    setFormData({ 
+                      ...formData, 
+                      collateralType: value, 
+                      propertyType: value === 'property' ? formData.propertyType : '',
+                      constructionType: value === 'property' ? formData.constructionType : ''
+                    });
                   }}
                   disabled={isInteractionDisabled}
                 >
@@ -463,27 +753,101 @@ export default function CollateralPage() {
               </div>
 
               {formData.collateralType === 'property' && (
+                <>
                 <div>
-                  <Label htmlFor="collateralSubType">
-                    Collateral Sub Type <span className="text-red-500">*</span>
+                    <Label htmlFor="propertyType">
+                      Property Type <span className="text-red-500">*</span>
                   </Label>
                   <Select
-                    value={formData.collateralSubType}
-                    onValueChange={(value: string) => setField('collateralSubType', value)}
+                      value={formData.propertyType}
+                      onValueChange={(value: string) => setField('propertyType', value)}
                     disabled={isInteractionDisabled}
                   >
-                    <SelectTrigger id="collateralSubType" className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
-                      <SelectValue placeholder="Select collateral sub type" />
+                      <SelectTrigger id="propertyType" className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
+                        <SelectValue placeholder="Select property type" className="truncate" />
+                      </SelectTrigger>
+                      <SelectContent 
+                        className="max-w-[calc(100vw-2rem)] sm:max-w-none w-[var(--radix-select-trigger-width)] max-h-[300px] overflow-y-auto"
+                        position="popper"
+                        sideOffset={4}
+                      >
+                        <SelectItem value="aamm" className="whitespace-normal break-words">
+                          Authority approvals (UIT / Metro Dev / MC)
+                        </SelectItem>
+                        <SelectItem value="shb" className="whitespace-normal break-words">
+                          State Housing Board
+                        </SelectItem>
+                        <SelectItem value="90aapp" className="whitespace-normal break-words">
+                          90A Approved (Rajasthan)
+                        </SelectItem>
+                        <SelectItem value="dcml" className="whitespace-normal break-words">
+                          DTCP / CMDA / Metropolitan Layouts
+                        </SelectItem>
+                        <SelectItem value="fhml" className="whitespace-normal break-words">
+                          Freehold in municipal limits
+                        </SelectItem>
+                        <SelectItem value="gapcas" className="whitespace-normal break-words">
+                          Government allotted plots converted to absolute sale
+                        </SelectItem>
+                        <SelectItem value="lhctfh" className="whitespace-normal break-words">
+                          Leasehold converted to freehold
+                        </SelectItem>
+                        <SelectItem value="gptpa" className="whitespace-normal break-words">
+                          Gram Panchayat / Town Panchayat approved
+                        </SelectItem>
+                        <SelectItem value="rlcp" className="whitespace-normal break-words">
+                          Revenue layouts (conversion pending)
+                        </SelectItem>
+                        <SelectItem value="pattatn" className="whitespace-normal break-words">
+                          Patta (Tamil Nadu)
+                        </SelectItem>
+                        <SelectItem value="90breg" className="whitespace-normal break-words">
+                          90B regularised (Rajasthan)
+                        </SelectItem>
+                        <SelectItem value="lhwren" className="whitespace-normal break-words">
+                          Leasehold with renewals
+                        </SelectItem>
+                        <SelectItem value="muwpapp" className="whitespace-normal break-words">
+                          Mixed-use with partial approval
+                        </SelectItem>
+                        <SelectItem value="agrtitun" className="whitespace-normal break-words">
+                          Agricultural title unconverted
+                        </SelectItem>
+                        <SelectItem value="revreco" className="whitespace-normal break-words">
+                          Revenue record only
+                        </SelectItem>
+                        <SelectItem value="gpaunreg" className="whitespace-normal break-words">
+                          GPA unregistered
+                        </SelectItem>
+                        <SelectItem value="agreoso" className="whitespace-normal break-words">
+                          Agreement of Sale only
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="constructionType">
+                      Construction Type <span className="text-red-500">*</span>
+                    </Label>
+                    <Select
+                      value={formData.constructionType}
+                      onValueChange={(value: string) => setField('constructionType', value)}
+                      disabled={isInteractionDisabled}
+                    >
+                      <SelectTrigger id="constructionType" className={cn("h-12", isInteractionDisabled && "bg-gray-50 cursor-not-allowed")}>
+                        <SelectValue placeholder="Select construction type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="builder-property-under-construction">Builder Property Under Construction</SelectItem>
-                      <SelectItem value="construction-on-land">Construction On Land</SelectItem>
-                      <SelectItem value="plot-self-construction">Plot + Self Construction</SelectItem>
-                      <SelectItem value="purchase-plot">Purchase a Plot</SelectItem>
-                      <SelectItem value="ready-property">Ready Property</SelectItem>
+                        <SelectItem value="rcc_roof">RCC Roof</SelectItem>
+                        <SelectItem value="acc_roof">ACC Roof (Asbestos Cement)</SelectItem>
+                        <SelectItem value="tin_sheded">Tin Sheded</SelectItem>
+                        <SelectItem value="vacant_land">Mud House / Vacant Land</SelectItem>
+                        <SelectItem value="under_construction">Under Construction</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                </>
               )}
 
               <div>
@@ -544,6 +908,40 @@ export default function CollateralPage() {
 
               <div className="space-y-4 pt-4 border-t">
                 <h3 className="text-lg font-semibold text-[#003366]">Collateral Location</h3>
+
+                {/* Address Selection Dropdown */}
+                {availableAddresses.length > 0 && (
+                  <div>
+                    <Label htmlFor="selectAddress">
+                      Select Address from Application
+                    </Label>
+                    <Select
+                      value={selectedAddressType}
+                      onValueChange={handleAddressTypeSelect}
+                      disabled={isInteractionDisabled || isLoadingAddresses}
+                    >
+                      <SelectTrigger id="selectAddress" className={cn("h-12", (isInteractionDisabled || isLoadingAddresses) && "bg-gray-50 cursor-not-allowed")}>
+                        <SelectValue placeholder={isLoadingAddresses ? "Loading addresses..." : "Select address to auto-fill"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None (Enter manually)</SelectItem>
+                        {availableAddresses.some(addr => {
+                          const addrType = addr.address_type?.toLowerCase();
+                          return addrType === 'residential' || addrType === 'current';
+                        }) && (
+                          <SelectItem value="current">Current / Residential</SelectItem>
+                        )}
+                        {availableAddresses.some(addr => addr.address_type?.toLowerCase() === 'permanent') && (
+                          <SelectItem value="permanent">Permanent</SelectItem>
+                        )}
+                        {availableAddresses.some(addr => addr.address_type?.toLowerCase() === 'correspondence') && (
+                          <SelectItem value="correspondence">Correspondence</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-500 mt-1">Select an address from the application to auto-fill the location fields</p>
+                  </div>
+                )}
 
                 <div>
                   <Label htmlFor="addressLine1">

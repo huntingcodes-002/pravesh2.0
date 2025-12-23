@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { submitAddressDetails, isApiError, getDetailedInfo, lookupPincode, triggerBureauCheck } from '@/lib/api';
+import { submitAddressDetails, isApiError, getDetailedInfo, lookupPincode, triggerBureauCheck, getRequiredDocuments, getCoApplicantRequiredDocuments, type ApiSuccess } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -347,6 +347,69 @@ export default function Step3Page() {
     toast({ title: 'Address Saved', description: 'Address details saved locally.', className: 'bg-green-50 border-green-200' });
   };
 
+  // Helper function to check required documents and trigger bureau check
+  const checkAndTriggerBureauCheck = async (applicationId: string) => {
+    try {
+      // Check main applicant's required documents
+      const mainApplicantDocs = await getRequiredDocuments(applicationId);
+      if (!isApiError(mainApplicantDocs) && mainApplicantDocs.success) {
+        const requiredDocs = mainApplicantDocs.required_documents || {};
+        const panUploaded = requiredDocs.pan_card?.uploaded === true;
+        const aadhaarUploaded = requiredDocs.aadhaar_card?.uploaded === true;
+
+        if (panUploaded && aadhaarUploaded) {
+          try {
+            await triggerBureauCheck({
+              application_id: applicationId,
+              agency: 'CRIF'
+            });
+            console.log('Bureau check triggered for main applicant');
+          } catch (err) {
+            console.error('Bureau check trigger failed for main applicant', err);
+          }
+        }
+      }
+
+      // Check co-applicants' required documents
+      const detailedInfo = await getDetailedInfo(applicationId);
+      if (!isApiError(detailedInfo)) {
+        const successResponse = detailedInfo as ApiSuccess<any>;
+        const applicationDetails = successResponse.data?.application_details || successResponse.application_details || (detailedInfo as any).application_details;
+        const participants = applicationDetails?.participants || [];
+        const coApplicants = participants.filter((p: any) => 
+          p.participant_type === 'co-applicant' || p.participant_type === 'co_applicant'
+        );
+
+        // Check each co-applicant
+        for (const coApp of coApplicants) {
+          const coAppIndex = coApp.co_applicant_index;
+          if (typeof coAppIndex === 'number') {
+            const coAppDocs = await getCoApplicantRequiredDocuments(applicationId, coAppIndex);
+            if (!isApiError(coAppDocs) && coAppDocs.success) {
+              const coAppRequiredDocs = coAppDocs.required_documents || {};
+              const coAppPanUploaded = coAppRequiredDocs.pan_card?.uploaded === true;
+              const coAppAadhaarUploaded = coAppRequiredDocs.aadhaar_card?.uploaded === true;
+
+              if (coAppPanUploaded && coAppAadhaarUploaded) {
+                try {
+                  await triggerBureauCheck({
+                    application_id: applicationId,
+                    agency: 'CRIF'
+                  });
+                  console.log(`Bureau check triggered for co-applicant index ${coAppIndex}`);
+                } catch (err) {
+                  console.error(`Bureau check trigger failed for co-applicant index ${coAppIndex}`, err);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error checking required documents for bureau check', error);
+    }
+  };
+
   const handleSaveInformation = async () => {
     if (!currentLead?.appId) return;
     if (!isLocationReady) {
@@ -395,12 +458,8 @@ export default function Step3Page() {
         },
       });
 
-      // Trigger Bureau Check if needed
-      const existingFiles = currentLead?.formData?.step8?.files || [];
-      const successFiles = existingFiles.filter((f: any) => f.status === 'Success');
-      if (successFiles.some((f: any) => f.type === 'PAN') && successFiles.some((f: any) => f.type === 'Adhaar')) {
-        triggerBureauCheck({ application_id: currentLead.appId, agency: 'CRIF' }).catch(console.error);
-      }
+      // Check required documents and trigger bureau check if both PAN and Aadhaar are uploaded
+      await checkAndTriggerBureauCheck(currentLead.appId);
 
       toast({ title: 'Success', description: 'All addresses saved successfully.', className: 'bg-green-50 border-green-200' });
       router.push('/lead/new-lead-info');

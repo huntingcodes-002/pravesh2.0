@@ -7,7 +7,7 @@ import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-im
 import 'react-image-crop/dist/ReactCrop.css';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { uploadDocument, uploadCoApplicantDocument, getDetailedInfo, submitPersonalInfo, isApiError, type ApiSuccess, triggerBureauCheck } from '@/lib/api';
+import { uploadDocument, uploadCoApplicantDocument, getDetailedInfo, submitPersonalInfo, isApiError, type ApiSuccess, triggerBureauCheck, getRequiredDocuments, getCoApplicantRequiredDocuments, type DocumentStatus } from '@/lib/api';
 import { useGeolocation } from '@uidotdev/usehooks';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -57,7 +57,7 @@ const ALTERNATE_ID_TYPES = [
     { value: "Passport", label: "Passport", fileTypes: ["image"], requiresCamera: true },
 ];
 
-const DocumentSelectItem = ({ docType, isUploaded }: { docType: { value: string; label: string }, isUploaded: boolean }) => (
+const DocumentSelectItem = ({ docType, isUploaded, isRequired }: { docType: { value: string; label: string }, isUploaded: boolean, isRequired: boolean }) => (
     <SelectItem value={docType.value} disabled={isUploaded} className={isUploaded ? "opacity-60" : ""}>
         <div className="flex items-center justify-between w-full">
             <span>{docType.label}</span>
@@ -478,8 +478,233 @@ function Step8Content() {
 
     const totalSteps = 10;
 
-    // Generate dynamic document list based on current lead data
-    const availableDocuments = currentLead ? generateDocumentList(currentLead) : [];
+    // State for API document data
+    const [applicantDocs, setApplicantDocs] = useState<Record<string, DocumentStatus> | null>(null);
+    const [coApplicantDocs, setCoApplicantDocs] = useState<Record<number, Record<string, DocumentStatus>>>({});
+    const [isLoadingDocs, setIsLoadingDocs] = useState(true);
+    const [detailedInfo, setDetailedInfo] = useState<any>(null);
+
+    // Fetch required documents from API
+    useEffect(() => {
+        if (!currentLead?.appId) {
+            setIsLoadingDocs(false);
+            return;
+        }
+
+        const fetchDocuments = async () => {
+            setIsLoadingDocs(true);
+            try {
+                // Fetch detailed info to get co-applicants
+                const detailedInfoRes = await getDetailedInfo(currentLead.appId);
+                if (!isApiError(detailedInfoRes)) {
+                    setDetailedInfo(detailedInfoRes);
+                }
+
+                // Fetch Applicant Docs
+                const appDocsRes = await getRequiredDocuments(currentLead.appId);
+                if (!isApiError(appDocsRes)) {
+                    const data = (appDocsRes as any).required_documents || (appDocsRes as any).data?.required_documents;
+                    setApplicantDocs(data || {});
+                }
+
+                // Fetch Co-Applicant Docs
+                if (detailedInfoRes && !isApiError(detailedInfoRes)) {
+                    const participants = (detailedInfoRes as any).participants || [];
+                    const coApps = participants.filter((p: any) => 
+                        p.participant_type === 'co-applicant' || p.participant_type === 'co_applicant'
+                    );
+                    
+                    const coAppDocsMap: Record<number, Record<string, DocumentStatus>> = {};
+                    await Promise.all(coApps.map(async (p: any) => {
+                        const idx = p.co_applicant_index;
+                        if (typeof idx === 'number') {
+                            const res = await getCoApplicantRequiredDocuments(currentLead.appId, idx);
+                            if (!isApiError(res)) {
+                                const data = (res as any).required_documents || (res as any).data?.required_documents;
+                                coAppDocsMap[idx] = data || {};
+                            }
+                        }
+                    }));
+                    setCoApplicantDocs(coAppDocsMap);
+                }
+            } catch (e) {
+                console.error('Failed to fetch document statuses', e);
+            } finally {
+                setIsLoadingDocs(false);
+            }
+        };
+
+        fetchDocuments();
+    }, [currentLead?.appId]);
+
+    // Helper function to map API document key to UI label
+    const getDocumentLabel = (apiKey: string, name: string = ''): string => {
+        const labelMap: Record<string, string> = {
+            'pan_card': 'PAN',
+            'aadhaar_card': 'Aadhaar',
+            'bank_statement': 'Bank Statement',
+            'applicant_image': 'Applicant Image',
+            'driving_license': 'Driving License',
+            'voter_id': 'Voter ID',
+            'form_60': 'Form 60',
+            'passport': 'Passport',
+            'collateral_legal': 'Sale Deed',
+            'collateral_ownership': 'Ownership Document',
+            'collateral_images_front': 'Front View',
+            'collateral_images_inside': 'Inside View',
+            'collateral_images_road': 'Road View',
+            'collateral_images_selfie': 'Selfie',
+            'collateral_images_side': 'Side View',
+            'collateral_images_surrounding': 'Surrounding View',
+        };
+
+        const baseLabel = labelMap[apiKey] || apiKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        return name ? `${baseLabel} - ${name}` : baseLabel;
+    };
+
+    // Generate document list from API response
+    const generateDocumentListFromAPI = (): DocumentDefinition[] => {
+        const documents: DocumentDefinition[] = [];
+        
+        if (!applicantDocs || !currentLead) return documents;
+
+        const mainApplicantName = currentLead.customerName || getApplicantName(currentLead.customerFirstName, currentLead.customerLastName);
+
+        // Define the order for applicant documents
+        const applicantDocumentOrder = [
+            'pan_card',
+            'aadhaar_card',
+            'bank_statement',
+            'applicant_image',
+            'driving_license',
+            'voter_id',
+            'form_60',
+            'passport'
+        ];
+
+        // Create a set of applicant document keys for quick lookup
+        const applicantDocumentKeys = new Set(applicantDocumentOrder);
+
+        // Process applicant documents in the specified order
+        applicantDocumentOrder.forEach(key => {
+            if (applicantDocs[key]) {
+                const status = applicantDocs[key];
+                const docDef: DocumentDefinition = {
+                    value: key,
+                    label: getDocumentLabel(key, mainApplicantName),
+                    fileTypes: key === 'bank_statement' ? ['pdf', 'image'] : ['image'],
+                    requiresCamera: key !== 'bank_statement',
+                    applicantType: 'main',
+                    required: status.required || false,
+                    requiresFrontBack: key === 'aadhaar_card',
+                };
+                documents.push(docDef);
+            }
+        });
+
+        // Process collateral documents
+        // 1. Documents starting with collateral_ (except property photos)
+        // 2. Documents not in the applicant document list
+        Object.entries(applicantDocs).forEach(([key, status]) => {
+            if (key.startsWith('collateral_')) {
+                if (key.startsWith('collateral_images_')) {
+                    // Handle property photos separately
+                    if (key === 'collateral_images_front' || 
+                        key === 'collateral_images_inside' || 
+                        key === 'collateral_images_road' || 
+                        key === 'collateral_images_selfie' || 
+                        key === 'collateral_images_side' || 
+                        key === 'collateral_images_surrounding') {
+                        // These will be handled as PropertyPhotos
+                        return;
+                    }
+                } else {
+                    // Other collateral documents
+                    const docDef: DocumentDefinition = {
+                        value: key,
+                        label: getDocumentLabel(key),
+                        fileTypes: key === 'collateral_legal' ? ['pdf'] : ['image'],
+                        requiresCamera: false,
+                        applicantType: 'collateral',
+                        required: status.required || false,
+                        requiresFrontBack: false,
+                    };
+                    documents.push(docDef);
+                }
+            } else if (!applicantDocumentKeys.has(key)) {
+                // Documents not in the applicant list go to collateral
+                const docDef: DocumentDefinition = {
+                    value: key,
+                    label: getDocumentLabel(key),
+                    fileTypes: key === 'bank_statement' || key.includes('statement') ? ['pdf', 'image'] : ['image'],
+                    requiresCamera: false,
+                    applicantType: 'collateral',
+                    required: status.required || false,
+                    requiresFrontBack: false,
+                };
+                documents.push(docDef);
+            }
+        });
+
+        // Add PropertyPhotos if any collateral_images_* exist
+        const hasPropertyPhotos = Object.keys(applicantDocs).some(key => 
+            key.startsWith('collateral_images_')
+        );
+        if (hasPropertyPhotos) {
+            documents.push({
+                value: 'PropertyPhotos',
+                label: 'Property Photos',
+                fileTypes: ['image'],
+                requiresCamera: true,
+                applicantType: 'collateral',
+                required: true,
+                requiresFrontBack: false,
+                isPropertyPhotos: true,
+            });
+        }
+
+        // Process co-applicant documents in the same order as applicant documents
+        Object.entries(coApplicantDocs).forEach(([indexStr, docs]) => {
+            const coAppIndex = parseInt(indexStr);
+            if (detailedInfo) {
+                const participant = (detailedInfo as any).participants?.find((p: any) => 
+                    p.co_applicant_index === coAppIndex
+                );
+                const coAppName = participant?.personal_info?.full_name?.value || 
+                                 getApplicantName(
+                                     participant?.personal_info?.first_name,
+                                     participant?.personal_info?.last_name
+                                 ) || 
+                                 `Co-Applicant ${coAppIndex + 1}`;
+
+                // Process co-applicant documents in the same order as applicant documents
+                applicantDocumentOrder.forEach(key => {
+                    if (docs[key]) {
+                        const status = docs[key];
+                        const docDef: DocumentDefinition = {
+                            value: `${key}_${coAppIndex}`,
+                            label: getDocumentLabel(key, coAppName),
+                            fileTypes: key === 'bank_statement' ? ['pdf', 'image'] : ['image'],
+                            requiresCamera: key !== 'bank_statement',
+                            applicantType: 'coapplicant',
+                            coApplicantId: coAppIndex.toString(),
+                            required: status.required || false,
+                            requiresFrontBack: key === 'aadhaar_card',
+                        };
+                        documents.push(docDef);
+                    }
+                });
+            }
+        });
+
+        return documents;
+    };
+
+    // Generate dynamic document list based on API data
+    const availableDocuments = useMemo(() => {
+        if (isLoadingDocs || !applicantDocs) return [];
+        return generateDocumentListFromAPI();
+    }, [isLoadingDocs, applicantDocs, coApplicantDocs, detailedInfo, currentLead]);
 
     const entityOptions = useMemo((): EntityOption[] => {
         if (!currentLead) return [];
@@ -493,6 +718,30 @@ function Step8Content() {
             type: 'main'
         });
 
+        // Use co-applicants from API (detailedInfo) if available, otherwise fallback to formData
+        if (detailedInfo && (detailedInfo as any).participants) {
+            const participants = (detailedInfo as any).participants || [];
+            const coApps = participants.filter((p: any) => 
+                p.participant_type === 'co-applicant' || p.participant_type === 'co_applicant'
+            );
+            
+            coApps.forEach((coApp: any) => {
+                const coAppIndex = coApp.co_applicant_index;
+                const coAppName = coApp.personal_info?.full_name?.value || 
+                                 getApplicantName(
+                                     coApp.personal_info?.first_name,
+                                     coApp.personal_info?.last_name
+                                 ) || 
+                                 `Co-Applicant ${coAppIndex + 1}`;
+                entities.push({
+                    value: coAppIndex.toString(),
+                    label: `Co-Applicant ${coAppIndex + 1} - ${coAppName}`,
+                    type: 'coapplicant',
+                    coApplicantId: coAppIndex.toString(),
+                });
+            });
+        } else {
+            // Fallback to formData co-applicants
         const coApplicants = currentLead?.formData?.coApplicants || [];
         coApplicants.forEach((coApp: any, index: number) => {
             const coApplicantName = getApplicantName(
@@ -506,6 +755,7 @@ function Step8Content() {
                 coApplicantId: coApp.id,
             });
         });
+        }
 
         entities.push({
             value: 'collateral',
@@ -514,7 +764,7 @@ function Step8Content() {
         });
 
         return entities;
-    }, [currentLead]);
+    }, [currentLead, detailedInfo]);
 
     useEffect(() => {
         if (!entityOptions.length) return;
@@ -537,9 +787,9 @@ function Step8Content() {
             // Default to applicant entity for preselection
             setSelectedEntity('applicant');
             if (preselect === 'pan') {
-                setDocumentType('PAN');
+                setDocumentType('pan_card');
             } else if (preselect === 'aadhaar') {
-                setDocumentType('Adhaar');
+                setDocumentType('aadhaar_card');
             }
         }
     }, [preselect, entityOptions]);
@@ -648,11 +898,41 @@ function Step8Content() {
 
     // Helper function to map frontend document type to backend format
     const mapDocumentTypeToBackend = (docType: string): string => {
-        // Check if it's a property photo type first (before parsing) - return it as-is
-        if (docType.startsWith('collateral_images_')) {
+        // Handle PropertyPhotos separately
+        if (docType === 'PropertyPhotos') {
+            // This will be handled separately in the upload logic
+            return 'collateral_images_front'; // Default, but actual type will be determined by subType
+        }
+
+        // If it's already an API key format (contains underscore and is a known API key), return as-is
+        // But first, handle co-applicant suffix
+        if (docType.includes('_') && !docType.startsWith('collateral_images_')) {
+            // Check if it's a co-applicant document (format: apiKey_coAppIndex)
+            const lastUnderscoreIndex = docType.lastIndexOf('_');
+            const possibleIndex = docType.substring(lastUnderscoreIndex + 1);
+            
+            // If the part after last underscore is a number, it's a co-applicant document
+            if (!isNaN(Number(possibleIndex))) {
+                const apiKey = docType.substring(0, lastUnderscoreIndex);
+                // Return just the API key (co-applicant index is handled separately)
+                return apiKey;
+            }
+        }
+
+        // If it's already an API key (like pan_card, aadhaar_card), return as-is
+        const knownApiKeys = [
+            'pan_card', 'aadhaar_card', 'bank_statement', 'driving_license', 
+            'passport', 'voter_id', 'form_60', 'collateral_legal', 
+            'collateral_ownership', 'collateral_images_front', 'collateral_images_inside',
+            'collateral_images_road', 'collateral_images_selfie', 'collateral_images_side',
+            'collateral_images_surrounding'
+        ];
+        
+        if (knownApiKeys.includes(docType)) {
             return docType;
         }
 
+        // Legacy mapping for old format
         const { baseValue } = parseDocumentValue(docType);
         const mapping: Record<string, string> = {
             'PAN': 'pan_card',
@@ -668,7 +948,70 @@ function Step8Content() {
             'ITR': 'itr',
         };
 
-        return mapping[baseValue] || 'other';
+        return mapping[baseValue] || docType; // Return docType as fallback if no mapping found
+    };
+
+    // Helper function to check required documents and trigger bureau check
+    const checkAndTriggerBureauCheck = async (applicationId: string) => {
+        try {
+            // Check main applicant's required documents
+            const mainApplicantDocs = await getRequiredDocuments(applicationId);
+            if (!isApiError(mainApplicantDocs) && mainApplicantDocs.success) {
+                const requiredDocs = mainApplicantDocs.required_documents || {};
+                const panUploaded = requiredDocs.pan_card?.uploaded === true;
+                const aadhaarUploaded = requiredDocs.aadhaar_card?.uploaded === true;
+
+                if (panUploaded && aadhaarUploaded) {
+                    try {
+                        await triggerBureauCheck({
+                            application_id: applicationId,
+                            agency: 'CRIF'
+                        });
+                        console.log('Bureau check triggered for main applicant');
+                    } catch (err) {
+                        console.error('Bureau check trigger failed for main applicant', err);
+                    }
+                }
+            }
+
+            // Check co-applicants' required documents
+            const detailedInfo = await getDetailedInfo(applicationId);
+            if (!isApiError(detailedInfo)) {
+                const successResponse = detailedInfo as ApiSuccess<any>;
+                const applicationDetails = successResponse.data?.application_details || successResponse.application_details || (detailedInfo as any).application_details;
+                const participants = applicationDetails?.participants || [];
+                const coApplicants = participants.filter((p: any) => 
+                    p.participant_type === 'co-applicant' || p.participant_type === 'co_applicant'
+                );
+
+                // Check each co-applicant
+                for (const coApp of coApplicants) {
+                    const coAppIndex = coApp.co_applicant_index;
+                    if (typeof coAppIndex === 'number') {
+                        const coAppDocs = await getCoApplicantRequiredDocuments(applicationId, coAppIndex);
+                        if (!isApiError(coAppDocs) && coAppDocs.success) {
+                            const coAppRequiredDocs = coAppDocs.required_documents || {};
+                            const coAppPanUploaded = coAppRequiredDocs.pan_card?.uploaded === true;
+                            const coAppAadhaarUploaded = coAppRequiredDocs.aadhaar_card?.uploaded === true;
+
+                            if (coAppPanUploaded && coAppAadhaarUploaded) {
+                                try {
+                                    await triggerBureauCheck({
+                                        application_id: applicationId,
+                                        agency: 'CRIF'
+                                    });
+                                    console.log(`Bureau check triggered for co-applicant index ${coAppIndex}`);
+                                } catch (err) {
+                                    console.error(`Bureau check trigger failed for co-applicant index ${coAppIndex}`, err);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error checking required documents for bureau check', error);
+        }
     };
 
     // Helper function to handle document upload with API integration
@@ -780,29 +1123,11 @@ function Step8Content() {
             // If PAN or Aadhaar, fetch parsed data from Endpoint 6 after backend processes it
             if (baseDocType === 'PAN' || baseDocType === 'Adhaar') {
 
-                // Check if we should trigger Bureau Check
-                // Conditions: PAN uploaded, Aadhaar uploaded, Address Details submitted
-                const isAddressSubmitted = currentLead?.step3Completed;
-                const existingFiles = currentLead?.formData?.step8?.files || [];
-                const successFiles = existingFiles.filter((f: any) => f.status === 'Success');
-
-                const hasPan = baseDocType === 'PAN' || successFiles.some((f: any) => f.type === 'PAN');
-                const hasAadhaar = baseDocType === 'Adhaar' || successFiles.some((f: any) => f.type === 'Adhaar');
-
-                if (hasPan && hasAadhaar && isAddressSubmitted) {
-                    try {
-                        await triggerBureauCheck({
-                            application_id: currentLead.appId,
-                            agency: 'CRIF'
-                        });
-                        console.log('Bureau check triggered');
-                    } catch (err) {
-                        console.error('Bureau check trigger failed', err);
-                    }
-                }
-
-                // Wait a bit for backend to process the document
+                // Wait a bit for backend to process the document and update required-documents status
                 await new Promise(resolve => setTimeout(resolve, 2000));
+
+                // Check required documents and trigger bureau check if both PAN and Aadhaar are uploaded
+                await checkAndTriggerBureauCheck(currentLead.appId);
 
                 const detailedResponse = await getDetailedInfo(currentLead.appId);
 
@@ -1998,24 +2323,50 @@ function Step8Content() {
 
     const getUploadedDocTypes = () => {
         const completed = new Set<string>();
-        const successFiles = uploadedFiles.filter(file => file.status === 'Success');
 
-        successFiles.forEach(file => {
-            if (file.type !== 'PropertyPhotos') {
-                completed.add(file.type);
+        // Check applicant documents from API
+        if (applicantDocs) {
+            Object.entries(applicantDocs).forEach(([key, status]) => {
+                if (status.uploaded && !key.startsWith('collateral_images_')) {
+                    completed.add(key);
+                }
+            });
+
+            // Check property photos completeness
+            const propertyPhotoKeys = [
+                'collateral_images_front',
+                'collateral_images_inside',
+                'collateral_images_road',
+                'collateral_images_selfie',
+                'collateral_images_side',
+                'collateral_images_surrounding'
+            ];
+            const uploadedPropertyPhotos = propertyPhotoKeys.filter(key => 
+                applicantDocs[key]?.uploaded === true
+            );
+            if (uploadedPropertyPhotos.length === PROPERTY_PHOTO_REQUIRED_COUNT) {
+                completed.add('PropertyPhotos');
             }
-        });
-
-        const propertyCompleteness = new Set<PropertyPhotoType>();
-        successFiles.forEach(file => {
-            if (file.type === 'PropertyPhotos' && file.subType) {
-                propertyCompleteness.add(file.subType as PropertyPhotoType);
-            }
-        });
-
-        if (propertyCompleteness.size === PROPERTY_PHOTO_REQUIRED_COUNT) {
-            completed.add('PropertyPhotos');
         }
+
+        // Check collateral documents from API
+        if (applicantDocs) {
+            Object.entries(applicantDocs).forEach(([key, status]) => {
+                if (key.startsWith('collateral_') && !key.startsWith('collateral_images_') && status.uploaded) {
+                    completed.add(key);
+                }
+            });
+        }
+
+        // Check co-applicant documents from API
+        Object.entries(coApplicantDocs).forEach(([indexStr, docs]) => {
+            const coAppIndex = parseInt(indexStr);
+            Object.entries(docs).forEach(([key, status]) => {
+                if (status.uploaded) {
+                    completed.add(`${key}_${coAppIndex}`);
+                }
+            });
+        });
 
         return completed;
     };
@@ -2222,12 +2573,30 @@ function Step8Content() {
                                         <SelectValue placeholder="Choose document type..." />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {filteredDocuments.map(doc => {
+                                        {isLoadingDocs ? (
+                                            <SelectItem value="loading" disabled>
+                                                <div className="flex items-center gap-2">
+                                                    <Loader className="w-4 h-4 animate-spin" />
+                                                    <span>Loading documents...</span>
+                                                </div>
+                                            </SelectItem>
+                                        ) : filteredDocuments.length === 0 ? (
+                                            <SelectItem value="no-docs" disabled>
+                                                No documents available
+                                            </SelectItem>
+                                        ) : (
+                                            filteredDocuments.map(doc => {
                                             const isUploaded = getUploadedDocTypes().has(doc.value);
                                             return (
-                                                <DocumentSelectItem key={doc.value} docType={doc} isUploaded={isUploaded} />
-                                            );
-                                        })}
+                                                    <DocumentSelectItem 
+                                                        key={doc.value} 
+                                                        docType={doc} 
+                                                        isUploaded={isUploaded}
+                                                        isRequired={doc.required || false}
+                                                    />
+                                                );
+                                            })
+                                        )}
                                     </SelectContent>
                                 </Select>
                             </div>

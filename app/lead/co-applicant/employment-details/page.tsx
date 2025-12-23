@@ -14,7 +14,7 @@ import { CalendarIcon } from 'lucide-react';
 import { format, parse } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { submitEmploymentInfo, submitCoApplicantEmploymentInfo, isApiError, getDetailedInfo } from '@/lib/api';
+import { submitEmploymentInfo, submitCoApplicantEmploymentInfo, isApiError, getDetailedInfo, type ApiSuccess } from '@/lib/api';
 
 // ... imports ...
 
@@ -64,14 +64,17 @@ function EmploymentDetailsContent() {
 
       try {
         const response = await getDetailedInfo(currentLead.appId);
-        if (isApiError(response) || !response.success) {
+        if (isApiError(response)) {
           if (coApplicant?.data?.step5) {
             setFormData(coApplicant.data.step5);
           }
           return;
         }
 
-        const participants = response.data?.application_details?.participants || [];
+        // Handle both response structures: response.data.application_details or response.application_details
+        const successResponse = response as ApiSuccess<any>;
+        const applicationDetails = successResponse.data?.application_details || successResponse.application_details || (response as any).application_details;
+        const participants = applicationDetails?.participants || [];
         const targetIndex = coApplicant?.workflowIndex;
 
         if (typeof targetIndex !== 'number') {
@@ -82,13 +85,14 @@ function EmploymentDetailsContent() {
         }
 
         const apiCoApp = participants.find((p: any) =>
-          p.participant_type === 'co-applicant' && p.co_applicant_index === targetIndex
+          (p.participant_type === 'co-applicant' || p.participant_type === 'co_applicant') && 
+          p.co_applicant_index === targetIndex
         );
 
         if (apiCoApp?.employment_details) {
           const apiData = apiCoApp.employment_details;
 
-          const formatDate = (dateStr: string | null) => {
+          const formatDate = (dateStr: string | null | undefined) => {
             if (!dateStr) return '';
             try {
               const date = parse(dateStr, 'yyyy-MM-dd', new Date());
@@ -103,36 +107,55 @@ function EmploymentDetailsContent() {
             'self_employed_professional': 'self-employed-professional',
           };
 
-          const mappedData: any = {
-            occupationType: occTypeMap[apiData.occupation_type] || apiData.occupation_type || '',
-            monthlyIncome: apiData.monthly_income ? String(apiData.monthly_income) : '',
+          const occupationType = occTypeMap[apiData.occupation_type] || apiData.occupation_type || '';
+
+          // Initialize form data with all fields
+          const mappedData: typeof formData = {
+            occupationType,
+            monthlyIncome: apiData.monthly_income ? String(apiData.monthly_income).replace(/\.00$/, '') : '',
             employmentStatus: apiData.employment_status || '',
             employedFrom: formatDate(apiData.employed_from),
             employedTo: formatDate(apiData.employed_to),
+            employerName: '',
+            designation: '',
+            natureOfBusiness: '',
+            industry: '',
+            officialEmail: '',
+            orgNameSENP: '',
+            natureOfBusinessSENP: '',
+            industrySENP: '',
+            officialEmailSENP: '',
+            orgNameSEP: '',
+            natureOfProfession: '',
+            industrySEP: '',
+            registrationNumber: '',
+            officialEmailSEP: '',
+            natureOfOccupation: '',
           };
 
-          if (mappedData.occupationType === 'salaried') {
+          // Map fields based on occupation type
+          if (occupationType === 'salaried') {
             mappedData.employerName = apiData.organization_name || '';
             mappedData.designation = apiData.designation || '';
             mappedData.natureOfBusiness = apiData.nature_of_occupation || '';
             mappedData.industry = apiData.industry || '';
             mappedData.officialEmail = apiData.official_email || '';
-          } else if (mappedData.occupationType === 'self-employed-non-professional') {
+          } else if (occupationType === 'self-employed-non-professional') {
             mappedData.orgNameSENP = apiData.organization_name || '';
             mappedData.natureOfBusinessSENP = apiData.nature_of_occupation || '';
             mappedData.industrySENP = apiData.industry || '';
             mappedData.officialEmailSENP = apiData.official_email || '';
-          } else if (mappedData.occupationType === 'self-employed-professional') {
+          } else if (occupationType === 'self-employed-professional') {
             mappedData.orgNameSEP = apiData.organization_name || '';
             mappedData.natureOfProfession = apiData.nature_of_occupation || '';
             mappedData.industrySEP = apiData.industry || '';
             mappedData.registrationNumber = apiData.registration_number || '';
             mappedData.officialEmailSEP = apiData.official_email || '';
-          } else if (mappedData.occupationType === 'others') {
+          } else if (occupationType === 'others') {
             mappedData.natureOfOccupation = apiData.nature_of_occupation || '';
           }
 
-          setFormData(prev => ({ ...prev, ...mappedData }));
+          setFormData(mappedData);
 
         } else if (coApplicant?.data?.step5) {
           setFormData(coApplicant.data.step5);
