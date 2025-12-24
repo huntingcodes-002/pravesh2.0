@@ -54,13 +54,15 @@ interface TempFile {
 const ALTERNATE_ID_TYPES = [
     { value: "VoterID", label: "Voter ID", fileTypes: ["image"], requiresCamera: true },
     { value: "DrivingLicense", label: "Driving License", fileTypes: ["image"], requiresCamera: true },
-    { value: "Passport", label: "Passport", fileTypes: ["image"], requiresCamera: true },
 ];
 
 const DocumentSelectItem = ({ docType, isUploaded, isRequired }: { docType: { value: string; label: string }, isUploaded: boolean, isRequired: boolean }) => (
     <SelectItem value={docType.value} disabled={isUploaded} className={isUploaded ? "opacity-60" : ""}>
         <div className="flex items-center justify-between w-full">
-            <span>{docType.label}</span>
+            <span>
+                {docType.label}
+                {isRequired ? <span className="text-red-500 ml-1">*</span> : <span className="text-gray-500 ml-1">(optional)</span>}
+            </span>
             {isUploaded && <CheckCircle className="w-4 h-4 text-green-600 ml-2" />}
         </div>
     </SelectItem>
@@ -75,7 +77,6 @@ const getApplicantName = (firstName?: string, lastName?: string) => {
 // Helper function to map alternate ID type from step2 to step8 document value
 const mapAlternateIdTypeToDocumentValue = (alternateIdType: string): string => {
     const mapping: { [key: string]: string } = {
-        "Passport": "Passport",
         "Voter ID": "VoterID",
         "Driving License": "DrivingLicense"
     };
@@ -85,7 +86,6 @@ const mapAlternateIdTypeToDocumentValue = (alternateIdType: string): string => {
 // Helper function to get document label for alternate ID types
 const getAlternateDocumentLabel = (alternateIdType: string): string => {
     const labelMapping: { [key: string]: string } = {
-        "Passport": "Passport",
         "Voter ID": "Voter ID",
         "Driving License": "Driving License"
     };
@@ -547,7 +547,6 @@ function Step8Content() {
             'driving_license': 'Driving License',
             'voter_id': 'Voter ID',
             'form_60': 'Form 60',
-            'passport': 'Passport',
             'collateral_legal': 'Sale Deed',
             'collateral_ownership': 'Ownership Document',
             'collateral_images_front': 'Front View',
@@ -578,8 +577,7 @@ function Step8Content() {
             'applicant_image',
             'driving_license',
             'voter_id',
-            'form_60',
-            'passport'
+            'form_60'
         ];
 
         // Create a set of applicant document keys for quick lookup
@@ -596,7 +594,7 @@ function Step8Content() {
                     requiresCamera: key !== 'bank_statement',
                     applicantType: 'main',
                     required: status.required || false,
-                    requiresFrontBack: key === 'aadhaar_card',
+                    requiresFrontBack: key === 'aadhaar_card' || key === 'driving_license' || key === 'voter_id',
                 };
                 documents.push(docDef);
             }
@@ -623,8 +621,8 @@ function Step8Content() {
                     const docDef: DocumentDefinition = {
                         value: key,
                         label: getDocumentLabel(key),
-                        fileTypes: key === 'collateral_legal' ? ['pdf'] : ['image'],
-                        requiresCamera: false,
+                        fileTypes: key === 'collateral_legal' ? ['pdf'] : key === 'collateral_ownership' ? ['pdf', 'image'] : ['image'],
+                        requiresCamera: true, // Enable capture for all collateral documents
                         applicantType: 'collateral',
                         required: status.required || false,
                         requiresFrontBack: false,
@@ -637,7 +635,7 @@ function Step8Content() {
                     value: key,
                     label: getDocumentLabel(key),
                     fileTypes: key === 'bank_statement' || key.includes('statement') ? ['pdf', 'image'] : ['image'],
-                    requiresCamera: false,
+                    requiresCamera: true, // Enable capture for all collateral documents
                     applicantType: 'collateral',
                     required: status.required || false,
                     requiresFrontBack: false,
@@ -689,7 +687,7 @@ function Step8Content() {
                             applicantType: 'coapplicant',
                             coApplicantId: coAppIndex.toString(),
                             required: status.required || false,
-                            requiresFrontBack: key === 'aadhaar_card',
+                            requiresFrontBack: key === 'aadhaar_card' || key === 'driving_license' || key === 'voter_id',
                         };
                         documents.push(docDef);
                     }
@@ -781,18 +779,7 @@ function Step8Content() {
 
     const searchParams = useSearchParams();
     const preselect = searchParams.get('preselect');
-
-    useEffect(() => {
-        if (preselect && entityOptions.length > 0) {
-            // Default to applicant entity for preselection
-            setSelectedEntity('applicant');
-            if (preselect === 'pan') {
-                setDocumentType('pan_card');
-            } else if (preselect === 'aadhaar') {
-                setDocumentType('aadhaar_card');
-            }
-        }
-    }, [preselect, entityOptions]);
+    const [hasPreselected, setHasPreselected] = useState(false);
 
     const filteredDocuments = useMemo(() => {
         if (!selectedEntityOption) return [];
@@ -810,19 +797,55 @@ function Step8Content() {
         return [];
     }, [availableDocuments, selectedEntityOption]);
 
+    // Handle preselection from URL params (for KYC popup redirect)
+    // Wait for availableDocuments and filteredDocuments to be ready before setting preselection
     useEffect(() => {
+        if (preselect && entityOptions.length > 0 && availableDocuments.length > 0 && !hasPreselected) {
+            // Default to applicant entity for preselection
+            setSelectedEntity('applicant');
+        }
+    }, [preselect, entityOptions, availableDocuments, hasPreselected]);
+
+    // Set document type after filteredDocuments is ready
+    useEffect(() => {
+        if (preselect && selectedEntity === 'applicant' && filteredDocuments.length > 0 && !hasPreselected) {
+            const targetDocType = preselect === 'pan' ? 'pan_card' : (preselect === 'aadhaar' ? 'aadhaar_card' : '');
+            if (targetDocType && filteredDocuments.some(doc => doc.value === targetDocType)) {
+                setDocumentType(targetDocType);
+                setHasPreselected(true);
+            }
+        }
+    }, [preselect, selectedEntity, filteredDocuments, hasPreselected]);
+
+    useEffect(() => {
+        // Don't reset documentType if we're in preselection mode
+        if (hasPreselected && preselect) {
+            // Check if the preselected document exists in filteredDocuments
+            const targetDocType = preselect === 'pan' ? 'pan_card' : (preselect === 'aadhaar' ? 'aadhaar_card' : '');
+            if (targetDocType && filteredDocuments.some(doc => doc.value === targetDocType)) {
+                // Preselected document is available, ensure it's selected
+                if (documentType !== targetDocType) {
+                    setDocumentType(targetDocType);
+                }
+                return;
+            }
+        }
+        
         if (!filteredDocuments.length) {
-            if (documentType) {
+            if (documentType && !hasPreselected) {
                 setDocumentType('');
             }
             return;
         }
         if (!filteredDocuments.some(doc => doc.value === documentType)) {
-            const autoValue = filteredDocuments.length === 1 ? filteredDocuments[0].value : '';
-            setDocumentType(autoValue);
+            // Only auto-select if not in preselection mode
+            if (!hasPreselected) {
+                const autoValue = filteredDocuments.length === 1 ? filteredDocuments[0].value : '';
+                setDocumentType(autoValue);
+            }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filteredDocuments]);
+    }, [filteredDocuments, hasPreselected, preselect]);
 
     useEffect(() => {
         if (documentType !== 'PropertyPhotos') {
@@ -938,7 +961,6 @@ function Step8Content() {
             'PAN': 'pan_card',
             'Adhaar': 'aadhaar_card',
             'DrivingLicense': 'driving_license',
-            'Passport': 'passport',
             'VoterID': 'voter_id',
             'CollateralPapers': 'collateral_documents',
             'collateral': 'collateral_legal',
@@ -992,9 +1014,13 @@ function Step8Content() {
                         if (!isApiError(coAppDocs) && coAppDocs.success) {
                             const coAppRequiredDocs = coAppDocs.required_documents || {};
                             const coAppPanUploaded = coAppRequiredDocs.pan_card?.uploaded === true;
+                            const coAppPanRequired = coAppRequiredDocs.pan_card?.required !== false; // true or undefined means required
                             const coAppAadhaarUploaded = coAppRequiredDocs.aadhaar_card?.uploaded === true;
 
-                            if (coAppPanUploaded && coAppAadhaarUploaded) {
+                            // Trigger bureau check if:
+                            // 1. Both PAN and Aadhaar are uploaded, OR
+                            // 2. Aadhaar is uploaded and PAN is not required (pan_card.required: false)
+                            if ((coAppPanUploaded && coAppAadhaarUploaded) || (coAppAadhaarUploaded && coAppPanRequired === false)) {
                                 try {
                                     await triggerBureauCheck({
                                         application_id: applicationId,

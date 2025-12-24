@@ -12,8 +12,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Sheet, SheetContent } from '@/components/ui/sheet';
-import ApplicationPreview from '@/components/ApplicationPreview';
+// Application Preview Feature - Hidden
+// import { Sheet, SheetContent } from '@/components/ui/sheet';
+// import ApplicationPreview from '@/components/ApplicationPreview';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as DatePicker } from '@/components/ui/calendar';
 import { format } from 'date-fns';
@@ -175,9 +176,10 @@ export default function LeadsDashboardPage() {
 
       setCurrentLead(fullLead);
 
-      if (action === 'view') {
-        setPreviewLead(fullLead);
-      }
+      // Preview feature disabled
+      // if (action === 'view') {
+      //   setPreviewLead(fullLead);
+      // }
 
       if (action === 'edit') {
         // 1. Check for Main Applicant Mobile Verification (from fresh API data)
@@ -262,12 +264,12 @@ export default function LeadsDashboardPage() {
 
   return (
     <DashboardLayout title="Lead Dashboard" showNotifications={false}>
-      <Sheet open={previewLead !== null} onOpenChange={(open) => !open && setPreviewLead(null)}>
-        {/* Preview Modal (Req 4) */}
+      {/* Application Preview Feature - Hidden */}
+      {/* <Sheet open={previewLead !== null} onOpenChange={(open) => !open && setPreviewLead(null)}>
         <SheetContent side="right" className="w-full sm:max-w-xl p-0">
           {previewLead && <ApplicationPreview lead={previewLead} onClose={() => setPreviewLead(null)} />}
         </SheetContent>
-      </Sheet>
+      </Sheet> */}
 
       <div className="space-y-6">
         {/* Summary Carousel (Req 1) */}
@@ -430,7 +432,7 @@ export default function LeadsDashboardPage() {
                   <CardContent className="p-4">
                     <div
                       className="flex flex-col space-y-3"
-                      onClick={() => void handleAction(lead, 'view')}
+                      // onClick={() => void handleAction(lead, 'view')} // Preview feature disabled
                     >
 
                       {/* Row 1: App ID & Status */}

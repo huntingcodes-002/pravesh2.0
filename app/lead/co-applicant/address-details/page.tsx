@@ -4,7 +4,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, CoApplicant } from '@/contexts/LeadContext';
-import { submitCoApplicantAddressDetails, isApiError, lookupPincode } from '@/lib/api';
+import { submitCoApplicantAddressDetails, isApiError, lookupPincode, getDetailedInfo } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -128,43 +128,211 @@ function CoApplicantAddressDetailsPageContent() {
   const isLocationReady = locationStatus === 'success';
   const isInteractionDisabled = isCompleted;
 
-  // Initialize addresses from co-applicant data
+  // Fetch addresses from detailed-info API and initialize from co-applicant data
   useEffect(() => {
-    if (coApplicant?.data?.addressDetails?.addresses) {
-      const existingAddresses = coApplicant.data.addressDetails.addresses;
-      setAddresses(prev => {
-        const newAddresses = [...prev];
-        existingAddresses.forEach((apiAddr: any) => {
-          let targetType: 'residential' | 'permanent' | 'correspondence' | null = null;
-          // Map API types to our types
-          if (apiAddr.addressType === 'residential' || apiAddr.addressType === 'current') targetType = 'residential';
-          else if (apiAddr.addressType === 'permanent') targetType = 'permanent';
-          else if (apiAddr.addressType === 'correspondence') targetType = 'correspondence';
+    const fetchAndPopulateAddresses = async () => {
+      if (!currentLead?.appId || typeof coApplicant?.workflowIndex !== 'number') {
+        // Fallback to local data if API not available
+        if (coApplicant?.data?.addressDetails?.addresses) {
+          const existingAddresses = coApplicant.data.addressDetails.addresses;
+          setAddresses(prev => {
+            const newAddresses = [...prev];
+            existingAddresses.forEach((apiAddr: any) => {
+              let targetType: 'residential' | 'permanent' | 'correspondence' | null = null;
+              if (apiAddr.addressType === 'residential' || apiAddr.addressType === 'current') targetType = 'residential';
+              else if (apiAddr.addressType === 'permanent') targetType = 'permanent';
+              else if (apiAddr.addressType === 'correspondence') targetType = 'correspondence';
 
-          if (targetType) {
-            const index = newAddresses.findIndex(a => a.addressType === targetType);
-            if (index !== -1) {
-              newAddresses[index] = {
-                ...newAddresses[index],
-                addressLine1: apiAddr.addressLine1 || '',
-                addressLine2: apiAddr.addressLine2 || '',
-                addressLine3: apiAddr.addressLine3 || '',
-                postalCode: apiAddr.postalCode || '',
-                landmark: apiAddr.landmark || '',
-                city: apiAddr.city || '',
-                stateCode: apiAddr.stateCode || '',
-                stateName: apiAddr.stateName || '',
-                latitude: apiAddr.latitude || '',
-                longitude: apiAddr.longitude || '',
-                isComplete: true // Assume fetched addresses are complete
-              };
-            }
+              if (targetType) {
+                const index = newAddresses.findIndex(a => a.addressType === targetType);
+                if (index !== -1) {
+                  newAddresses[index] = {
+                    ...newAddresses[index],
+                    addressLine1: apiAddr.addressLine1 || '',
+                    addressLine2: apiAddr.addressLine2 || '',
+                    addressLine3: apiAddr.addressLine3 || '',
+                    postalCode: apiAddr.postalCode || '',
+                    landmark: apiAddr.landmark || '',
+                    city: apiAddr.city || '',
+                    stateCode: apiAddr.stateCode || '',
+                    stateName: apiAddr.stateName || '',
+                    latitude: apiAddr.latitude || '',
+                    longitude: apiAddr.longitude || '',
+                    isComplete: true
+                  };
+                }
+              }
+            });
+            return newAddresses;
+          });
+        }
+        return;
+      }
+
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+        if (isApiError(response)) {
+          // Fallback to local data on error
+          if (coApplicant?.data?.addressDetails?.addresses) {
+            const existingAddresses = coApplicant.data.addressDetails.addresses;
+            setAddresses(prev => {
+              const newAddresses = [...prev];
+              existingAddresses.forEach((apiAddr: any) => {
+                let targetType: 'residential' | 'permanent' | 'correspondence' | null = null;
+                if (apiAddr.addressType === 'residential' || apiAddr.addressType === 'current') targetType = 'residential';
+                else if (apiAddr.addressType === 'permanent') targetType = 'permanent';
+                else if (apiAddr.addressType === 'correspondence') targetType = 'correspondence';
+
+                if (targetType) {
+                  const index = newAddresses.findIndex(a => a.addressType === targetType);
+                  if (index !== -1) {
+                    newAddresses[index] = {
+                      ...newAddresses[index],
+                      addressLine1: apiAddr.addressLine1 || '',
+                      addressLine2: apiAddr.addressLine2 || '',
+                      addressLine3: apiAddr.addressLine3 || '',
+                      postalCode: apiAddr.postalCode || '',
+                      landmark: apiAddr.landmark || '',
+                      city: apiAddr.city || '',
+                      stateCode: apiAddr.stateCode || '',
+                      stateName: apiAddr.stateName || '',
+                      latitude: apiAddr.latitude || '',
+                      longitude: apiAddr.longitude || '',
+                      isComplete: true
+                    };
+                  }
+                }
+              });
+              return newAddresses;
+            });
           }
-        });
-        return newAddresses;
-      });
-    }
-  }, [coApplicant]);
+          return;
+        }
+
+        const successResponse = response as any;
+        const appDetails = successResponse.data?.application_details || successResponse.application_details || (response as any).application_details;
+        const participants = appDetails?.participants || [];
+        const apiCoApp = participants.find((p: any) =>
+          (p.participant_type === 'co-applicant' || p.participant_type === 'co_applicant') &&
+          p.co_applicant_index === coApplicant.workflowIndex
+        );
+
+        if (apiCoApp?.addresses && Array.isArray(apiCoApp.addresses) && apiCoApp.addresses.length > 0) {
+          setAddresses(prev => {
+            const newAddresses = [...prev];
+
+            apiCoApp.addresses.forEach((apiAddr: any) => {
+              let targetType: 'residential' | 'permanent' | 'correspondence' | null = null;
+              if (apiAddr.address_type === 'residential' || apiAddr.address_type === 'current') targetType = 'residential';
+              else if (apiAddr.address_type === 'permanent') targetType = 'permanent';
+              else if (apiAddr.address_type === 'correspondence') targetType = 'correspondence';
+
+              if (targetType) {
+                const index = newAddresses.findIndex(a => a.addressType === targetType);
+                if (index !== -1) {
+                  newAddresses[index] = {
+                    ...newAddresses[index],
+                    addressLine1: apiAddr.address_line_1 || '',
+                    addressLine2: apiAddr.address_line_2 || '',
+                    addressLine3: apiAddr.address_line_3 || '',
+                    postalCode: apiAddr.pincode || '',
+                    landmark: apiAddr.landmark || '',
+                    city: apiAddr.city || '',
+                    stateCode: apiAddr.state_code || '',
+                    stateName: apiAddr.state || '',
+                    latitude: apiAddr.latitude || locationCoords.latitude || '',
+                    longitude: apiAddr.longitude || locationCoords.longitude || '',
+                    isComplete: true
+                  };
+                }
+              }
+            });
+            
+            // Trigger pincode lookup for addresses with 6-digit pincode (always trigger to ensure data is correct)
+            newAddresses.forEach((addr) => {
+              if (addr.postalCode && addr.postalCode.length === 6) {
+                // Trigger lookup for this address immediately
+                performPincodeLookup(addr.id, addr.postalCode);
+              }
+            });
+            
+            return newAddresses;
+          });
+        } else if (coApplicant?.data?.addressDetails?.addresses) {
+          // Fallback to local data if API doesn't have addresses
+          const existingAddresses = coApplicant.data.addressDetails.addresses;
+          setAddresses(prev => {
+            const newAddresses = [...prev];
+            existingAddresses.forEach((apiAddr: any) => {
+              let targetType: 'residential' | 'permanent' | 'correspondence' | null = null;
+              if (apiAddr.addressType === 'residential' || apiAddr.addressType === 'current') targetType = 'residential';
+              else if (apiAddr.addressType === 'permanent') targetType = 'permanent';
+              else if (apiAddr.addressType === 'correspondence') targetType = 'correspondence';
+
+              if (targetType) {
+                const index = newAddresses.findIndex(a => a.addressType === targetType);
+                if (index !== -1) {
+                  newAddresses[index] = {
+                    ...newAddresses[index],
+                    addressLine1: apiAddr.addressLine1 || '',
+                    addressLine2: apiAddr.addressLine2 || '',
+                    addressLine3: apiAddr.addressLine3 || '',
+                    postalCode: apiAddr.postalCode || '',
+                    landmark: apiAddr.landmark || '',
+                    city: apiAddr.city || '',
+                    stateCode: apiAddr.stateCode || '',
+                    stateName: apiAddr.stateName || '',
+                    latitude: apiAddr.latitude || '',
+                    longitude: apiAddr.longitude || '',
+                    isComplete: true
+                  };
+                }
+              }
+            });
+            return newAddresses;
+          });
+        }
+      } catch (error: any) {
+        console.error('Failed to fetch co-applicant addresses from API', error);
+        // Fallback to local data on error
+        if (coApplicant?.data?.addressDetails?.addresses) {
+          const existingAddresses = coApplicant.data.addressDetails.addresses;
+          setAddresses(prev => {
+            const newAddresses = [...prev];
+            existingAddresses.forEach((apiAddr: any) => {
+              let targetType: 'residential' | 'permanent' | 'correspondence' | null = null;
+              if (apiAddr.addressType === 'residential' || apiAddr.addressType === 'current') targetType = 'residential';
+              else if (apiAddr.addressType === 'permanent') targetType = 'permanent';
+              else if (apiAddr.addressType === 'correspondence') targetType = 'correspondence';
+
+              if (targetType) {
+                const index = newAddresses.findIndex(a => a.addressType === targetType);
+                if (index !== -1) {
+                  newAddresses[index] = {
+                    ...newAddresses[index],
+                    addressLine1: apiAddr.addressLine1 || '',
+                    addressLine2: apiAddr.addressLine2 || '',
+                    addressLine3: apiAddr.addressLine3 || '',
+                    postalCode: apiAddr.postalCode || '',
+                    landmark: apiAddr.landmark || '',
+                    city: apiAddr.city || '',
+                    stateCode: apiAddr.stateCode || '',
+                    stateName: apiAddr.stateName || '',
+                    latitude: apiAddr.latitude || '',
+                    longitude: apiAddr.longitude || '',
+                    isComplete: true
+                  };
+                }
+              }
+            });
+            return newAddresses;
+          });
+        }
+      }
+    };
+
+    void fetchAndPopulateAddresses();
+  }, [currentLead?.appId, coApplicant?.workflowIndex, coApplicant, locationCoords]);
 
   // Sync addresses when "Same As" source changes
   useEffect(() => {
@@ -576,7 +744,7 @@ function CoApplicantAddressDetailsPageContent() {
                     <div className="pt-4">
                       <Button
                         onClick={() => handleSaveAddress(address.id)}
-                        disabled={isLocked || isCompleted}
+                        disabled={isCompleted}
                         className="w-full bg-[#0072CE] hover:bg-[#005a9e]"
                       >
                         <Save className="w-4 h-4 mr-2" />

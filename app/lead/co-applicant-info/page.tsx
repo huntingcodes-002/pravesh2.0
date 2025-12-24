@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, UserCheck, MapPin, Trash2, Briefcase, Database, ChevronDown, ChevronUp } from 'lucide-react';
+import { Users, UserCheck, MapPin, Trash2, Briefcase, Database, ChevronDown, ChevronUp, CheckCircle, AlertCircle, RefreshCw, Loader2, Info, Upload } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { deleteCoApplicantFromApi, getDetailedInfo, isApiError, getCoApplicantRequiredDocuments, type ApiSuccess, type DocumentStatus } from '@/lib/api';
+import { deleteCoApplicantFromApi, getDetailedInfo, isApiError, getCoApplicantRequiredDocuments, type ApiSuccess, type DocumentStatus, initiateCoApplicantAccountAggregator, resendCoApplicantAccountAggregatorConsent, getCoApplicantAccountAggregatorStatus } from '@/lib/api';
 
 type SectionStatus = 'incomplete' | 'in-progress' | 'completed';
 
@@ -114,6 +114,9 @@ export default function CoApplicantInfoPage() {
     index: number;
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  
+  // Account Aggregator status state
+  const [aaStatus, setAaStatus] = useState<Record<string, { status: string; loading: boolean }>>({});
 
   // Fetch co-applicants from detailed-info API when page loads
   useEffect(() => {
@@ -140,7 +143,8 @@ export default function CoApplicantInfoPage() {
         // Map API participants to our internal structure
         const apiCoAppsMap = new Map<number, CoApplicantFromDetailedInfo>();
         apiParticipants.forEach((p: any) => {
-          if (p?.participant_type === 'co-applicant' && typeof p?.co_applicant_index === 'number') {
+          const pt = p?.participant_type as string;
+          if ((pt === 'co-applicant' || pt === 'co_applicant') && typeof p?.co_applicant_index === 'number') {
             apiCoAppsMap.set(p.co_applicant_index, {
               co_applicant_index: p.co_applicant_index,
               personal_info: p.personal_info,
@@ -213,6 +217,141 @@ export default function CoApplicantInfoPage() {
       isMounted = false;
     };
   }, [currentLead?.appId, currentLead?.formData?.coApplicants]);
+
+  // Fetch Account Aggregator status for each co-applicant
+  useEffect(() => {
+    if (!currentLead?.appId || apiCoApplicants.length === 0) return;
+
+    const fetchAaStatus = async () => {
+      for (const coApp of apiCoApplicants) {
+        if (typeof coApp.co_applicant_index === 'number') {
+          try {
+            const res = await getCoApplicantAccountAggregatorStatus(currentLead.appId, coApp.co_applicant_index);
+            if (!isApiError(res)) {
+              setAaStatus(prev => ({ 
+                ...prev, 
+                [`coapplicant_${coApp.co_applicant_index}`]: { 
+                  status: res.status || 'PENDING', 
+                  loading: false 
+                } 
+              }));
+            } else {
+              setAaStatus(prev => ({ 
+                ...prev, 
+                [`coapplicant_${coApp.co_applicant_index}`]: { 
+                  status: 'NOT_INITIATED', 
+                  loading: false 
+                } 
+              }));
+            }
+          } catch {
+            setAaStatus(prev => ({ 
+              ...prev, 
+              [`coapplicant_${coApp.co_applicant_index}`]: { 
+                status: 'NOT_INITIATED', 
+                loading: false 
+              } 
+            }));
+          }
+        }
+      }
+    };
+
+    void fetchAaStatus();
+  }, [currentLead?.appId, apiCoApplicants]);
+
+  // Handle Account Aggregator actions for co-applicants
+  const handleAaAction = async (action: 'initiate' | 'resend' | 'refresh', coApplicantIndex: number) => {
+    if (!currentLead?.appId) return;
+
+    const key = `coapplicant_${coApplicantIndex}`;
+    setAaStatus(prev => ({ 
+      ...prev, 
+      [key]: { 
+        ...prev[key] || { status: 'NOT_INITIATED' }, 
+        loading: true 
+      } 
+    }));
+
+    try {
+      let response;
+      if (action === 'initiate') {
+        response = await initiateCoApplicantAccountAggregator(currentLead.appId, coApplicantIndex);
+      } else if (action === 'resend') {
+        response = await resendCoApplicantAccountAggregatorConsent(currentLead.appId, coApplicantIndex);
+      } else if (action === 'refresh') {
+        response = await getCoApplicantAccountAggregatorStatus(currentLead.appId, coApplicantIndex);
+      }
+
+      if (response && !isApiError(response)) {
+        if (action === 'initiate') {
+          toast({ 
+            title: 'Success', 
+            description: 'Account Aggregator flow initiated successfully.', 
+            className: 'bg-green-50 border-green-200' 
+          });
+          setAaStatus(prev => ({ 
+            ...prev, 
+            [key]: { status: 'PENDING', loading: false } 
+          }));
+        } else if (action === 'resend') {
+          toast({ 
+            title: 'Success', 
+            description: 'Consent SMS resent successfully.', 
+            className: 'bg-green-50 border-green-200' 
+          });
+          setAaStatus(prev => ({ 
+            ...prev, 
+            [key]: { ...prev[key], loading: false } 
+          }));
+        } else if (action === 'refresh') {
+          const status = response.status || 'PENDING';
+          setAaStatus(prev => ({ 
+            ...prev, 
+            [key]: { status: status, loading: false } 
+          }));
+          if (status === 'COMPLETED' || status === 'COMPLETE' || status === 'SUCCESS') {
+            toast({ 
+              title: 'Completed', 
+              description: 'Account Aggregator flow completed.', 
+              className: 'bg-green-50 border-green-200' 
+            });
+          } else {
+            toast({ 
+              title: 'Status Updated', 
+              description: `Current status: ${status}` 
+            });
+          }
+        }
+      } else {
+        toast({
+          title: 'Error',
+          description: response?.error || 'Failed to perform action.',
+          variant: 'destructive',
+        });
+        setAaStatus(prev => ({ 
+          ...prev, 
+          [key]: { 
+            ...prev[key] || { status: 'NOT_INITIATED' }, 
+            loading: false 
+          } 
+        }));
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred.',
+        variant: 'destructive',
+      });
+      setAaStatus(prev => ({ 
+        ...prev, 
+        [key]: { 
+          ...prev[key] || { status: 'NOT_INITIATED' }, 
+          loading: false 
+        } 
+      }));
+    }
+  };
 
   const statusBadge = (status: SectionStatus) => {
     const baseClasses = 'rounded-full border text-[11px] font-medium px-3 py-1';
@@ -300,6 +439,10 @@ export default function CoApplicantInfoPage() {
     }
   };
 
+  const handleUploadDocuments = () => {
+    router.push('/lead/documents');
+  };
+
   const handleAddCoApplicant = () => {
     if (!currentLead) {
       router.replace('/leads');
@@ -319,60 +462,86 @@ export default function CoApplicantInfoPage() {
   };
 
   const renderBasicDetails = (apiCoApp: CoApplicantFromDetailedInfo) => {
-    const personalInfo = apiCoApp.personal_info;
-    const fullName = personalInfo?.full_name?.value || 'Unnamed Co-applicant';
-    const mobileNumber = personalInfo?.mobile_number?.value;
-    const panNumber = personalInfo?.pan_number?.value;
-    const dob = personalInfo?.date_of_birth?.value;
-    const gender = personalInfo?.gender;
-    const email = personalInfo?.email;
-    const maritalStatus = personalInfo?.marital_status;
-    const status = getBasicDetailsStatusFromApi(personalInfo);
+    const personalInfo = apiCoApp?.personal_info;
+    if (!personalInfo) {
+      return (
+        <div className="border-b border-gray-300 pb-4 mb-4 last:border-0 last:mb-0">
+          <div className="flex items-center gap-2 mb-4">
+            <h3 className="text-base font-semibold text-gray-900">Basic Details</h3>
+          </div>
+          <div className="space-y-1 mb-4">
+            <p className="font-semibold text-gray-900 text-sm">No basic details added yet</p>
+            <p className="text-xs text-gray-500">Upload PAN to auto-fill Name, DOB & PAN Number</p>
+          </div>
+        </div>
+      );
+    }
 
     const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
-    const localStep2 = localCoApp?.data?.step2;
-    const showPanVerifiedPill = Boolean(localStep2?.autoFilledViaPAN || personalInfo?.pan_number?.verified);
+    const localStep2 = localCoApp?.data?.basicDetails || localCoApp?.data?.step2;
+    
+    // Get data from API first, fallback to local state
+    const fullName = personalInfo?.full_name?.value || (localStep2?.firstName && localStep2?.lastName ? [localStep2.firstName, localStep2.lastName].filter(Boolean).join(' ') : 'Unnamed Co-applicant');
+    const mobileNumber = personalInfo?.mobile_number?.value || localStep2?.mobile;
+    const panNumber = personalInfo?.pan_number?.value || localStep2?.pan;
+    const dob = personalInfo?.date_of_birth?.value || localStep2?.dob;
+    const gender = personalInfo?.gender || localStep2?.gender;
+    const email = personalInfo?.email || localStep2?.email;
+    const maritalStatus = personalInfo?.marital_status || localStep2?.maritalStatus;
+    
+    // Show data if it exists in API response or local state
+    const hasDetails = Boolean(
+      (fullName && fullName !== 'Unnamed Co-applicant') ||
+      mobileNumber ||
+      panNumber ||
+      dob ||
+      gender ||
+      email ||
+      maritalStatus
+    );
+
+    // Check if PAN is uploaded from required documents API
+    const isPanUploaded = requiredDocuments[apiCoApp.co_applicant_index]?.pan_card?.uploaded === true;
+    const showPanVerifiedPill = Boolean(
+      hasDetails && (
+        isPanUploaded ||
+        localStep2?.autoFilledViaPAN ||
+        personalInfo?.pan_number?.verified
+      )
+    );
     const canEditBasic = Boolean(localCoApp);
 
     return (
-      <div className={tileWrapperClass}>
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-            <UserCheck className="w-5 h-5" />
+      <div className="border-b border-gray-300 pb-4 mb-4 last:border-0 last:mb-0">
+        {/* Title with Badge */}
+        <div className="flex items-center gap-2 mb-4">
+          <h3 className="text-base font-semibold text-gray-900">Basic Details</h3>
+          {showPanVerifiedPill && (
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+              Verified via PAN
+            </Badge>
+          )}
           </div>
-          <div className="flex-1 min-w-0">
-            {personalInfo ? (
-              <div className="mt-2 space-y-1 text-xs text-gray-600">
-                {fullName && (
-                  <p>
-                    <span className="font-medium">Name:</span> {fullName}
-                    {personalInfo.full_name?.verified && <span className="ml-2 text-xs text-green-600">✓ Verified</span>}
-                  </p>
-                )}
-                {mobileNumber && (
-                  <p>
-                    <span className="font-medium">Mobile:</span> {mobileNumber}
-                    {personalInfo.mobile_number?.verified && (
-                      <span className="ml-2 text-xs text-green-600">✓ Verified</span>
-                    )}
-                  </p>
-                )}
-                {email && (
-                  <p>
-                    <span className="font-medium">Email:</span> {email}
-                  </p>
-                )}
-                {panNumber && (
-                  <p>
-                    <span className="font-medium">PAN Number:</span> {panNumber}
-                    {personalInfo.pan_number?.verified && (
-                      <span className="ml-2 text-xs text-green-600">✓ Verified</span>
-                    )}
-                  </p>
+
+        {/* Fields */}
+        {hasDetails ? (
+          <div className="space-y-1 mb-4">
+                {fullName && fullName !== 'Unnamed Co-applicant' && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5 flex items-center justify-start">
+                  {personalInfo?.full_name?.verified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                </div>
+                <span className="font-semibold text-gray-700 text-sm">Name:</span>
+                <span className="text-gray-900 text-sm">{fullName}</span>
+              </div>
                 )}
                 {dob && (
-                  <p>
-                    <span className="font-medium">Date of Birth:</span>{' '}
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5 flex items-center justify-start">
+                  {personalInfo?.date_of_birth?.verified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                </div>
+                <span className="font-semibold text-gray-700 text-sm">Date of Birth:</span>
+                <span className="text-gray-900 text-sm">
                     {(() => {
                       try {
                         const date = new Date(dob);
@@ -384,39 +553,66 @@ export default function CoApplicantInfoPage() {
                       }
                       return dob;
                     })()}
-                    {personalInfo.date_of_birth?.verified && (
-                      <span className="ml-2 text-xs text-green-600">✓ Verified</span>
-                    )}
-                  </p>
+                </span>
+              </div>
+            )}
+            {panNumber && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5 flex items-center justify-start">
+                  {personalInfo?.pan_number?.verified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                </div>
+                <span className="font-semibold text-gray-700 text-sm">PAN Number:</span>
+                <span className="text-gray-900 text-sm">{panNumber}</span>
+              </div>
+            )}
+            {mobileNumber && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5 flex items-center justify-start">
+                  {personalInfo?.mobile_number?.verified && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                </div>
+                <span className="font-semibold text-gray-700 text-sm">Mobile Number:</span>
+                <span className="text-gray-900 text-sm">{mobileNumber}</span>
+              </div>
                 )}
                 {gender && (
-                  <p>
-                    <span className="font-medium">Gender:</span> {gender}
-                  </p>
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Gender:</span>
+                <span className="text-gray-900 text-sm">{gender.charAt(0).toUpperCase() + gender.slice(1)}</span>
+              </div>
+            )}
+            {email && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Email:</span>
+                <span className="text-gray-900 text-sm">{email}</span>
+              </div>
                 )}
                 {maritalStatus && (
-                  <p>
-                    <span className="font-medium">Marital Status:</span> {maritalStatus}
-                  </p>
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Marital Status:</span>
+                <span className="text-gray-900 text-sm">{maritalStatus.charAt(0).toUpperCase() + maritalStatus.slice(1)}</span>
+              </div>
                 )}
               </div>
             ) : (
-              <div className="space-y-0.5">
-                <p className="text-sm font-semibold text-gray-900">No basic details added yet</p>
+          <div className="space-y-1 mb-4">
+            <p className="font-semibold text-gray-900 text-sm">No basic details added yet</p>
                 <p className="text-xs text-gray-500">Upload PAN to auto-fill Name, DOB & PAN Number</p>
               </div>
             )}
+
+        {/* Information Box */}
+        {hasDetails && showPanVerifiedPill && (
+          <div className="bg-blue-50 rounded-lg p-3 flex gap-3 mb-4">
+            <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-gray-500 leading-relaxed">Auto-filled and verified via PAN & NSDL workflow</p>
           </div>
-        </div>
-        <div className="flex flex-col items-end gap-2 min-w-[140px]">
-          {statusBadge(status)}
-          {showPanVerifiedPill && (
-            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
-              Verified via PAN
-            </Badge>
-          )}
-          {localCoApp &&
-            (canEditBasic ? (
+        )}
+
+        {/* Edit Button */}
+        {localCoApp && canEditBasic && (
               <Button
                 variant="outline"
                 size="sm"
@@ -425,95 +621,121 @@ export default function CoApplicantInfoPage() {
               >
                 Edit
               </Button>
-            ) : (
-              <Badge className="rounded-full bg-white border border-gray-300 text-gray-600 text-[11px] px-3 py-1">
-                Submitted
-              </Badge>
-            ))}
-        </div>
+        )}
       </div>
     );
   };
 
   const renderAddressDetails = (apiCoApp: CoApplicantFromDetailedInfo) => {
-    const addresses = apiCoApp.addresses ?? [];
-    const primaryAddress = addresses.find((addr) => addr.is_primary) ?? addresses[0] ?? null;
-    const status = getAddressStatusFromApi(addresses);
-
+    const addresses = apiCoApp?.addresses ?? [];
     const localCoApp = coApplicants.find((ca: any) => ca.workflowIndex === apiCoApp.co_applicant_index);
-    const localStep3 = localCoApp?.data?.step3;
+    const localStep3 = localCoApp?.data?.addressDetails || localCoApp?.data?.step3;
+    const localAddresses = localStep3?.addresses || [];
+    
+    // Get primary address from API first, fallback to local state
+    let primaryAddress = addresses.find((addr: any) => addr.is_primary || addr.address_type === 'residential' || addr.address_type === 'current') ?? addresses[0] ?? null;
+    
+    // If no API address, try to get from local state
+    if (!primaryAddress && localAddresses.length > 0) {
+      const localPrimary = localAddresses.find((addr: any) => addr.isPrimary || addr.addressType === 'residential' || addr.addressType === 'current') || localAddresses[0];
+      if (localPrimary) {
+        primaryAddress = {
+          address_line_1: localPrimary.addressLine1,
+          address_line_2: localPrimary.addressLine2,
+          address_line_3: localPrimary.addressLine3,
+          pincode: localPrimary.postalCode,
+          landmark: localPrimary.landmark,
+          city: localPrimary.city,
+          state: localPrimary.stateName,
+        } as any;
+      }
+    }
+    
+    // Show data if it exists in API response or local state
+    const hasDetails = Boolean(
+      primaryAddress && (
+        primaryAddress.address_line_1 ||
+        primaryAddress.address_line_2 ||
+        primaryAddress.address_line_3 ||
+        primaryAddress.pincode ||
+        primaryAddress.city ||
+        primaryAddress.state
+      )
+    );
+    
+    // Check if Aadhaar is uploaded from required documents API
+    const isAadhaarUploaded = requiredDocuments[apiCoApp.co_applicant_index]?.aadhaar_card?.uploaded === true;
     const showAadhaarVerifiedPill = Boolean(
-      localStep3?.autoFilledViaAadhaar || localStep3?.addresses?.some((addr: any) => addr?.autoFilledViaAadhaar)
+      hasDetails && (
+        isAadhaarUploaded ||
+        localStep3?.autoFilledViaAadhaar ||
+        localStep3?.addresses?.some((addr: any) => addr?.autoFilledViaAadhaar) ||
+        addresses.some((addr: any) => addr?.auto_filled_via_aadhaar)
+      )
     );
     const canEditAddress = Boolean(localCoApp);
 
     return (
-      <div className={tileWrapperClass}>
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-            <MapPin className="w-5 h-5" />
-          </div>
-          <div className="flex-1 min-w-0">
-            {primaryAddress ? (
-              <div className="mt-2 space-y-1 text-xs text-gray-600">
-                {primaryAddress.address_line_1 && (
-                  <p>
-                    <span className="font-medium">Address:</span> {primaryAddress.address_line_1}
-                  </p>
-                )}
-                {primaryAddress.address_line_2 && (
-                  <p>
-                    <span className="font-medium">Area:</span> {primaryAddress.address_line_2}
-                  </p>
-                )}
-                {primaryAddress.address_line_3 && (
-                  <p>
-                    <span className="font-medium">Area 2:</span> {primaryAddress.address_line_3}
-                  </p>
-                )}
-                {primaryAddress.landmark && (
-                  <p>
-                    <span className="font-medium">Landmark:</span> {primaryAddress.landmark}
-                  </p>
-                )}
-                {primaryAddress.city && (
-                  <p>
-                    <span className="font-medium">City:</span> {primaryAddress.city}
-                  </p>
-                )}
-                {primaryAddress.state && (
-                  <p>
-                    <span className="font-medium">State:</span> {primaryAddress.state}
-                  </p>
-                )}
-                {primaryAddress.pincode && (
-                  <p>
-                    <span className="font-medium">Pincode:</span> {primaryAddress.pincode}
-                  </p>
-                )}
-                {primaryAddress.address_type && (
-                  <p>
-                    <span className="font-medium">Type:</span> {primaryAddress.address_type}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-0.5">
-                <p className="text-sm font-semibold text-gray-900">No address details added yet</p>
-                <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill Address & Pincode</p>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-2 min-w-[140px]">
-          {statusBadge(status)}
+      <div className="border-b border-gray-300 pb-4 mb-4 last:border-0 last:mb-0">
+        {/* Title with Badge */}
+        <div className="flex items-center gap-2 mb-4">
+          <h3 className="text-base font-semibold text-gray-900">Address Details</h3>
           {showAadhaarVerifiedPill && (
-            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[11px] px-3 py-1">
+            <Badge className="rounded-full bg-white border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
               Verified via Aadhaar
             </Badge>
           )}
-          {localCoApp &&
-            (canEditAddress ? (
+          </div>
+
+        {/* Fields */}
+        {hasDetails && primaryAddress ? (
+          <div className="space-y-1 mb-4">
+                {primaryAddress.address_line_1 && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Address Line 1:</span>
+                <span className="text-gray-900 text-sm">{primaryAddress.address_line_1}</span>
+              </div>
+                )}
+                {primaryAddress.address_line_2 && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Address Line 2:</span>
+                <span className="text-gray-900 text-sm">{primaryAddress.address_line_2}</span>
+              </div>
+                )}
+                {primaryAddress.address_line_3 && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Address Line 3:</span>
+                <span className="text-gray-900 text-sm">{primaryAddress.address_line_3}</span>
+              </div>
+                )}
+                {primaryAddress.pincode && (
+              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                <div className="w-5"></div>
+                <span className="font-semibold text-gray-700 text-sm">Pincode:</span>
+                <span className="text-gray-900 text-sm">{primaryAddress.pincode}</span>
+              </div>
+                )}
+              </div>
+            ) : (
+          <div className="space-y-1 mb-4">
+            <p className="font-semibold text-gray-900 text-sm">Address details</p>
+            <p className="text-xs text-gray-500">Upload Aadhaar to auto-fill address</p>
+              </div>
+            )}
+
+        {/* Information Box */}
+        {hasDetails && showAadhaarVerifiedPill && (
+          <div className="bg-blue-50 rounded-lg p-3 flex gap-3 mb-4">
+            <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-gray-500 leading-relaxed">Auto-filled and verified via Aadhaar OCR workflow</p>
+          </div>
+        )}
+
+        {/* Edit Button */}
+        {localCoApp && canEditAddress && (
               <Button
                 variant="outline"
                 size="sm"
@@ -522,12 +744,7 @@ export default function CoApplicantInfoPage() {
               >
                 Edit
               </Button>
-            ) : (
-              <Badge className="rounded-full bg-white border border-gray-300 text-gray-600 text-[11px] px-3 py-1">
-                Submitted
-              </Badge>
-            ))}
-        </div>
+        )}
       </div>
     );
   };
@@ -576,6 +793,17 @@ export default function CoApplicantInfoPage() {
     >
       <div className="max-w-2xl mx-auto flex flex-col h-[calc(100vh-120px)] relative">
         <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+          {/* Upload Documents Button */}
+          <div className="mb-4">
+            <Button
+              onClick={handleUploadDocuments}
+              className="w-full h-14 bg-[#0072CE] hover:bg-[#005a9e] text-white font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Upload className="w-5 h-5 mr-2" />
+              Add a Document
+            </Button>
+          </div>
+
           <div className="mb-6">
             <Button
               onClick={handleAddCoApplicant}
@@ -613,19 +841,41 @@ export default function CoApplicantInfoPage() {
               const isExpanded = expandedCards[apiCoApp.co_applicant_index] !== false; // Default expanded
 
               return (
-                <Card key={`co-applicant-${apiCoApp.co_applicant_index}`} className="border border-gray-200 bg-white mb-4 border-l-4 border-l-blue-600 relative">
-                  <CardContent className="p-5 space-y-4">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-500 mb-1">{`Co-Applicant ${apiCoApp.co_applicant_index + 1} –`}</p>
-                        <h3 className="text-lg font-semibold text-gray-900 leading-snug">{fullName}</h3>
-                        {relation && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            {relation}
-                          </p>
-                        )}
+                <Card key={`co-applicant-${apiCoApp.co_applicant_index}`} className={cn(
+                  "border border-gray-200 hover:shadow-lg transition-all duration-200 bg-white mb-4 border-l-4 relative",
+                  (() => {
+                    const basicStatus = getBasicDetailsStatusFromApi(apiCoApp.personal_info);
+                    const addressStatus = getAddressStatusFromApi(apiCoApp.addresses);
+                    const employmentStatus = localCoApp ? getEmploymentStatusForCoApplicant(localCoApp.id) : 'incomplete';
+                    const aaStatusKey = `coapplicant_${apiCoApp.co_applicant_index}`;
+                    const aaStatusData = aaStatus[aaStatusKey];
+                    const isAACompleted = aaStatusData?.status === 'COMPLETED' || aaStatusData?.status === 'COMPLETE' || aaStatusData?.status === 'SUCCESS';
+                    const allCompleted = basicStatus === 'completed' && addressStatus === 'completed' && employmentStatus === 'completed' && isAACompleted;
+                    return allCompleted ? "border-l-green-600" : "border-l-blue-600";
+                  })()
+                )}>
+                  <CardContent className="p-4">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <UserCheck className="w-5 h-5 text-blue-600" />
+                        <h3 className="text-lg font-semibold text-gray-900">{fullName}</h3>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const basicStatus = getBasicDetailsStatusFromApi(apiCoApp.personal_info);
+                          const addressStatus = getAddressStatusFromApi(apiCoApp.addresses);
+                          const employmentStatus = localCoApp ? getEmploymentStatusForCoApplicant(localCoApp.id) : 'incomplete';
+                          const aaStatusKey = `coapplicant_${apiCoApp.co_applicant_index}`;
+                          const aaStatusData = aaStatus[aaStatusKey];
+                          const isAACompleted = aaStatusData?.status === 'COMPLETED' || aaStatusData?.status === 'COMPLETE' || aaStatusData?.status === 'SUCCESS';
+                          const allCompleted = basicStatus === 'completed' && addressStatus === 'completed' && employmentStatus === 'completed' && isAACompleted;
+                          return allCompleted ? (
+                            <Badge className="rounded-full bg-green-100 border border-green-200 text-green-700 text-[10px] px-3 py-0.5 font-semibold">Completed</Badge>
+                          ) : (
+                            <Badge className="rounded-full bg-yellow-100 border border-yellow-200 text-yellow-700 text-[10px] px-3 py-0.5 font-semibold">In Progress</Badge>
+                          );
+                        })()}
                         <button
                           type="button"
                           className="text-red-500 hover:text-red-600"
@@ -640,27 +890,16 @@ export default function CoApplicantInfoPage() {
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
-                        {isMobileVerified && (
-                          <button
-                            type="button"
-                            onClick={() => toggleCard(apiCoApp.co_applicant_index)}
-                            className="text-gray-500 hover:text-gray-700"
-                          >
-                            {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                          </button>
-                        )}
                       </div>
                     </div>
 
                     {!isMobileVerified ? (
-                      <div className="mt-4">
+                      <div className="mb-4">
                         <Button
                           onClick={() => {
                             if (localCoApp) {
                               router.push(`/lead/co-applicant/new?coApplicantId=${localCoApp.id}&openOtp=true`);
                             } else {
-                              // Fallback if localCoApp is missing but API has it (rare case)
-                              // We can't easily edit without ID, maybe show toast
                               toast({
                                 title: "Error",
                                 description: "Co-applicant details missing locally. Please refresh.",
@@ -674,14 +913,8 @@ export default function CoApplicantInfoPage() {
                         </Button>
                       </div>
                     ) : (
-                      isExpanded && (
-                        <>
-                          <div className="grid gap-4">
+                      <div className="space-y-3">
                             {(() => {
-                              console.log('Checking Aadhaar status for index:', apiCoApp.co_applicant_index);
-                              console.log('requiredDocuments state:', requiredDocuments);
-                              console.log('Specific doc status:', requiredDocuments[apiCoApp.co_applicant_index]?.aadhaar_card);
-
                               const isAadhaarUploaded = Boolean(
                                 localCoApp?.data?.step3?.autoFilledViaAadhaar ||
                                 (apiCoApp.addresses && apiCoApp.addresses.length > 0) ||
@@ -689,11 +922,13 @@ export default function CoApplicantInfoPage() {
                                 requiredDocuments[apiCoApp.co_applicant_index]?.aadhaar_card?.uploaded
                               );
 
-                              console.log('isAadhaarUploaded result:', isAadhaarUploaded);
-
-                              if (!isAadhaarUploaded) {
                                 return (
-                                  <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-100">
+                            <>
+                              {renderBasicDetails(apiCoApp)}
+                              {renderAddressDetails(apiCoApp)}
+                              
+                              {!isAadhaarUploaded && (
+                                <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-100 mb-4">
                                     <div className="flex items-center justify-between mb-3">
                                       <div className="flex items-center gap-3">
                                         <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
@@ -739,91 +974,132 @@ export default function CoApplicantInfoPage() {
                                       Upload Aadhaar
                                     </Button>
                                   </div>
-                                );
-                              }
-
+                              )}
+                                  {(() => {
                               const employmentStatus = localCoApp ? getEmploymentStatusForCoApplicant(localCoApp.id) : 'incomplete';
                               const step5 = localCoApp?.data?.step5;
                               const apiEmploymentDetails = apiCoApp?.employment_details;
 
-                              const hasDetails = employmentStatus !== 'incomplete' && (step5 || apiEmploymentDetails);
+                                    // Show data if it exists in API response or local state, regardless of status
+                                    const hasDetails = Boolean(
+                                      apiEmploymentDetails || step5
+                                    );
+                                    
+                                    // Check if employment details are completed
+                                    const isCompleted = employmentStatus === 'completed';
+
+                                    // Format monthly income
+                                    const formatMonthlyIncome = (income: string | number | undefined): string => {
+                                      if (!income) return '';
+                                      const numValue = typeof income === 'string' ? parseFloat(income) : income;
+                                      if (isNaN(numValue)) return '';
+                                      return `₹${numValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                    };
+
+                                    const monthlyIncome = apiEmploymentDetails?.monthly_income || step5?.monthlyIncome;
+                                    const formattedIncome = formatMonthlyIncome(monthlyIncome);
+
+                                    // Format date
+                                    const formatDate = (dateStr: string | undefined | null): string => {
+                                      if (!dateStr) return '';
+                                      try {
+                                        const date = new Date(dateStr);
+                                        if (isNaN(date.getTime())) return dateStr;
+                                        return date.toISOString().split('T')[0];
+                                      } catch {
+                                        return dateStr;
+                                      }
+                                    };
+
+                                    const employedFrom = apiEmploymentDetails?.employed_from || step5?.employedFrom;
+                                    const formattedEmployedFrom = formatDate(employedFrom);
 
                               const occupationTypeLabels: Record<string, string> = {
-                                'salaried': 'Salaried',
+                                      salaried: 'Salaried',
                                 'self-employed-non-professional': 'Self Employed Non Professional',
                                 'self-employed-professional': 'Self Employed Professional',
-                                'others': 'Others'
-                              };
+                                      others: 'Others',
+                                    };
 
-                              return (
-                                <>
-                                  {renderBasicDetails(apiCoApp)}
-                                  {renderAddressDetails(apiCoApp)}
-                                  <div className={tileWrapperClass}>
-                                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                                      <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-                                        <Briefcase className="w-5 h-5" />
-                                      </div>
-                                      <div className="flex-1 min-w-0">
-                                        {!hasDetails ? (
-                                          <div className="space-y-0.5">
-                                            <p className="text-sm font-semibold text-gray-900">No employment details added yet</p>
-                                            <p className="text-xs text-gray-500">Upload or enter occupation and employment details manually</p>
-                                          </div>
-                                        ) : (
-                                          <div className="mt-2 space-y-1 text-xs text-gray-600">
-                                            {(() => {
                                               const occupationType = apiEmploymentDetails ? apiEmploymentDetails.occupation_type : step5?.occupationType;
-                                              const displayOccupation = occupationTypeLabels[occupationType] || occupationType;
+                                    const displayOccupation = occupationType ? (occupationTypeLabels[occupationType] || occupationType) : null;
 
                                               return (
-                                                <>
-                                                  <p>
-                                                    <span className="font-medium">Occupation Type:</span> {displayOccupation}
-                                                  </p>
-                                                  {occupationType === 'salaried' && (
-                                                    <>
-                                                      {(apiEmploymentDetails?.organization_name || step5?.employerName) && (
-                                                        <p>
-                                                          <span className="font-medium">Employer:</span> {apiEmploymentDetails?.organization_name || step5?.employerName}
-                                                        </p>
-                                                      )}
-                                                      {(apiEmploymentDetails?.employment_status || step5?.employmentStatus) && (
-                                                        <p>
-                                                          <span className="font-medium">Status:</span> {(apiEmploymentDetails?.employment_status || step5?.employmentStatus) === 'present' ? 'Present' : 'Past'}
-                                                        </p>
-                                                      )}
-                                                    </>
-                                                  )}
-                                                  {(occupationType === 'self-employed-non-professional' || occupationType === 'self-employed-professional') &&
-                                                    (apiEmploymentDetails?.organization_name || step5?.orgNameSENP || step5?.orgNameSEP) && (
-                                                      <p>
-                                                        <span className="font-medium">Organization:</span> {apiEmploymentDetails?.organization_name || step5?.orgNameSENP || step5?.orgNameSEP}
-                                                      </p>
-                                                    )}
-                                                  {occupationType === 'others' && (apiEmploymentDetails?.nature_of_occupation || step5?.natureOfOccupation) && (
-                                                    <p>
-                                                      <span className="font-medium">Nature:</span> {(apiEmploymentDetails?.nature_of_occupation || step5?.natureOfOccupation).charAt(0).toUpperCase() + (apiEmploymentDetails?.nature_of_occupation || step5?.natureOfOccupation).slice(1)}
-                                                    </p>
-                                                  )}
-                                                </>
-                                              );
-                                            })()}
+                                      <div className="border-b border-gray-300 pb-4 mb-4 last:border-0 last:mb-0">
+                                        {/* Title with Badge */}
+                                        <div className="flex items-center gap-2 mb-4">
+                                          <h3 className="text-base font-semibold text-gray-900">Employment Details</h3>
+                                          {isCompleted ? (
+                                            <Badge className="rounded-full bg-green-100 border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+                                              Completed
+                                            </Badge>
+                                          ) : !hasDetails ? (
+                                            <Badge className="rounded-full bg-gray-100 border border-gray-200 text-gray-600 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+                                              No Data
+                                            </Badge>
+                                          ) : null}
+                                        </div>
+
+                                        {/* Fields */}
+                                        {hasDetails && (apiEmploymentDetails || step5) ? (
+                                          <div className="space-y-1 mb-4">
+                                            {displayOccupation && (
+                                              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                                <div className="w-5"></div>
+                                                <span className="font-semibold text-gray-700 text-sm">Occupation:</span>
+                                                <span className="text-gray-900 text-sm">{displayOccupation}</span>
+                                              </div>
+                                            )}
+                                            {(apiEmploymentDetails?.organization_name || step5?.employerName || step5?.orgNameSENP || step5?.orgNameSEP) && (
+                                              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                                <div className="w-5"></div>
+                                                <span className="font-semibold text-gray-700 text-sm">Company:</span>
+                                                <span className="text-gray-900 text-sm">
+                                                  {apiEmploymentDetails?.organization_name || step5?.employerName || step5?.orgNameSENP || step5?.orgNameSEP}
+                                                </span>
+                                              </div>
+                                            )}
+                                            {(apiEmploymentDetails?.designation || step5?.designation) && (
+                                              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                                <div className="w-5"></div>
+                                                <span className="font-semibold text-gray-700 text-sm">Designation:</span>
+                                                <span className="text-gray-900 text-sm">
+                                                  {apiEmploymentDetails?.designation || step5?.designation}
+                                                </span>
+                                              </div>
+                                            )}
+                                            {formattedIncome && (
+                                              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                                <div className="w-5"></div>
+                                                <span className="font-semibold text-gray-700 text-sm">Monthly Income:</span>
+                                                <span className="text-gray-900 text-sm">{formattedIncome}</span>
+                                              </div>
+                                            )}
+                                            {formattedEmployedFrom && (
+                                              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                                <div className="w-5"></div>
+                                                <span className="font-semibold text-gray-700 text-sm">Employed From:</span>
+                                                <span className="text-gray-900 text-sm">{formattedEmployedFrom}</span>
+                                              </div>
+                                            )}
+                                            {(apiEmploymentDetails?.nature_of_occupation || step5?.natureOfOccupation) && (
+                                              <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                                                <div className="w-5"></div>
+                                                <span className="font-semibold text-gray-700 text-sm">Nature:</span>
+                                                <span className="text-gray-900 text-sm">
+                                                  {(apiEmploymentDetails?.nature_of_occupation || step5?.natureOfOccupation).charAt(0).toUpperCase() + (apiEmploymentDetails?.nature_of_occupation || step5?.natureOfOccupation).slice(1)}
+                                                </span>
                                           </div>
                                         )}
                                       </div>
+                                        ) : (
+                                          <div className="space-y-1 mb-4">
+                                            <p className="font-semibold text-gray-900 text-sm">Employment details</p>
+                                            <p className="text-xs text-gray-500">Enter employment details</p>
                                     </div>
-                                    <div className="flex flex-col items-end gap-2 min-w-[140px]">
-                                      {employmentStatus !== 'incomplete' && (
-                                        <Badge className={cn(
-                                          'rounded-full text-[11px] px-3 py-1 border',
-                                          employmentStatus === 'completed'
-                                            ? 'bg-white border-green-200 text-green-700'
-                                            : 'bg-white border-yellow-200 text-yellow-700'
-                                        )}>
-                                          {employmentStatus === 'completed' ? 'Completed' : 'In Progress'}
-                                        </Badge>
-                                      )}
+                                        )}
+
+                                        {/* Edit Button */}
                                       {localCoApp && (
                                         <Button
                                           variant="outline"
@@ -835,34 +1111,116 @@ export default function CoApplicantInfoPage() {
                                         </Button>
                                       )}
                                     </div>
+                                    );
+                                  })()}
+
+                                  {(() => {
+                                    const aaStatusKey = `coapplicant_${apiCoApp.co_applicant_index}`;
+                                    const aaStatusData = aaStatus[aaStatusKey];
+                                    const isCompleted = aaStatusData?.status === 'COMPLETED' || aaStatusData?.status === 'COMPLETE' || aaStatusData?.status === 'SUCCESS';
+                                    const isFailed = aaStatusData?.status === 'FAILED';
+                                    const isPending = aaStatusData?.status === 'PENDING';
+                                    const isNotInitiated = !aaStatusData || aaStatusData.status === 'NOT_INITIATED';
+
+                                    return (
+                                      <div className="border-b border-gray-300 pb-4 mb-4 last:border-0 last:mb-0">
+                                        {/* Title with Badge */}
+                                        <div className="flex items-center gap-2 mb-4">
+                                          <h3 className="text-base font-semibold text-gray-900">Account Aggregator</h3>
+                                          {isCompleted && (
+                                            <Badge className="rounded-full bg-green-100 border border-green-200 text-green-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+                                              Fetch Complete
+                                            </Badge>
+                                          )}
+                                          {isFailed && (
+                                            <Badge className="rounded-full bg-red-100 border border-red-200 text-red-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+                                              Failed
+                                            </Badge>
+                                          )}
+                                          {isPending && (
+                                            <Badge className="rounded-full bg-yellow-100 border border-yellow-200 text-yellow-700 text-[10px] px-2.5 py-0.5 font-medium whitespace-nowrap">
+                                              Pending
+                                            </Badge>
+                                          )}
                                   </div>
 
-                                  <div className={tileWrapperClass}>
-                                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                                      <div className="w-10 h-10 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600">
-                                        <Database className="w-5 h-5" />
+                                        {/* Success Message Box */}
+                                        {isCompleted && (
+                                          <div className="bg-green-50 rounded-lg p-3 flex gap-3 mb-4">
+                                            <div className="w-5 h-5 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0">
+                                              <CheckCircle className="w-4 h-4 text-white" />
                                       </div>
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-semibold text-gray-900">No account aggregator request initiated</p>
-                                        <p className="text-xs text-gray-500 mt-1">Initiate to fetch customer's bank statements digitally</p>
+                                            <p className="text-sm text-gray-700 leading-relaxed">Bank statement data received via Account Aggregator.</p>
                                       </div>
+                                        )}
+
+                                        {/* Error Message */}
+                                        {isFailed && (
+                                          <div className="bg-red-50 rounded-lg p-3 flex gap-3 mb-4">
+                                            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                                            <p className="text-sm text-gray-700 leading-relaxed">Account Aggregator verification failed</p>
                                     </div>
-                                    <div className="flex flex-col items-end gap-2 min-w-[140px]">
-                                      <Button variant="outline" size="sm" className={tileButtonClass}>
-                                        Initiate
+                                        )}
+
+                                        {/* Pending Message */}
+                                        {isPending && (
+                                          <div className="bg-yellow-50 rounded-lg p-3 flex gap-3 mb-4">
+                                            <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+                                            <p className="text-sm text-gray-700 leading-relaxed">Verification Pending</p>
+                                          </div>
+                                        )}
+
+                                        {/* No Status Message */}
+                                        {!isCompleted && !isFailed && !isPending && (
+                                          <div className="mb-4">
+                                            <p className="text-xs text-gray-500">Initiate to fetch customer's bank statements digitally</p>
+                                          </div>
+                                        )}
+
+                                        {/* Action Buttons */}
+                                        {!isCompleted && !isFailed && (
+                                          <div className="flex items-center gap-2">
+                                            {isPending ? (
+                                              <>
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  onClick={() => handleAaAction('resend', apiCoApp.co_applicant_index)}
+                                                  disabled={aaStatusData?.loading}
+                                                  className={tileButtonClass}
+                                                >
+                                                  Resend
                                       </Button>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  onClick={() => handleAaAction('refresh', apiCoApp.co_applicant_index)}
+                                                  disabled={aaStatusData?.loading}
+                                                  className="h-8 w-8 text-gray-500 hover:text-blue-600"
+                                                >
+                                                  <RefreshCw className={cn("w-4 h-4", aaStatusData?.loading && "animate-spin")} />
+                                                </Button>
+                                              </>
+                                            ) : isNotInitiated ? (
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => handleAaAction('initiate', apiCoApp.co_applicant_index)}
+                                                disabled={aaStatusData?.loading}
+                                                className={tileButtonClass}
+                                              >
+                                                {aaStatusData?.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Initiate'}
+                                              </Button>
+                                            ) : null}
                                     </div>
+                                        )}
                                   </div>
+                                    );
+                                  })()}
                                 </>
                               );
                             })()}
                           </div>
-
-                          <div className="pt-2 border-t border-gray-100 text-xs text-gray-400">
-                            {localCoApp ? documentsSummary(localCoApp) : 'No documents linked yet'}
-                          </div>
-                        </>
-                      )
                     )}
                   </CardContent>
                 </Card>

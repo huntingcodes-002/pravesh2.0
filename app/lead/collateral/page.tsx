@@ -279,8 +279,8 @@ export default function CollateralPage() {
           setStateCode(locationStateCode);
           setStateName(locationStateName);
 
-          // If pincode exists but city/state are missing, trigger lookup
-          if (newFormData.pincode && newFormData.pincode.length === 6 && !locationCity) {
+          // If pincode exists and is 6 digits, trigger lookup immediately (even if city is already set)
+          if (newFormData.pincode && newFormData.pincode.length === 6) {
             // Trigger pincode lookup asynchronously
             const triggerLookup = async () => {
               setPincodeLookupId('collateral-pincode');
@@ -607,6 +607,17 @@ export default function CollateralPage() {
         description: 'Your session has expired. Please sign in again to continue.',
         variant: 'destructive',
       });
+      return;
+    }
+
+    // Validate application ID exists
+    if (!currentLead.appId) {
+      toast({
+        title: 'Application Missing',
+        description: 'Application ID not found. Please complete the consent OTP verification first.',
+        variant: 'destructive',
+      });
+      setIsSaving(false);
       return;
     }
 

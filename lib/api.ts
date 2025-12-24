@@ -892,9 +892,13 @@ export interface CoApplicantPersonalInfoRequest {
   co_applicant_index: number;
   customer_type: 'individual' | 'non_individual';
   pan_number?: string;
+  pan_unavailability_reason?: string;
+  alternate_id_type?: string;
+  alternate_id_number?: string;
   date_of_birth: string;
   gender: string;
   email?: string;
+  marital_status?: string;
 }
 
 export interface CoApplicantPersonalInfoResponse {
@@ -922,10 +926,14 @@ export async function submitCoApplicantPersonalInfo(
     application_id,
     co_applicant_index,
     customer_type: data.customer_type,
-    pan_number: data.pan_number,
+    ...(data.pan_number ? { pan_number: data.pan_number } : {}),
+    ...(data.pan_unavailability_reason ? { pan_unavailability_reason: data.pan_unavailability_reason } : {}),
+    ...(data.alternate_id_type ? { alternate_id_type: data.alternate_id_type } : {}),
+    ...(data.alternate_id_number ? { alternate_id_number: data.alternate_id_number } : {}),
     date_of_birth: data.date_of_birth,
     gender: data.gender,
     ...(data.email ? { email: data.email } : {}),
+    ...(data.marital_status ? { marital_status: data.marital_status } : {}),
   };
   return apiFetch<CoApplicantPersonalInfoResponse>(
     `applications/${application_id}/co-applicant-personal-info/${co_applicant_index}/`,
@@ -1724,6 +1732,7 @@ export interface CoApplicantEmploymentInfoRequest extends EmploymentInfoRequest 
 
 export async function submitCoApplicantEmploymentInfo(data: CoApplicantEmploymentInfoRequest): Promise<ApiResponse<EmploymentInfoResponse>> {
   const { application_id, co_applicant_index, ...payload } = data;
+  // Application ID and co-applicant index are already in the URL path
   return apiFetch<EmploymentInfoResponse>(`applications/${application_id}/co-applicant-employment-info/${co_applicant_index}/`, {
     method: 'POST',
     body: JSON.stringify(payload),

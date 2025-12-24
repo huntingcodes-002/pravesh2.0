@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { MaskedDateInput } from '@/components/MaskedDateInput';
-import { submitCoApplicantPersonalInfo, isApiError, getDetailedInfo, type CoApplicantPersonalInfoResponse } from '@/lib/api';
+import { submitCoApplicantPersonalInfo, isApiError, getDetailedInfo, type CoApplicantPersonalInfoResponse, getCoApplicantRequiredDocuments, triggerBureauCheck } from '@/lib/api';
 import { CheckCircle } from 'lucide-react';
 
 type ValidationStatus = 'pending' | 'valid' | 'invalid';
@@ -64,24 +64,25 @@ function CoApplicantBasicDetailsContent() {
     setIsValidated(coApplicant?.data?.basicDetails?.panValidated === true);
   }, [coApplicant?.data?.basicDetails?.panValidated]);
 
-  // Fetch detailed info to check for backend verification
+  // Fetch detailed info to check for backend verification and prefill form
   useEffect(() => {
     const fetchBackendData = async () => {
       if (!currentLead?.appId || typeof coApplicant?.workflowIndex !== 'number') return;
-
-      if (isBackendVerified) return;
 
       try {
         const response = await getDetailedInfo(currentLead.appId);
         if (isApiError(response) || !response.success) return;
 
-        const participants = response.data?.application_details?.participants || [];
-        const apiCoApp = participants.find((p: any) =>
-          p.participant_type === 'co-applicant' && p.co_applicant_index === coApplicant.workflowIndex
-        );
+        const applicationDetails = response.data?.application_details || response.application_details || (response as any).application_details;
+        const participants = applicationDetails?.participants || [];
+        const apiCoApp = participants.find((p: any) => {
+          const pt = p.participant_type as string;
+          return (pt === 'co-applicant' || pt === 'co_applicant') && p.co_applicant_index === coApplicant.workflowIndex;
+        });
 
         if (apiCoApp?.personal_info) {
-          const { pan_number, date_of_birth, gender, email } = apiCoApp.personal_info;
+          const personalInfo = apiCoApp.personal_info;
+          const { pan_number, date_of_birth, gender, email, marital_status, full_name, mobile_number } = personalInfo;
 
           let hasUpdates = false;
           let isVerified = false;
@@ -89,8 +90,9 @@ function CoApplicantBasicDetailsContent() {
           setFormData(prev => {
             const updates: any = { ...prev };
 
+            // Only update if field is empty or if API has verified data
             // 1. PAN Logic
-            if (pan_number?.value) {
+            if (pan_number?.value && (!prev.pan || pan_number.verified)) {
               updates.pan = pan_number.value;
               updates.hasPan = 'yes';
               hasUpdates = true;
@@ -101,7 +103,7 @@ function CoApplicantBasicDetailsContent() {
             }
 
             // 2. Date of Birth
-            if (date_of_birth?.value) {
+            if (date_of_birth?.value && (!prev.dob || date_of_birth.verified)) {
               // Convert DD/MM/YYYY to YYYY-MM-DD
               const parts = date_of_birth.value.split('/');
               if (parts.length === 3) {
@@ -122,7 +124,7 @@ function CoApplicantBasicDetailsContent() {
             }
 
             // 3. Gender
-            if (gender) {
+            if (gender && (!prev.gender || personalInfo.gender)) {
               const g = gender.toLowerCase();
               if (g === 'male' || g === 'm') updates.gender = 'male';
               else if (g === 'female' || g === 'f') updates.gender = 'female';
@@ -131,8 +133,14 @@ function CoApplicantBasicDetailsContent() {
             }
 
             // 4. Email
-            if (email) {
+            if (email && (!prev.email || email)) {
               updates.email = email;
+              hasUpdates = true;
+            }
+
+            // 5. Marital Status
+            if (marital_status && (!prev.maritalStatus || marital_status)) {
+              updates.maritalStatus = marital_status;
               hasUpdates = true;
             }
 
@@ -142,8 +150,6 @@ function CoApplicantBasicDetailsContent() {
           if (isVerified) {
             setIsBackendVerified(true);
             setIsValidated(true);
-          } else {
-            setIsBackendVerified(false);
           }
 
           if (hasUpdates) {
@@ -160,9 +166,60 @@ function CoApplicantBasicDetailsContent() {
     };
 
     fetchBackendData();
-  }, [currentLead?.appId, coApplicant?.workflowIndex]);
+  }, [currentLead?.appId, coApplicant?.workflowIndex, toast]);
 
-  const isReadOnly = isBackendVerified;
+  // Check if basic details have been submitted
+  const [isCompleted, setIsCompleted] = useState(
+    coApplicant?.data?.basicDetails?.isCompleted === true
+  );
+
+  // Check if basic details are completed by checking backend data or local flag
+  useEffect(() => {
+    // First check local completion flag
+    if (coApplicant?.data?.basicDetails?.isCompleted === true) {
+      setIsCompleted(true);
+      return;
+    }
+
+    // If not completed locally, check backend
+    const checkCompletion = async () => {
+      if (!currentLead?.appId || typeof coApplicant?.workflowIndex !== 'number') return;
+
+      try {
+        const response = await getDetailedInfo(currentLead.appId);
+        if (isApiError(response)) return;
+
+        const successResponse = response as any;
+        const appDetails = successResponse.application_details;
+        const participants = appDetails?.participants || [];
+        const apiCoApp = participants.find((p: any) =>
+          (p.participant_type === 'co-applicant' || p.participant_type === 'co_applicant') &&
+          p.co_applicant_index === coApplicant.workflowIndex
+        );
+
+        // If personal_info exists in backend, consider it completed
+        if (apiCoApp?.personal_info) {
+          const personalInfo = apiCoApp.personal_info;
+          // Check if we have essential data (name, DOB, gender, and either PAN or alternate ID)
+          const hasName = personalInfo.full_name?.value;
+          const hasDob = personalInfo.date_of_birth?.value;
+          const hasGender = personalInfo.gender;
+          const hasPan = personalInfo.pan_number?.value;
+          const hasAlternateId = personalInfo.alternate_id_type && personalInfo.alternate_id_number;
+
+          if (hasName && hasDob && hasGender && (hasPan || hasAlternateId)) {
+            setIsCompleted(true);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to check completion status', error);
+      }
+    };
+
+    checkCompletion();
+  }, [currentLead?.appId, coApplicant?.workflowIndex, coApplicant?.data?.basicDetails?.isCompleted]);
+
+  const isReadOnly = isCompleted || isBackendVerified;
 
   useEffect(() => {
     if (!currentLead || !coApplicant || !coApplicantId) {
@@ -291,6 +348,7 @@ function CoApplicantBasicDetailsContent() {
         date_of_birth: formData.dob,
         gender: formData.gender,
         email: formData.email || undefined,
+        marital_status: formData.maritalStatus || undefined,
       });
 
       if (isApiError(response)) {
@@ -325,9 +383,12 @@ function CoApplicantBasicDetailsContent() {
             ...formData,
             isMobileVerified: existingBasic?.isMobileVerified,
             panValidated: true,
+            isCompleted: true, // Mark as completed after PAN validation
           },
         },
       });
+      // Mark as completed locally
+      setIsCompleted(true);
       toast({
         title: 'PAN Validated',
         description: responseData.message || 'Co-applicant PAN validated successfully.',
@@ -345,8 +406,8 @@ function CoApplicantBasicDetailsContent() {
     }
   };
 
-  const handleSave = () => {
-    if (!currentLead || !coApplicantId) return;
+  const handleSave = async () => {
+    if (!currentLead || !coApplicantId || !coApplicant) return;
     if (!canSave) {
       toast({
         title: 'Missing Information',
@@ -354,6 +415,75 @@ function CoApplicantBasicDetailsContent() {
         variant: 'destructive',
       });
       return;
+    }
+
+    const coApplicantIndex = coApplicant?.workflowIndex;
+    if (!currentLead?.appId || typeof coApplicantIndex !== 'number') {
+      toast({
+        title: 'Application ID Missing',
+        description: 'Application ID not found. Please complete the consent OTP verification first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // If "No PAN" is selected, call the API to save the data
+    if (formData.hasPan === 'no') {
+      try {
+        const response = await submitCoApplicantPersonalInfo({
+          application_id: currentLead.appId,
+          co_applicant_index: coApplicantIndex,
+          customer_type: 'individual',
+          pan_number: undefined,
+          pan_unavailability_reason: formData.panUnavailabilityReason || undefined,
+          alternate_id_type: formData.alternateIdType || undefined,
+          alternate_id_number: formData.documentNumber || undefined,
+          date_of_birth: formData.dob,
+          gender: formData.gender,
+          email: formData.email || undefined,
+          marital_status: formData.maritalStatus || undefined,
+        });
+
+        if (isApiError(response)) {
+          throw new Error(response.error || 'Failed to save personal information');
+        }
+
+        // Check required-documents API and trigger bureau check if pan_card.required: false
+        if (currentLead.appId && typeof coApplicantIndex === 'number') {
+          try {
+            // Wait a bit for backend to process
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const requiredDocsResponse = await getCoApplicantRequiredDocuments(currentLead.appId, coApplicantIndex);
+            if (!isApiError(requiredDocsResponse) && requiredDocsResponse.success) {
+              const requiredDocs = requiredDocsResponse.required_documents || {};
+              const panRequired = requiredDocs.pan_card?.required;
+              const aadhaarUploaded = requiredDocs.aadhaar_card?.uploaded === true;
+
+              // Trigger bureau check if PAN is not required and Aadhaar is uploaded
+              if (panRequired === false && aadhaarUploaded) {
+                try {
+                  await triggerBureauCheck({
+                    application_id: currentLead.appId,
+                    agency: 'CRIF'
+                  });
+                  console.log(`Bureau check triggered for co-applicant ${coApplicantIndex} after PAN "No" submission`);
+                } catch (err) {
+                  console.error('Bureau check trigger failed', err);
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Failed to check required documents for bureau trigger', err);
+          }
+        }
+      } catch (error: any) {
+        toast({
+          title: 'Save Failed',
+          description: error.message || 'Failed to save co-applicant personal information.',
+          variant: 'destructive',
+        });
+        return;
+      }
     }
 
     updateCoApplicant(currentLead.id, coApplicantId, {
@@ -365,9 +495,13 @@ function CoApplicantBasicDetailsContent() {
           ...formData,
           isMobileVerified: coApplicant?.data?.basicDetails?.isMobileVerified,
           panValidated: formData.hasPan === 'yes' ? isValidated : false,
+          isCompleted: true, // Mark as completed after saving
         },
       },
     });
+
+    // Mark as completed locally
+    setIsCompleted(true);
 
     toast({
       title: 'Saved',
@@ -389,6 +523,15 @@ function CoApplicantBasicDetailsContent() {
       onExit={() => router.push('/lead/co-applicant-info')}
     >
       <div className="max-w-2xl mx-auto pb-24">
+        {isCompleted && (
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+            <p className="text-sm font-medium text-green-800">
+              Co-applicant Basic Details section has been completed and submitted. This section is now read-only.
+            </p>
+          </div>
+        )}
+
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
           <div className="flex items-center justify-between">
             <div>
@@ -401,7 +544,6 @@ function CoApplicantBasicDetailsContent() {
                   'Unnamed Co-applicant'}
               </h2>
             </div>
-            <Badge variant="outline">{coApplicant.relationship || 'Relation not set'}</Badge>
           </div>
 
           <div>
@@ -548,7 +690,6 @@ function CoApplicantBasicDetailsContent() {
                     <SelectValue placeholder="Select ID Type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Passport">Passport</SelectItem>
                     <SelectItem value="Voter ID">Voter ID</SelectItem>
                     <SelectItem value="Driving License">Driving License</SelectItem>
                   </SelectContent>

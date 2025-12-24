@@ -194,8 +194,8 @@ function CoApplicantNewPageContent() {
 
     if (!currentLead.appId) {
       toast({
-        title: 'Application Not Found',
-        description: 'Application ID missing. Please create or refresh the lead before adding a co-applicant.',
+        title: 'Application Missing',
+        description: 'Application ID not found. Please complete the consent OTP verification first.',
         variant: 'destructive',
       });
       return;

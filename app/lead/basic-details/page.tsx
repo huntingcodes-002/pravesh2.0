@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { CheckCircle, AlertTriangle, Loader, Edit, X } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
-import { submitPersonalInfo, isApiError, getDetailedInfo, type PersonalInfoResponse } from '@/lib/api';
+import { submitPersonalInfo, isApiError, getDetailedInfo, type PersonalInfoResponse, getRequiredDocuments, triggerBureauCheck } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -214,6 +214,7 @@ export default function Step2Page() {
   const [isAutoFilledViaPAN, setIsAutoFilledViaPAN] = useState(currentLead?.formData?.step2?.autoFilledViaPAN || false);
   const [isAutoFilledViaAadhaar, setIsAutoFilledViaAadhaar] = useState(currentLead?.formData?.step2?.autoFilledViaAadhaar || false);
 
+  // Make read-only if completed, or if PAN is validated (for PAN flow)
   const isReadOnly = isCompleted || (formData.hasPan === 'yes' && isPanValidated);
 
 
@@ -587,7 +588,7 @@ export default function Step2Page() {
     if (!currentLead.appId) {
       toast({
         title: 'Application Missing',
-        description: 'Application ID not found. Please create a new lead first.',
+        description: 'Application ID not found. Please complete the consent OTP verification first.',
         variant: 'destructive',
       });
       return;
@@ -731,6 +732,16 @@ export default function Step2Page() {
   const handleSave = async () => {
     if (!currentLead) return;
 
+    // Validate application ID exists
+    if (!currentLead.appId) {
+      toast({
+        title: 'Application Missing',
+        description: 'Application ID not found. Please complete the consent OTP verification first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (isCompleted) {
       router.push('/lead/new-lead-info');
       return;
@@ -786,8 +797,65 @@ export default function Step2Page() {
     };
 
     if (formData.hasPan === 'no') {
-      performLocalSave({ dob: formData.dob, gender: formData.gender, email: formData.email, panNumber: '' });
-      setIsSaving(false);
+      try {
+        // Call personal-info API with alternate ID details
+        const response = await submitPersonalInfo({
+          application_id: currentLead.appId,
+          customer_type: 'individual',
+          pan_number: undefined,
+          pan_unavailability_reason: formData.panUnavailabilityReason || undefined,
+          alternate_id_type: formData.alternateIdType || undefined,
+          alternate_id_number: formData.documentNumber || undefined,
+          date_of_birth: formData.dob,
+          gender: formData.gender,
+          email: formData.email || undefined,
+          marital_status: formData.maritalStatus || undefined,
+        });
+
+        if (isApiError(response)) {
+          throw new Error(response.error || 'Failed to save personal information');
+        }
+
+        // Update local state after successful API call
+        performLocalSave({ dob: formData.dob, gender: formData.gender, email: formData.email, panNumber: '' });
+
+        // Check required-documents API and trigger bureau check if pan_card.required: false
+        if (currentLead.appId) {
+          try {
+            // Wait a bit for backend to process
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const requiredDocsResponse = await getRequiredDocuments(currentLead.appId);
+            if (!isApiError(requiredDocsResponse) && requiredDocsResponse.success) {
+              const requiredDocs = requiredDocsResponse.required_documents || {};
+              const panRequired = requiredDocs.pan_card?.required;
+              const aadhaarUploaded = requiredDocs.aadhaar_card?.uploaded === true;
+
+              // Trigger bureau check if PAN is not required and Aadhaar is uploaded
+              if (panRequired === false && aadhaarUploaded) {
+                try {
+                  await triggerBureauCheck({
+                    application_id: currentLead.appId,
+                    agency: 'CRIF'
+                  });
+                  console.log('Bureau check triggered after PAN "No" submission');
+                } catch (err) {
+                  console.error('Bureau check trigger failed', err);
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Failed to check required documents for bureau trigger', err);
+          }
+        }
+      } catch (error: any) {
+        toast({
+          title: 'Save Failed',
+          description: error.message || 'Failed to save personal information',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsSaving(false);
+      }
       return;
     }
 
@@ -1079,7 +1147,6 @@ export default function Step2Page() {
                     <SelectContent>
                       <SelectItem value="voter_id">Voter ID</SelectItem>
                       <SelectItem value="driving_license">Driving License</SelectItem>
-                      <SelectItem value="passport">Passport</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

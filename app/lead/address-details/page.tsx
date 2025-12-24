@@ -233,6 +233,15 @@ export default function Step3Page() {
                 }
               }
             });
+            
+            // Trigger pincode lookup for addresses with 6-digit pincode (always trigger to ensure data is correct)
+            newAddresses.forEach((addr) => {
+              if (addr.postalCode && addr.postalCode.length === 6) {
+                // Trigger lookup for this address immediately
+                performPincodeLookup(addr.id, addr.postalCode);
+              }
+            });
+            
             return newAddresses;
           });
 
@@ -674,7 +683,7 @@ export default function Step3Page() {
                     <div className="pt-4">
                       <Button
                         onClick={() => handleSaveAddress(address.id)}
-                        disabled={isLocked || isCompleted}
+                        disabled={isCompleted}
                         className="w-full bg-[#0072CE] hover:bg-[#005a9e]"
                       >
                         <Save className="w-4 h-4 mr-2" />

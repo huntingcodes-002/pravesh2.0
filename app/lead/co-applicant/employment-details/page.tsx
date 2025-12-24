@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead } from '@/contexts/LeadContext';
@@ -24,11 +24,26 @@ function EmploymentDetailsContent() {
   const { toast } = useToast();
   const { currentLead, updateLead } = useLead();
 
-  const coApplicantId = searchParams.get('id');
+  const coApplicantId = searchParams.get('coApplicantId') || searchParams.get('id');
 
-  const coApplicant = currentLead?.formData?.coApplicants?.find(
-    (ca: any) => ca.id === coApplicantId
-  );
+  // Find co-applicant by ID first
+  const coApplicant = useMemo(() => {
+    if (!coApplicantId || !currentLead?.formData?.coApplicants) return undefined;
+    
+    // Try to find by ID
+    let found = currentLead.formData.coApplicants.find(
+      (ca: any) => ca.id === coApplicantId
+    );
+
+    // If not found by ID, try to find by workflowIndex (in case ID is actually an index)
+    if (!found) {
+      found = currentLead.formData.coApplicants.find((ca: any) => 
+        String(ca.workflowIndex) === String(coApplicantId)
+      );
+    }
+
+    return found;
+  }, [coApplicantId, currentLead?.formData?.coApplicants]);
 
   const [formData, setFormData] = useState({
     occupationType: '',
@@ -55,6 +70,57 @@ function EmploymentDetailsContent() {
 
   useEffect(() => {
     const fetchCoApplicantEmploymentDetails = async () => {
+      // If no co-applicant found locally, try to fetch from API and create a temporary entry
+      if (!coApplicant && currentLead?.appId && coApplicantId) {
+        try {
+          const response = await getDetailedInfo(currentLead.appId);
+          if (!isApiError(response)) {
+            const successResponse = response as ApiSuccess<any>;
+            const applicationDetails = successResponse.data?.application_details || successResponse.application_details || (response as any).application_details;
+            const participants = applicationDetails?.participants || [];
+            
+            // Try to find co-applicant in API by matching ID or index
+            const apiCoApp = participants.find((p: any) => {
+              if (p.participant_type !== 'co-applicant' && p.participant_type !== 'co_applicant') return false;
+              // Try matching by co_applicant_index if coApplicantId is numeric
+              if (!isNaN(Number(coApplicantId))) {
+                return p.co_applicant_index === Number(coApplicantId);
+              }
+              return false;
+            });
+
+            if (apiCoApp && typeof apiCoApp.co_applicant_index === 'number') {
+              // Create a temporary co-applicant entry from API data
+              const tempCoApplicant = {
+                id: coApplicantId,
+                workflowIndex: apiCoApp.co_applicant_index,
+                relationship: apiCoApp.relationship_to_primary || '',
+                currentStep: 0 as 0 | 1 | 2 | 3 | 4,
+                isComplete: false,
+                data: {
+                  step5: {},
+                },
+              };
+              
+              // Update the lead context with this temporary co-applicant
+              if (currentLead.formData?.coApplicants) {
+                const exists = currentLead.formData.coApplicants.some((ca: any) => ca.id === coApplicantId);
+                if (!exists) {
+                  updateLead(currentLead.id, {
+                    formData: {
+                      ...currentLead.formData,
+                      coApplicants: [...(currentLead.formData.coApplicants || []), tempCoApplicant as any],
+                    },
+                  });
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Failed to fetch co-applicant from API', error);
+        }
+      }
+
       if (!currentLead?.appId || !coApplicantId) {
         if (coApplicant?.data?.step5) {
           setFormData(coApplicant.data.step5);
@@ -193,6 +259,16 @@ function EmploymentDetailsContent() {
       return;
     }
 
+    // Validate application ID exists
+    if (!currentLead.appId) {
+      toast({
+        title: 'Application Missing',
+        description: 'Application ID not found. Please complete the consent OTP verification first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     // Map form data to API payload
     let occupationType = formData.occupationType;
     if (occupationType === 'self-employed-non-professional') occupationType = 'self_employed_non_professional';
@@ -236,17 +312,18 @@ function EmploymentDetailsContent() {
       }
     };
 
+    // Validate co-applicant index exists
     if (typeof coApplicant.workflowIndex !== 'number') {
       toast({
         title: 'Error',
-        description: 'Co-applicant index not found.',
+        description: 'Co-applicant index not found. Please ensure the co-applicant workflow is properly initialized.',
         variant: 'destructive',
       });
       return;
     }
 
     const payload = {
-      application_id: currentLead.id,
+      application_id: currentLead.appId,
       co_applicant_index: coApplicant.workflowIndex,
       occupation_type: occupationType,
       nature_of_occupation: natureOfOccupation,

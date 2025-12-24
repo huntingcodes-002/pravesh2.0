@@ -103,8 +103,8 @@ export default function LoanRequirementPage() {
 
     if (!currentLead.appId) {
       toast({
-        title: 'Missing Application ID',
-        description: 'Application ID is required to save loan details.',
+        title: 'Application Missing',
+        description: 'Application ID not found. Please complete the consent OTP verification first.',
         variant: 'destructive',
       });
       return;

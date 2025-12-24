@@ -209,8 +209,18 @@ export default function EmploymentDetailsPage() {
       }
     };
 
+    // Validate application ID exists
+    if (!currentLead.appId) {
+      toast({
+        title: 'Application Missing',
+        description: 'Application ID not found. Please complete the consent OTP verification first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const payload = {
-      application_id: currentLead.id,
+      application_id: currentLead.appId,
       occupation_type: occupationType,
       nature_of_occupation: natureOfOccupation,
       organization_name: organizationName,

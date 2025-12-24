@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard, Check, AlertTriangle, RefreshCw, ShieldCheck, Info } from 'lucide-react';
+import { Upload, Play, Edit, CheckCircle, AlertCircle, X, UserCheck, MapPin, Home, IndianRupee, FileText, Image as ImageIcon, Users, Loader2, Briefcase, Database, CreditCard, Check, AlertTriangle, RefreshCw, ShieldCheck, Info, Camera } from 'lucide-react';
+import ReactCrop, { Crop, PixelCrop, makeAspectCrop, centerCrop } from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLead, type PaymentStatus } from '@/contexts/LeadContext';
 import { Button } from '@/components/ui/button';
@@ -67,6 +69,20 @@ export default function NewLeadInfoPage() {
   const [aaStatus, setAaStatus] = useState<Record<string, { status: string; loading: boolean }>>({});
   const [locationCoords, setLocationCoords] = useState<{ latitude: string; longitude: string } | null>(null);
   const [breQuestions, setBreQuestions] = useState<BreQuestion[]>([]);
+  
+  // Camera and crop states for Aadhaar upload
+  const [uploadMode, setUploadMode] = useState<'front' | 'back' | null>(null);
+  const [showUploadMethodModal, setShowUploadMethodModal] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [capturedImageSrc, setCapturedImageSrc] = useState<string>('');
+  const [crop, setCrop] = useState<Crop>();
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
+  const [imageRef, setImageRef] = useState<HTMLImageElement | null>(null);
+  const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Get location for upload
   useEffect(() => {
@@ -172,7 +188,10 @@ export default function NewLeadInfoPage() {
           // Extract co-applicants from participants
           const participants = applicationDetails.participants || [];
           const coApplicants = participants
-            .filter((participant: Participant) => participant?.participant_type === 'co-applicant')
+            .filter((participant: Participant) => {
+              const pt = participant?.participant_type as string;
+              return pt === 'co-applicant' || pt === 'co_applicant';
+            })
             .map((participant: Participant) => {
               const fullName = participant?.personal_info?.full_name;
               const name = fullName?.value || (typeof fullName === 'string' ? fullName : 'Unnamed Co-applicant');
@@ -253,17 +272,19 @@ export default function NewLeadInfoPage() {
     if (currentLead && applicantDocs) {
       const hasAadhaar = applicantDocs.aadhaar_card?.uploaded;
       const hasPan = applicantDocs.pan_card?.uploaded;
+      const panRequired = applicantDocs.pan_card?.required;
 
       if (!hasAadhaar) {
         setShowAadhaarModal(true);
         setShowKycModal(false);
       } else {
         setShowAadhaarModal(false);
-        // If Aadhaar is uploaded, check for PAN
-        if (!hasPan) {
-          setShowKycModal(true);
-        } else {
+        // Hide KYC modal if PAN is uploaded OR if PAN is not required (pan_card.required: false)
+        if (hasPan || panRequired === false) {
           setShowKycModal(false);
+        } else if (!hasPan && (panRequired === true || panRequired === undefined)) {
+          // Only show KYC modal if PAN is not uploaded AND (PAN is required OR requirement status is unknown)
+          setShowKycModal(true);
         }
       }
     }
@@ -442,6 +463,159 @@ export default function NewLeadInfoPage() {
       router.push('/lead/documents?preselect=pan');
     }
   };
+
+  // Camera functions for Aadhaar upload
+  const startCamera = async () => {
+    if (!locationCoords) {
+      toast({
+        title: 'Location Required',
+        description: 'Allow location access before capturing documents.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setCameraPermissionDenied(false);
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      setStream(mediaStream);
+      setIsCameraOpen(true);
+      setShowUploadMethodModal(false);
+    } catch (err: any) {
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        setCameraPermissionDenied(true);
+      } else {
+        toast({ title: 'Camera Error', description: 'Could not access the camera.', variant: 'destructive' });
+      }
+    }
+  };
+
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    setStream(null);
+    setIsCameraOpen(false);
+  };
+
+  const captureImage = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      if (context && videoRef.current) {
+        canvas.width = videoRef.current.videoWidth;
+        canvas.height = videoRef.current.videoHeight;
+        context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg');
+        setCapturedImageSrc(dataUrl);
+        setShowCropModal(true);
+        stopCamera();
+      }
+    }
+  };
+
+  const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const { width, height } = e.currentTarget;
+    const crop = makeAspectCrop(
+      {
+        unit: '%',
+        width: 90,
+      },
+      16 / 9,
+      width,
+      height
+    );
+    const centeredCrop = centerCrop(crop, width, height);
+    setCrop(centeredCrop);
+  };
+
+  const getCroppedImg = (image: HTMLImageElement, crop: PixelCrop): Promise<string> => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve('');
+        return;
+      }
+
+      const scaleX = image.naturalWidth / image.width;
+      const scaleY = image.naturalHeight / image.height;
+
+      canvas.width = crop.width;
+      canvas.height = crop.height;
+
+      ctx.drawImage(
+        image,
+        crop.x * scaleX,
+        crop.y * scaleY,
+        crop.width * scaleX,
+        crop.height * scaleY,
+        0,
+        0,
+        crop.width,
+        crop.height
+      );
+
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          resolve('');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          resolve(reader.result as string);
+        };
+        reader.readAsDataURL(blob);
+      }, 'image/jpeg', 0.95);
+    });
+  };
+
+  const dataURLtoFile = (dataurl: string, filename: string): File => {
+    const arr = dataurl.split(',');
+    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+  };
+
+  const handleCropComplete = async () => {
+    if (!imageRef || !completedCrop) {
+      toast({ title: 'Error', description: 'No crop selected', variant: 'destructive' });
+      return;
+    }
+
+    const croppedImageUrl = await getCroppedImg(imageRef, completedCrop);
+    const file = dataURLtoFile(croppedImageUrl, `aadhaar_${uploadMode}_${Date.now()}.jpg`);
+    
+    if (uploadMode === 'front') {
+      setAadhaarFront(file);
+    } else if (uploadMode === 'back') {
+      setAadhaarBack(file);
+    }
+    
+    setShowCropModal(false);
+    setCapturedImageSrc('');
+    setCrop(undefined);
+    setCompletedCrop(undefined);
+  };
+
+  useEffect(() => {
+    if (isCameraOpen && stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [isCameraOpen, stream]);
+
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [stream]);
 
   const handleAadhaarUpload = async () => {
     if (!aadhaarFront || !aadhaarBack || !currentLead?.appId) return;
@@ -965,7 +1139,10 @@ export default function NewLeadInfoPage() {
   const collateralStatus = currentLead ? getCollateralStatus() : 'incomplete';
   const loanStatus = currentLead ? getLoanRequirementStatus() : 'incomplete';
   const coApplicantStatus = currentLead ? getCoApplicantStatus() : 'incomplete';
-  const coApplicantCount = detailedInfo?.participants?.filter((p: Participant) => p.participant_type === 'co-applicant').length || apiCoApplicants.length;
+  const coApplicantCount = detailedInfo?.participants?.filter((p: Participant) => {
+    const pt = p.participant_type as string;
+    return pt === 'co-applicant' || pt === 'co_applicant';
+  }).length || apiCoApplicants.length;
   const hasCoApplicants = coApplicantCount > 0;
 
   const isPaymentCompleted = paymentStatus === 'Paid' || paymentStatus === 'Waived' || isWaiverPending;
@@ -1163,11 +1340,23 @@ export default function NewLeadInfoPage() {
 
                     const step2 = currentLead?.formData?.step2;
                     if (step2?.hasPan === 'no' && step2?.alternateIdType && step2?.documentNumber) {
+                      // Map backend values to UI labels
+                      const alternateIdLabelMap: Record<string, string> = {
+                        'voter_id': 'Voter ID',
+                        'driving_license': 'Driving License',
+                        'passport': 'Passport',
+                        'Voter ID': 'Voter ID',
+                        'Driving License': 'Driving License',
+                        'Passport': 'Passport',
+                      };
+                      const displayLabel = alternateIdLabelMap[step2.alternateIdType] || step2.alternateIdType;
+                      
                       return (
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-gray-700 text-sm">{step2.alternateIdType}</span>
-                    <span className="text-gray-900 text-sm">{step2.documentNumber}</span>
-                  </div>
+                        <div className="grid grid-cols-[auto_auto_1fr] gap-x-4 gap-y-1.5 py-1.5 items-start">
+                          <div className="w-5"></div>
+                          <span className="font-semibold text-gray-700 text-sm">{displayLabel}:</span>
+                          <span className="text-gray-900 text-sm">{step2.documentNumber}</span>
+                        </div>
                       );
                     }
                     return null;
@@ -1532,7 +1721,7 @@ export default function NewLeadInfoPage() {
         )}
 
         {/* Action Buttons */}
-        {!isCompleted && (
+        {!isCompleted && !isFailed && (
             <div className="flex items-center gap-2">
             {isPending ? (
               <>
@@ -1576,8 +1765,10 @@ export default function NewLeadInfoPage() {
 
   const isAadhaarUploaded = applicantDocs?.aadhaar_card?.uploaded;
   const isAACompleted = aaStatus.primary?.status === 'COMPLETED' || aaStatus.primary?.status === 'COMPLETE' || aaStatus.primary?.status === 'SUCCESS' || aaStatus.primary?.status === 'FAILED';
+  const isAAInitiated = aaStatus.primary?.status && aaStatus.primary?.status !== 'NOT_INITIATED';
   const isEmploymentAndAACompleted = employmentStatus === 'completed' && isAACompleted;
-  const shouldHideCards = isAadhaarUploaded && !isEmploymentAndAACompleted;
+  // Show cards once Account Aggregator is initiated (not just completed)
+  const shouldHideCards = isAadhaarUploaded && !isAAInitiated;
 
   const areAllDataCardsCompleted =
     step2Status === 'completed' &&
@@ -1596,6 +1787,124 @@ export default function NewLeadInfoPage() {
       onExit={handleExit}
     >
       <div className="max-w-2xl mx-auto">
+        {/* Camera Modal */}
+        {isCameraOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col items-center justify-center p-4">
+            <video ref={videoRef} autoPlay playsInline className="w-full max-w-lg h-auto rounded-lg border-4 border-gray-600" />
+            <div className="flex space-x-4 mt-4">
+              <Button onClick={captureImage} className="bg-green-600 hover:bg-green-700">
+                <Camera className="w-4 h-4 mr-2" /> Capture
+              </Button>
+              <Button onClick={stopCamera} variant="destructive">Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Crop Modal */}
+        {showCropModal && capturedImageSrc && (
+          <Dialog open={showCropModal} onOpenChange={setShowCropModal}>
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Crop Image - {uploadMode === 'front' ? 'Front Side' : 'Back Side'}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                {capturedImageSrc && (
+                  <div className="flex justify-center">
+                    <ReactCrop
+                      crop={crop}
+                      onChange={(_, percentCrop) => setCrop(percentCrop)}
+                      onComplete={(c) => setCompletedCrop(c)}
+                      aspect={undefined}
+                      minWidth={50}
+                      minHeight={50}
+                    >
+                      <img
+                        ref={(el) => setImageRef(el)}
+                        src={capturedImageSrc}
+                        alt="Captured"
+                        style={{ maxHeight: '70vh', maxWidth: '100%' }}
+                        onLoad={onImageLoad}
+                      />
+                    </ReactCrop>
+                  </div>
+                )}
+                <div className="flex justify-end space-x-2">
+                  <Button variant="outline" onClick={() => {
+                    setShowCropModal(false);
+                    setCapturedImageSrc('');
+                    setCrop(undefined);
+                    setCompletedCrop(undefined);
+                  }}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleCropComplete} disabled={!completedCrop}>
+                    Use Cropped Image
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* Camera Permission Dialog */}
+        {cameraPermissionDenied && (
+          <Dialog open={cameraPermissionDenied} onOpenChange={setCameraPermissionDenied}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle className="flex items-center">
+                  <AlertTriangle className="w-5 h-5 mr-2 text-yellow-500" /> Camera Access Required
+                </DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-gray-600">
+                Please allow camera access in your browser settings to capture documents directly from your device.
+              </p>
+              <div className="flex justify-end space-x-2 mt-4">
+                <Button variant="outline" onClick={() => setCameraPermissionDenied(false)}>Close</Button>
+                <Button onClick={() => { setCameraPermissionDenied(false); startCamera(); }}>
+                  Try Again
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* Upload Method Modal */}
+        <Dialog open={showUploadMethodModal} onOpenChange={setShowUploadMethodModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Choose Upload Method - {uploadMode === 'front' ? 'Front Side' : 'Back Side'}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-4">
+              <Button
+                onClick={startCamera}
+                variant="outline"
+                className="w-full flex items-center justify-center h-20 space-y-1 border-2 border-blue-300 hover:bg-blue-50"
+              >
+                <Camera className="w-6 h-6 text-blue-600 mr-2" />
+                <span className="text-sm font-medium">Capture from Camera</span>
+              </Button>
+              <Button
+                onClick={() => {
+                  if (uploadMode === 'front') {
+                    document.getElementById('aadhaar-front-input')?.click();
+                  } else {
+                    document.getElementById('aadhaar-back-input')?.click();
+                  }
+                }}
+                variant="outline"
+                className="w-full flex items-center justify-center h-20 space-y-1 border-2 border-blue-300 hover:bg-blue-50"
+              >
+                <Upload className="w-6 h-6 text-blue-600 mr-2" />
+                <span className="text-sm font-medium">Select from Files</span>
+              </Button>
+              <div className="text-xs text-gray-600 mt-2">
+                <p className="font-medium">Accepted file types:</p>
+                <p>PNG, JPG, JPEG, HEIC</p>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {showAadhaarModal ? (
           <>
             <div className="p-4 pb-32">
@@ -1632,7 +1941,10 @@ export default function NewLeadInfoPage() {
                         <div className="space-y-2">
                           <label className="text-xs font-medium text-gray-600 block">Front Side</label>
                           <div
-                            onClick={() => document.getElementById('aadhaar-front-input')?.click()}
+                            onClick={() => {
+                              setUploadMode('front');
+                              setShowUploadMethodModal(true);
+                            }}
                             className={cn(
                               "aspect-[4/3] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors relative overflow-hidden",
                               aadhaarFront ? "border-green-500 bg-green-50" : "border-gray-300 hover:border-blue-500 hover:bg-gray-50"
@@ -1640,11 +1952,15 @@ export default function NewLeadInfoPage() {
                           >
                             <input
                               id="aadhaar-front-input"
+                              ref={fileInputRef}
                               type="file"
                               accept="image/*"
                               className="hidden"
                               onChange={(e) => {
-                                if (e.target.files?.[0]) setAadhaarFront(e.target.files[0]);
+                                if (e.target.files?.[0]) {
+                                  setAadhaarFront(e.target.files[0]);
+                                  setShowUploadMethodModal(false);
+                                }
                               }}
                             />
                             {aadhaarFront ? (
@@ -1657,6 +1973,18 @@ export default function NewLeadInfoPage() {
                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                                   <CheckCircle className="w-8 h-8 text-white" />
                                 </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="absolute bottom-2 right-2 bg-white/90 hover:bg-white"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setUploadMode('front');
+                                    setShowUploadMethodModal(true);
+                                  }}
+                                >
+                                  Replace
+                                </Button>
                               </div>
                             ) : (
                               <>
@@ -1671,7 +1999,10 @@ export default function NewLeadInfoPage() {
                         <div className="space-y-2">
                           <label className="text-xs font-medium text-gray-600 block">Back Side</label>
                           <div
-                            onClick={() => document.getElementById('aadhaar-back-input')?.click()}
+                            onClick={() => {
+                              setUploadMode('back');
+                              setShowUploadMethodModal(true);
+                            }}
                             className={cn(
                               "aspect-[4/3] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors relative overflow-hidden",
                               aadhaarBack ? "border-green-500 bg-green-50" : "border-gray-300 hover:border-blue-500 hover:bg-gray-50"
@@ -1683,7 +2014,10 @@ export default function NewLeadInfoPage() {
                               accept="image/*"
                               className="hidden"
                               onChange={(e) => {
-                                if (e.target.files?.[0]) setAadhaarBack(e.target.files[0]);
+                                if (e.target.files?.[0]) {
+                                  setAadhaarBack(e.target.files[0]);
+                                  setShowUploadMethodModal(false);
+                                }
                               }}
                             />
                             {aadhaarBack ? (
@@ -1696,6 +2030,18 @@ export default function NewLeadInfoPage() {
                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                                   <CheckCircle className="w-8 h-8 text-white" />
                                 </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="absolute bottom-2 right-2 bg-white/90 hover:bg-white"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setUploadMode('back');
+                                    setShowUploadMethodModal(true);
+                                  }}
+                                >
+                                  Replace
+                                </Button>
                               </div>
                             ) : (
                               <>
@@ -1902,99 +2248,42 @@ export default function NewLeadInfoPage() {
                           Manage
                         </Button>
                       </div>
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         {detailedInfo?.participants
-                          ?.filter((p: Participant) => p.participant_type === 'co-applicant')
+                          ?.filter((p: Participant) => {
+                            const pt = p.participant_type as string;
+                            return pt === 'co-applicant' || pt === 'co_applicant';
+                          })
+                          .sort((a: Participant, b: Participant) => {
+                            const indexA = a.co_applicant_index ?? -1;
+                            const indexB = b.co_applicant_index ?? -1;
+                            return indexA - indexB;
+                          })
                           .map((participant: Participant) => {
                             const fullName = participant?.personal_info?.full_name;
                             const name = fullName?.value || (typeof fullName === 'string' ? fullName : 'Unnamed Co-applicant');
                             const index = participant?.co_applicant_index ?? -1;
-                            const key = `coapplicant_${index}`;
-                            const status = aaStatus[key];
-                            const isCompleted = status?.status === 'COMPLETED' || status?.status === 'COMPLETE' || status?.status === 'SUCCESS';
-                            const isPending = status?.status === 'PENDING';
 
                             return (
                               <div
                                 key={`co-applicant-${index}`}
-                                className="rounded-lg border border-gray-200 bg-white p-4"
+                                className="py-2 px-3 rounded-lg border border-gray-200 bg-white"
                               >
-                                <div className="flex items-center justify-between mb-3">
-                                  <span className="text-sm font-medium text-gray-900">{`Co-Applicant ${index + 1} – ${name}`}</span>
-                                </div>
-
-                                <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                                  <div className="flex items-center gap-2">
-                                    <Database className="w-4 h-4 text-gray-400" />
-                                    <div className="flex flex-col">
-                                      <span className="text-xs text-gray-600">Account Aggregator</span>
-                                      {isCompleted && <span className="text-[10px] text-green-600">Fetched successfully</span>}
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-2">
-                                    {isCompleted ? (
-                                      <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">Completed</Badge>
-                                    ) : isPending ? (
-                                      <>
-                                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAaAction('resend', 'coapplicant', index)} disabled={status?.loading}>Resend</Button>
-                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleAaAction('refresh', 'coapplicant', index)} disabled={status?.loading}>
-                                          <RefreshCw className={cn("w-3 h-3", status?.loading && "animate-spin")} />
-                                        </Button>
-                                      </>
-                                    ) : (
-                                      <Button variant="outline" size="sm" className="h-7 text-xs border-blue-600 text-blue-600" onClick={() => handleAaAction('initiate', 'coapplicant', index)} disabled={status?.loading}>
-                                        {status?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Initiate'}
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
+                                <span className="text-sm font-medium text-gray-900">
+                                  {index >= 0 ? `Co-Applicant ${index + 1} – ${name}` : name || 'Unnamed Co-applicant'}
+                                </span>
                               </div>
                             );
                           })}
                         {apiCoApplicants.length > 0 && !detailedInfo?.participants && (
                           // Fallback to simple list if detailed info not available
                           apiCoApplicants.map((coApp) => {
-                            const key = `coapplicant_${coApp.index}`;
-                            const status = aaStatus[key];
-                            const isCompleted = status?.status === 'COMPLETED' || status?.status === 'COMPLETE' || status?.status === 'SUCCESS';
-                            const isPending = status?.status === 'PENDING';
-
                             return (
                               <div
                                 key={`co-applicant-${coApp.index}`}
-                                className="rounded-lg border border-gray-200 bg-white p-4"
+                                className="py-2 px-3 rounded-lg border border-gray-200 bg-white"
                               >
-                                <div className="flex items-center justify-between mb-3">
-                                  <span className="text-sm font-medium text-gray-900">{`Co-Applicant ${coApp.index + 1} – ${coApp.name}`}</span>
-                                </div>
-
-                                <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                                  <div className="flex items-center gap-2">
-                                    <Database className="w-4 h-4 text-gray-400" />
-                                    <div className="flex flex-col">
-                                      <span className="text-xs text-gray-600">Account Aggregator</span>
-                                      {isCompleted && <span className="text-[10px] text-green-600">Fetched successfully</span>}
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-2">
-                                    {isCompleted ? (
-                                      <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">Completed</Badge>
-                                    ) : isPending ? (
-                                      <>
-                                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAaAction('resend', 'coapplicant', coApp.index)} disabled={status?.loading}>Resend</Button>
-                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleAaAction('refresh', 'coapplicant', coApp.index)} disabled={status?.loading}>
-                                          <RefreshCw className={cn("w-3 h-3", status?.loading && "animate-spin")} />
-                                        </Button>
-                                      </>
-                                    ) : (
-                                      <Button variant="outline" size="sm" className="h-7 text-xs border-blue-600 text-blue-600" onClick={() => handleAaAction('initiate', 'coapplicant', coApp.index)} disabled={status?.loading}>
-                                        {status?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Initiate'}
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
+                                <span className="text-sm font-medium text-gray-900">{`Co-Applicant ${coApp.index + 1} – ${coApp.name}`}</span>
                               </div>
                             )
                           })

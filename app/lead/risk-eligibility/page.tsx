@@ -11,6 +11,7 @@ import { AlertTriangle, TrendingUp } from 'lucide-react';
 import { getDetailedInfo, isApiError, type ApiSuccess, getBreQuestions, triggerBre, submitBreAnswers, type BreQuestion, type BreDbUpdateResponse } from '@/lib/api';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
 export default function RiskEligibilityPage() {
     const router = useRouter();
@@ -222,9 +223,9 @@ export default function RiskEligibilityPage() {
     const loanAmount = detailedInfo?.loan_details?.loan_amount_requested
         || 'N/A';
 
-    // Employment (Designation) from detailed-info API
-    // Path: application_details.participants[0].employment_details.designation
-    const employmentType = primaryParticipant?.employment_details?.designation
+    // Occupation Type from detailed-info API
+    // Path: application_details.participants[0].employment_details.occupation_type
+    const occupationType = primaryParticipant?.employment_details?.occupation_type
         || 'N/A';
 
     // Monthly Income from detailed-info API
@@ -270,8 +271,8 @@ export default function RiskEligibilityPage() {
                                 <p className="text-sm font-bold text-blue-900">{formatCurrency(loanAmount)}</p>
                             </div>
                             <div>
-                                <p className="text-xs text-gray-500 mb-1">Employment:</p>
-                                <p className="text-sm font-bold text-blue-900 capitalize">{employmentType}</p>
+                                <p className="text-xs text-gray-500 mb-1">Occupation Type:</p>
+                                <p className="text-sm font-bold text-blue-900 capitalize">{occupationType}</p>
                             </div>
                             <div>
                                 <p className="text-xs text-gray-500 mb-1">Monthly Income:</p>
@@ -282,7 +283,12 @@ export default function RiskEligibilityPage() {
                 </Card>
 
                 {/* Business Rule Engine Result */}
-                <Card className="border border-orange-200 overflow-hidden">
+                <Card className={cn(
+                    "border overflow-hidden border-l-4",
+                    questions.length > 0 && questions.every(q => q.status === 'answered') 
+                        ? "border-l-green-600 border-orange-200" 
+                        : "border-l-blue-600 border-orange-200"
+                )}>
                     <div className="bg-orange-50 p-4 border-b border-orange-100">
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
